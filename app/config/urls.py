@@ -27,6 +27,11 @@ urlpatterns = [
     path("projects/<int:project_id>/process/", views.project_process, name="project_process"),
     path("jobs/<int:job_id>/", views.job_status, name="job_status"),
 
+    # Secure artifact serving
+    path("pages/<int:page_id>/image/", views.page_image, name="page_image"),
+    path("tables/<int:table_id>/crop/", views.table_crop, name="table_crop"),
+    path("artifacts/<int:artifact_id>/content/", views.artifact_content, name="artifact_content"),
+
     # Reviews
     path("reviews/", views.review_list, name="review_list"),
     path("reviews/next/", views.review_next, name="review_next"),

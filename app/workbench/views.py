@@ -919,3 +919,123 @@ def job_status(request, job_id):
         "job": job,
         "source_document": job.source_document,
     })
+
+
+# --- Secure artifact serving ---
+
+@login_required
+def page_image(request, page_id):
+    """Serve a page image with permission check."""
+    from .policy import ProjectAccessPolicy
+    from django.http import FileResponse, Http404
+    from pathlib import Path
+    import os
+
+    page = get_object_or_404(Page, pk=page_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(page.document.collection):
+        messages.error(request, _("You do not have access to this document."))
+        return redirect("document_list")
+
+    if not page.image_path:
+        raise Http404("No image available for this page.")
+
+    artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
+    file_path = artifacts_base / page.image_path
+
+    # Security: resolve and verify path stays below artifacts base
+    try:
+        resolved = file_path.resolve()
+        if not str(resolved).startswith(str(artifacts_base.resolve())):
+            raise Http404("Invalid file path.")
+    except OSError:
+        raise Http404("File not found.")
+
+    if not resolved.exists():
+        raise Http404("Image file not found on disk.")
+
+    return FileResponse(open(resolved, "rb"), content_type="image/png")
+
+
+@login_required
+def table_crop(request, table_id):
+    """Serve a table crop image with permission check."""
+    from .policy import ProjectAccessPolicy
+    from django.http import FileResponse, Http404
+    from pathlib import Path
+    import os
+
+    table = get_object_or_404(TableCandidate, pk=table_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(table.document.collection):
+        messages.error(request, _("You do not have access to this document."))
+        return redirect("document_list")
+
+    if not table.crop_path:
+        raise Http404("No crop available for this table.")
+
+    artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
+    file_path = artifacts_base / table.crop_path
+
+    # Security: resolve and verify path stays below artifacts base
+    try:
+        resolved = file_path.resolve()
+        if not str(resolved).startswith(str(artifacts_base.resolve())):
+            raise Http404("Invalid file path.")
+    except OSError:
+        raise Http404("File not found.")
+
+    if not resolved.exists():
+        raise Http404("Crop file not found on disk.")
+
+    return FileResponse(open(resolved, "rb"), content_type="image/png")
+
+
+@login_required
+def artifact_content(request, artifact_id):
+    """Serve a processing artifact with permission check."""
+    from .policy import ProjectAccessPolicy
+    from .models import ProcessingArtifact
+    from django.http import FileResponse, Http404, JsonResponse
+    from pathlib import Path
+    import os
+
+    artifact = get_object_or_404(ProcessingArtifact, pk=artifact_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_job(artifact.job):
+        messages.error(request, _("You do not have access to this artifact."))
+        return redirect("dashboard")
+
+    # If it's JSON data, return directly
+    if artifact.data and not artifact.file_path:
+        return JsonResponse(artifact.data)
+
+    if not artifact.file_path:
+        raise Http404("No file for this artifact.")
+
+    artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
+    file_path = artifacts_base / artifact.file_path
+
+    # Security: resolve and verify path stays below artifacts base
+    try:
+        resolved = file_path.resolve()
+        if not str(resolved).startswith(str(artifacts_base.resolve())):
+            raise Http404("Invalid file path.")
+    except OSError:
+        raise Http404("File not found.")
+
+    if not resolved.exists():
+        raise Http404("Artifact file not found on disk.")
+
+    # Determine content type
+    content_type = "application/octet-stream"
+    if resolved.suffix == ".json":
+        content_type = "application/json"
+    elif resolved.suffix in (".png", ".jpg", ".jpeg"):
+        content_type = f"image/{resolved.suffix.lstrip('.')}"
+    elif resolved.suffix == ".html":
+        content_type = "text/html"
+    elif resolved.suffix == ".txt":
+        content_type = "text/plain"
+
+    return FileResponse(open(resolved, "rb"), content_type=content_type)

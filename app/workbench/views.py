@@ -16,6 +16,7 @@ from django.db import transaction
 from django.db.models import Count, Q, Avg, F
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 from django.contrib.auth import logout as auth_logout
 
@@ -182,7 +183,7 @@ def review_skip(request, task_id):
     task.save(update_fields=["state"])
     log_audit(request, "task_skipped", "ReviewTask", task.id)
 
-    messages.info(request, "Task skipped. It will remain available for later.")
+    messages.info(request, _("Task skipped. It will remain available for later."))
     return redirect("review_list")
 
 
@@ -197,7 +198,7 @@ def review_needs_expert(request, task_id):
     task.save(update_fields=["state"])
     log_audit(request, "task_needs_expert", "ReviewTask", task.id)
 
-    messages.info(request, "Task marked as needing expert review.")
+    messages.info(request, _("Task marked as needing expert review."))
     return redirect("review_list")
 
 
@@ -287,7 +288,7 @@ def review_submit(request, task_id):
     if existing is not None:
         messages.info(
             request,
-            "This review was already submitted. Your original response has been preserved."
+            _("This review was already submitted. Your original response has been preserved."),
         )
         return redirect("review_reveal", task_id=task.pk)
 
@@ -296,7 +297,7 @@ def review_submit(request, task_id):
     candidate_y = task.candidate_y
 
     if not candidate_x or not candidate_y:
-        messages.error(request, "Missing extraction data for this table.")
+        messages.error(request, _("Missing extraction data for this table."))
         return redirect("review_detail", task_id=task_id)
 
     # Create review atomically
@@ -321,7 +322,7 @@ def review_submit(request, task_id):
 
     log_audit(request, "review_created", "Review", review.id)
 
-    messages.success(request, "Review submitted successfully.")
+    messages.success(request, _("Review submitted successfully."))
     return redirect("review_reveal", pk=task.pk)
 
 
@@ -371,7 +372,7 @@ def review_post_reveal(request, task_id):
 
     log_audit(request, "review_post_reveal", "Review", review.id, after={"post_reveal_comment": review.post_reveal_comment})
 
-    messages.info(request, "Post-reveal note saved.")
+    messages.info(request, _("Post-reveal note saved."))
     return redirect("review_reveal", task_id=task.pk)
 
 
@@ -608,7 +609,7 @@ def user_settings(request):
             prefs.guided_explanations = "guided_explanations" in request.POST
             prefs.save()
             from django.contrib import messages
-            messages.success(request, "Preferences saved.")
+            messages.success(request, _("Preferences saved."))
 
         elif action == "create_api_token":
             token_name = request.POST.get("token_name", "API Token").strip()
@@ -626,7 +627,7 @@ def user_settings(request):
                 from django.contrib import messages
                 messages.success(
                     request,
-                    f"Token created: {raw_token}. Copy it now — it won't be shown again.",
+                    _("Token created: %(token)s. Copy it now — it won't be shown again.") % {"token": raw_token},
                 )
 
         elif action == "revoke_api_token":
@@ -637,10 +638,10 @@ def user_settings(request):
                 token.revoked_at = timezone.now()
                 token.save(update_fields=["revoked_at"])
                 from django.contrib import messages
-                messages.success(request, "Token revoked.")
+                messages.success(request, _("Token revoked."))
             else:
                 from django.contrib import messages
-                messages.error(request, "Token not found.")
+                messages.error(request, _("Token not found."))
         elif action == "change_password":
             old_password = request.POST.get("old_password", "")
             new_password = request.POST.get("new_password", "")
@@ -648,18 +649,18 @@ def user_settings(request):
 
             if not request.user.check_password(old_password):
                 from django.contrib import messages
-                messages.error(request, "Current password is incorrect.")
+                messages.error(request, _("Current password is incorrect."))
             elif new_password != confirm_password:
                 from django.contrib import messages
-                messages.error(request, "New passwords do not match.")
+                messages.error(request, _("New passwords do not match."))
             elif len(new_password) < 8:
                 from django.contrib import messages
-                messages.error(request, "New password must be at least 8 characters.")
+                messages.error(request, _("New password must be at least 8 characters."))
             else:
                 request.user.set_password(new_password)
                 request.user.save()
                 from django.contrib import messages
-                messages.success(request, "Password changed.")
+                messages.success(request, _("Password changed."))
 
         return redirect("user_settings")
 
@@ -668,10 +669,20 @@ def user_settings(request):
     from django.utils import timezone
     now = timezone.now()
 
+    # Timezone choices as (code, display_name) tuples
+    timezone_choices = [
+        ("UTC", "UTC"),
+        ("Europe/Vienna", "Vienna (CET/CEST)"),
+        ("Europe/Berlin", "Berlin (CET/CEST)"),
+        ("Europe/Zurich", "Zurich (CET/CEST)"),
+        ("America/New_York", "New York (EST/EDT)"),
+    ]
+
     return render(request, "workbench/user_settings.html", {
         "prefs": prefs,
         "tokens": tokens,
         "now": now,
+        "timezone_choices": timezone_choices,
     })
 
 

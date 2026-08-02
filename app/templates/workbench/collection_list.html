@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% load static i18n %}
-{% block title %}Collections{% endblock %}
+{% block title %}{% trans "Collections" %}{% endblock %}
 
 {% block content %}
 <div class="collection-list">
-    <h1>Collections</h1>
+    <h1>{% trans "Collections" %}</h1>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Created</th>
-                <th>Actions</th>
+                <th>{% trans "Name" %}</th>
+                <th>{% trans "Type" %}</th>
+                <th>{% trans "Created" %}</th>
+                <th>{% trans "Actions" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -20,10 +20,10 @@
                 <td>{{ collection.name }}</td>
                 <td>{{ collection.get_source_type_display }}</td>
                 <td>{{ collection.created_at|date:"Y-m-d" }}</td>
-                <td><a href="{% url 'collection_detail' collection.id %}" class="btn btn-sm">View</a></td>
+                <td><a href="{% url 'collection_detail' collection.id %}" class="btn btn-sm">{% trans "View" %}</a></td>
             </tr>
             {% empty %}
-            <tr><td colspan="4">No collections yet.</td></tr>
+            <tr><td colspan="4">{% trans "No collections yet." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>

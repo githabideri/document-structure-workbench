@@ -110,7 +110,6 @@ msgstr "Alle Bewertungen anzeigen"
 #, python-format
 msgid "Review: %(document.external_id)s - %(table_candidate.stable_table_id)s"
 msgstr "Bewertung: %(document.external_id)s - %(table_candidate.stable_table_id)s"
-"Bewertung: %(document.external_id)s - %(table_candidate.stable_table_id)s"
 
 #: app/templates/workbench/review_detail.html:38
 #, python-format
@@ -388,7 +387,6 @@ msgstr "Einführende Erklärungen anzeigen"
 #: app/templates/workbench/user_settings.html:45
 msgid "Display plain-language explanations alongside technical details."
 msgstr "Einfache, verständliche Erklärungen neben technischen Details anzeigen."
-"Einfache, verständliche Erklärungen neben technischen Details anzeigen."
 
 #: app/templates/workbench/user_settings.html:48
 msgid "Save preferences"
@@ -439,8 +437,6 @@ msgid "Status"
 msgstr "Status"
 
 #: app/templates/workbench/user_settings.html:92
-#, fuzzy
-#| msgid "Active"
 msgid "Actions"
 msgstr "Aktionen"
 
@@ -457,8 +453,6 @@ msgid "Active"
 msgstr "Aktiv"
 
 #: app/templates/workbench/user_settings.html:121
-#, fuzzy
-#| msgid "Revoked"
 msgid "Revoke"
 msgstr "Widerrufen"
 
@@ -473,3 +467,241 @@ msgstr "z. B. deployment-tool"
 #: app/templates/workbench/user_settings.html:141
 msgid "Create token"
 msgstr "Token erstellen"
+
+#: app/templates/workbench/review_list.html:4
+msgid "My Review Tasks"
+msgstr "Meine Bewertungsaufgaben"
+
+#: app/templates/workbench/review_list.html:9
+msgid "Document"
+msgstr "Dokument"
+
+#: app/templates/workbench/review_list.html:10
+msgid "Table ID"
+msgstr "Tabelle-ID"
+
+#: app/templates/workbench/review_list.html:11
+msgid "State"
+msgstr "Status"
+
+#: app/templates/workbench/review_list.html:12
+msgid "Priority"
+msgstr "Priorität"
+
+#: app/templates/workbench/review_list.html:24
+msgid "Review"
+msgstr "Bewerten"
+
+#: app/templates/workbench/review_list.html:26
+msgid "View"
+msgstr "Ansehen"
+
+#: app/templates/workbench/review_list.html:31
+msgid "No review tasks assigned."
+msgstr "Keine Bewertungsaufgaben zugewiesen."
+
+#: app/templates/workbench/collection_list.html:3
+#: app/templates/workbench/collection_list.html:6
+msgid "Collections"
+msgstr "Sammlungen"
+
+#: app/templates/workbench/collection_list.html:10
+msgid "Type"
+msgstr "Typ"
+
+#: app/templates/workbench/collection_list.html:24
+msgid "No collections yet."
+msgstr "Noch keine Sammlungen."
+
+#: app/templates/workbench/collection_detail.html:13
+msgid "Documents"
+msgstr "Dokumente"
+
+#: app/templates/workbench/collection_detail.html:17
+msgid "Tables"
+msgstr "Tabellen"
+
+#: app/templates/workbench/collection_detail.html:21
+msgid "Reviews"
+msgstr "Bewertungen"
+
+#: app/templates/workbench/collection_detail.html:30
+msgid "External ID"
+msgstr "Externe ID"
+
+#: app/templates/workbench/collection_detail.html:31
+msgid "Filename"
+msgstr "Dateiname"
+
+#: app/templates/workbench/collection_detail.html:32
+msgid "Pages"
+msgstr "Seiten"
+
+#: app/templates/workbench/collection_detail.html:42
+msgid "No documents."
+msgstr "Keine Dokumente."
+
+#: app/templates/workbench/guidelines.html:8
+msgid "Structure Errors"
+msgstr "Strukturfehler"
+
+#: app/templates/workbench/guidelines.html:9
+msgid "These errors relate to the table's grid structure."
+msgstr "Diese Fehler betreffen die Gitterstruktur der Tabelle."
+
+#: app/templates/workbench/guidelines.html:11
+msgid "The table has too many or too few rows compared to the source."
+msgstr "Die Tabelle hat im Vergleich zur Quelle zu viele oder zu wenige Zeilen."
+
+#: app/templates/workbench/guidelines.html:12
+msgid "The table has too many or too few columns."
+msgstr "Die Tabelle hat zu viele oder zu wenige Spalten."
+
+#: app/templates/workbench/guidelines.html:13
+msgid "A cell that should span multiple rows does not, or spans the wrong number."
+msgstr "Eine Zelle, die mehrere Zeilen überspannen sollte, tut dies nicht oder spannt die falsche Anzahl."
+
+#: app/templates/workbench/guidelines.html:14
+msgid "A cell that should span multiple columns does not, or spans the wrong number."
+msgstr "Eine Zelle, die mehrere Spalten überspannen sollte, tut dies nicht oder spannt die falsche Anzahl."
+
+#: app/templates/workbench/guidelines.html:15
+msgid "Text is placed in the wrong cell (wrong row or column)."
+msgstr "Text befindet sich in der falschen Zelle (falsche Zeile oder Spalte)."
+
+#: app/templates/workbench/guidelines.html:16
+msgid "A cell that should exist is completely absent."
+msgstr "Eine Zelle, die vorhanden sein sollte, fehlt vollständig."
+
+#: app/templates/workbench/guidelines.html:17
+msgid "A cell that should not exist is present."
+msgstr "Eine Zelle, die nicht vorhanden sein sollte, ist da."
+
+#: app/templates/workbench/guidelines.html:18
+msgid "A header row is treated as body data, or body data is treated as a header."
+msgstr "Eine Kopfzeile wird als Datenzeile behandelt, oder eine Datenzeile wird als Kopfzeile behandelt."
+
+#: app/templates/workbench/guidelines.html:23
+msgid "Text Errors"
+msgstr "Textfehler"
+
+#: app/templates/workbench/guidelines.html:24
+msgid "These errors relate to the text content within cells."
+msgstr "Diese Fehler betreffen den Textinhalt in den Zellen."
+
+#: app/templates/workbench/guidelines.html:26
+msgid "Text that should be in a cell is absent."
+msgstr "Text, der in einer Zelle stehen sollte, fehlt."
+
+#: app/templates/workbench/guidelines.html:27
+msgid "Text appears that is not in the source document."
+msgstr "Text erscheint, der nicht im Quelldokument vorhanden ist."
+
+#: app/templates/workbench/guidelines.html:28
+msgid "A number is wrong (wrong digit, missing minus sign, wrong decimal separator)."
+msgstr "Eine Zahl ist falsch (falsche Ziffer, fehlendes Minuszeichen, falscher Dezimaltrenner)."
+
+#: app/templates/workbench/guidelines.html:29
+msgid "Text is garbled or misread (e.g., \"0\" for \"O\", \"1\" for \"l\")."
+msgstr "Text ist unleserlich oder falsch gelesen (z. B. \"0\" statt \"O\", \"1\" statt \"l\")."
+
+#: app/templates/workbench/guidelines.html:34
+msgid "Detection and Crop Errors"
+msgstr "Erkennungs- und Zuschnittfehler"
+
+#: app/templates/workbench/guidelines.html:35
+msgid "These errors relate to how the table was detected and cropped from the page."
+msgstr "Diese Fehler betreffen, wie die Tabelle erkannt und von der Seite ausgeschnitten wurde."
+
+#: app/templates/workbench/guidelines.html:37
+msgid "Part of the table is cut off, or adjacent text/paragraphs are included."
+msgstr "Ein Teil der Tabelle ist abgeschnitten, oder benachbarter Text/Absätze sind enthalten."
+
+#: app/templates/workbench/guidelines.html:38
+msgid "Two tables were merged into one, or one table was split into two."
+msgstr "Zwei Tabellen wurden zu einer zusammengefasst, oder eine Tabelle wurde in zwei aufgeteilt."
+
+#: app/templates/workbench/guidelines.html:43
+msgid "Scoring Guide"
+msgstr "Bewertungsskala"
+
+#: app/templates/workbench/guidelines.html:47
+msgid "Score"
+msgstr "Punktzahl"
+
+#: app/templates/workbench/guidelines.html:48
+msgid "Meaning"
+msgstr "Bedeutung"
+
+#: app/templates/workbench/guidelines.html:53
+msgid "Correct — no errors or only trivial formatting differences."
+msgstr "Korrekt — keine Fehler oder nur unerhebliche Formatunterschiede."
+
+#: app/templates/workbench/guidelines.html:56
+msgid "Minor correction — small errors that don't affect understanding."
+msgstr "Geringfügige Korrektur — kleine Fehler, die das Verständnis nicht beeinträchtigen."
+
+#: app/templates/workbench/guidelines.html:59
+msgid "Major correction — significant errors that require manual fixing."
+msgstr "Erhebliche Korrektur — signifikante Fehler, die manuelles Beheben erfordern."
+
+#: app/templates/workbench/guidelines.html:62
+msgid "Unusable — the output cannot be used without complete re-entry."
+msgstr "Nicht nutzbar — das Ergebnis kann ohne vollständige Neueingabe nicht verwendet werden."
+
+#: app/workbench/views.py
+msgid "Task skipped. It will remain available for later."
+msgstr "Aufgabe übersprungen. Sie bleibt später verfügbar."
+
+#: app/workbench/views.py
+msgid "Task marked as needing expert review."
+msgstr "Aufgabe als fachliche Prüfung benötigt markiert."
+
+#: app/workbench/views.py
+msgid "This review was already submitted. Your original response has been preserved."
+msgstr "Diese Bewertung wurde bereits übermittelt. Ihre ursprüngliche Antwort wurde gespeichert."
+
+#: app/workbench/views.py
+msgid "Missing extraction data for this table."
+msgstr "Fehlende Extraktionsdaten für diese Tabelle."
+
+#: app/workbench/views.py
+msgid "Review submitted successfully."
+msgstr "Bewertung erfolgreich übermittelt."
+
+#: app/workbench/views.py
+msgid "Post-reveal note saved."
+msgstr "Nachtrag gespeichert."
+
+#: app/workbench/views.py
+msgid "Preferences saved."
+msgstr "Einstellungen gespeichert."
+
+#: app/workbench/views.py
+#, python-format
+msgid "Token created: %(token)s. Copy it now — it won't be shown again."
+msgstr "Token erstellt: %(token)s. Kopieren Sie ihn jetzt — er wird nicht mehr angezeigt."
+
+#: app/workbench/views.py
+msgid "Token revoked."
+msgstr "Token widerrufen."
+
+#: app/workbench/views.py
+msgid "Token not found."
+msgstr "Token nicht gefunden."
+
+#: app/workbench/views.py
+msgid "Current password is incorrect."
+msgstr "Aktuelles Passwort ist falsch."
+
+#: app/workbench/views.py
+msgid "New passwords do not match."
+msgstr "Neue Passwörter stimmen nicht überein."
+
+#: app/workbench/views.py
+msgid "New password must be at least 8 characters."
+msgstr "Neues Passwort muss mindestens 8 Zeichen lang sein."
+
+#: app/workbench/views.py
+msgid "Password changed."
+msgstr "Passwort geändert."

@@ -32,8 +32,8 @@
             <div class="form-group">
                 <label for="id_timezone">{% trans "Timezone" %}</label>
                 <select name="timezone" id="id_timezone">
-                    {% for tz in "UTC,Europe/Vienna,Europe/Berlin,Europe/Zurich,America/New_York" %}
-                    <option value="{{ tz }}" {% if prefs.timezone == tz %}selected{% endif %}>{{ tz }}</option>
+                    {% for code, name in timezone_choices %}
+                    <option value="{{ code }}" {% if prefs.timezone == code %}selected{% endif %}>{{ name }}</option>
                     {% endfor %}
                 </select>
             </div>

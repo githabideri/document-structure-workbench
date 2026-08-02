@@ -10,25 +10,25 @@
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-value">{{ documents|length }}</div>
-            <div class="stat-label">Documents</div>
+            <div class="stat-label">{% trans "Documents" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ total_tables }}</div>
-            <div class="stat-label">Tables</div>
+            <div class="stat-label">{% trans "Tables" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ total_reviews }}</div>
-            <div class="stat-label">Reviews</div>
+            <div class="stat-label">{% trans "Reviews" %}</div>
         </div>
     </div>
 
-    <h2>Documents</h2>
+    <h2>{% trans "Documents" %}</h2>
     <table class="data-table">
         <thead>
             <tr>
-                <th>External ID</th>
-                <th>Filename</th>
-                <th>Pages</th>
+                <th>{% trans "External ID" %}</th>
+                <th>{% trans "Filename" %}</th>
+                <th>{% trans "Pages" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -39,7 +39,7 @@
                 <td>{{ doc.page_count }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="3">No documents.</td></tr>
+            <tr><td colspan="3">{% trans "No documents." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>

@@ -1,78 +1,78 @@
 {% extends "base.html" %}
 {% load static i18n %}
-{% block title %}Review Guidelines{% endblock %}
+{% block title %}{% trans "Review Guidelines" %}{% endblock %}
 
 {% block content %}
 <div class="guidelines">
-    <h1>Review Guidelines</h1>
+    <h1>{% trans "Review Guidelines" %}</h1>
 
     <section>
-        <h2>Structure Errors</h2>
-        <p>These errors relate to the table's grid structure.</p>
+        <h2>{% trans "Structure Errors" %}</h2>
+        <p>{% trans "These errors relate to the table's grid structure." %}</p>
         <ul>
-            <li><strong>Wrong row count</strong> — The table has too many or too few rows compared to the source.</li>
-            <li><strong>Wrong column count</strong> — The table has too many or too few columns.</li>
-            <li><strong>Bad rowspan</strong> — A cell that should span multiple rows does not, or spans the wrong number.</li>
-            <li><strong>Bad colspan</strong> — A cell that should span multiple columns does not, or spans the wrong number.</li>
-            <li><strong>Wrong cell assignment</strong> — Text is placed in the wrong cell (wrong row or column).</li>
-            <li><strong>Missing cell</strong> — A cell that should exist is completely absent.</li>
-            <li><strong>Extra cell</strong> — A cell that should not exist is present.</li>
-            <li><strong>Header error</strong> — A header row is treated as body data, or body data is treated as a header.</li>
+            <li><strong>{% trans "Wrong row count" %}</strong> — {% trans "The table has too many or too few rows compared to the source." %}</li>
+            <li><strong>{% trans "Wrong column count" %}</strong> — {% trans "The table has too many or too few columns." %}</li>
+            <li><strong>{% trans "Bad rowspan" %}</strong> — {% trans "A cell that should span multiple rows does not, or spans the wrong number." %}</li>
+            <li><strong>{% trans "Bad colspan" %}</strong> — {% trans "A cell that should span multiple columns does not, or spans the wrong number." %}</li>
+            <li><strong>{% trans "Wrong cell assignment" %}</strong> — {% trans "Text is placed in the wrong cell (wrong row or column)." %}</li>
+            <li><strong>{% trans "Missing cell" %}</strong> — {% trans "A cell that should exist is completely absent." %}</li>
+            <li><strong>{% trans "Extra cell" %}</strong> — {% trans "A cell that should not exist is present." %}</li>
+            <li><strong>{% trans "Header error" %}</strong> — {% trans "A header row is treated as body data, or body data is treated as a header." %}</li>
         </ul>
     </section>
 
     <section>
-        <h2>Text Errors</h2>
-        <p>These errors relate to the text content within cells.</p>
+        <h2>{% trans "Text Errors" %}</h2>
+        <p>{% trans "These errors relate to the text content within cells." %}</p>
         <ul>
-            <li><strong>Missing text</strong> — Text that should be in a cell is absent.</li>
-            <li><strong>Invented text</strong> — Text appears that is not in the source document.</li>
-            <li><strong>Numeric error</strong> — A number is wrong (wrong digit, missing minus sign, wrong decimal separator).</li>
-            <li><strong>OCR/transcription error</strong> — Text is garbled or misread (e.g., "0" for "O", "1" for "l").</li>
+            <li><strong>{% trans "Missing text" %}</strong> — {% trans "Text that should be in a cell is absent." %}</li>
+            <li><strong>{% trans "Invented text" %}</strong> — {% trans "Text appears that is not in the source document." %}</li>
+            <li><strong>{% trans "Numeric error" %}</strong> — {% trans "A number is wrong (wrong digit, missing minus sign, wrong decimal separator)." %}</li>
+            <li><strong>{% trans "OCR/transcription error" %}</strong> — {% trans "Text is garbled or misread (e.g., \"0\" for \"O\", \"1\" for \"l\")." %}</li>
         </ul>
     </section>
 
     <section>
-        <h2>Detection and Crop Errors</h2>
-        <p>These errors relate to how the table was detected and cropped from the page.</p>
+        <h2>{% trans "Detection and Crop Errors" %}</h2>
+        <p>{% trans "These errors relate to how the table was detected and cropped from the page." %}</p>
         <ul>
-            <li><strong>Bad crop</strong> — Part of the table is cut off, or adjacent text/paragraphs are included.</li>
-            <li><strong>Bad detection</strong> — Two tables were merged into one, or one table was split into two.</li>
+            <li><strong>{% trans "Bad crop" %}</strong> — {% trans "Part of the table is cut off, or adjacent text/paragraphs are included." %}</li>
+            <li><strong>{% trans "Bad detection" %}</strong> — {% trans "Two tables were merged into one, or one table was split into two." %}</li>
         </ul>
     </section>
 
     <section>
-        <h2>Scoring Guide</h2>
+        <h2>{% trans "Scoring Guide" %}</h2>
         <table>
             <thead>
                 <tr>
-                    <th>Score</th>
-                    <th>Meaning</th>
+                    <th>{% trans "Score" %}</th>
+                    <th>{% trans "Meaning" %}</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
                     <td><strong>3</strong></td>
-                    <td>Correct — no errors or only trivial formatting differences.</td>
+                    <td>{% trans "Correct — no errors or only trivial formatting differences." %}</td>
                 </tr>
                 <tr>
                     <td><strong>2</strong></td>
-                    <td>Minor correction — small errors that don't affect understanding.</td>
+                    <td>{% trans "Minor correction — small errors that don't affect understanding." %}</td>
                 </tr>
                 <tr>
                     <td><strong>1</strong></td>
-                    <td>Major correction — significant errors that require manual fixing.</td>
+                    <td>{% trans "Major correction — significant errors that require manual fixing." %}</td>
                 </tr>
                 <tr>
                     <td><strong>0</strong></td>
-                    <td>Unusable — the output cannot be used without complete re-entry.</td>
+                    <td>{% trans "Unusable — the output cannot be used without complete re-entry." %}</td>
                 </tr>
             </tbody>
         </table>
     </section>
 
     <div class="actions">
-        <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary">{% trans "Back to Dashboard" %}</a>
     </div>
 </div>
 {% endblock %}

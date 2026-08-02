@@ -413,11 +413,11 @@ def api_documents(request, project_id):
 @require_scope("documents:upload", "jobs:submit")
 def api_upload_document(request, project_id):
     """Upload a PDF document to a project and create a processing job."""
+    from .policy import ProjectAccessPolicy
+    from .services import DocumentIngestionService, IngestionError
+
     token = request._api_token  # noqa: SLF001
     request_id = request._request_id  # noqa: SLF001
-
-    if not _check_project_access(token, project_id, min_role="editor"):
-        return JsonResponse({"error": "Edit access required"}, status=403)
 
     project = get_object_or_404(Collection, pk=project_id)
 
@@ -426,63 +426,23 @@ def api_upload_document(request, project_id):
         return JsonResponse({"error": "No file uploaded. Use multipart/form-data with 'file' field."}, status=400)
 
     uploaded_file = request.FILES["file"]
-
-    # Validate file type
-    if not uploaded_file.name.lower().endswith(".pdf"):
-        return JsonResponse({"error": "Only PDF files are supported."}, status=400)
-
-    # Validate file size (max 100MB)
-    if uploaded_file.size > 100 * 1024 * 1024:
-        return JsonResponse({"error": "File too large. Maximum 100MB."}, status=400)
-
-    # Compute SHA256
-    import hashlib
-    sha256 = hashlib.sha256()
-    for chunk in uploaded_file.chunks():
-        sha256.update(chunk)
-    file_hash = sha256.hexdigest()
-
-    # Save file to artifacts directory
-    from pathlib import Path
-    artifacts_dir = getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts")
-    uploads_dir = Path(artifacts_dir) / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-
-    # Unique filename: {sha256[:12]}_{original_name}
-    safe_name = Path(uploaded_file.name).stem.replace(" ", "_")
-    filename = f"{file_hash[:12]}_{safe_name}.pdf"
-    file_path = uploads_dir / filename
-
-    # Write file
-    with open(file_path, "wb") as f:
-        uploaded_file.seek(0)
-        for chunk in uploaded_file.chunks():
-            f.write(chunk)
-
-    # Create SourceDocument
-    owner = token.user if token.user_id else None
-    source_doc = SourceDocument.objects.create(
-        collection=project,
-        source_type="upload",
-        filename=uploaded_file.name,
-        file_path=f"uploads/{filename}",
-        sha256=file_hash,
-        file_size=uploaded_file.size,
-        uploaded_by=owner,
-    )
-
-    # Get preset (default: quick-extraction)
     preset_slug = request.POST.get("preset", "quick-extraction")
-    preset = get_object_or_404(ProcessingPreset, slug=preset_slug, is_active=True)
 
-    # Create job
-    job = ProcessingJob.objects.create(
-        source_document=source_doc,
-        preset=preset,
-        state="queued",
-        created_by=owner,
-    )
-    job.capture_preset_snapshot()
+    # Use shared ingestion service
+    policy = ProjectAccessPolicy(token=token)
+    service = DocumentIngestionService(user=(token.user if token.user_id else None), policy=policy)
+
+    try:
+        job = service.create_upload(
+            project=project,
+            uploaded_file=uploaded_file,
+            preset_slug=preset_slug,
+        )
+    except IngestionError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    owner = token.user if token.user_id else None
+    source_doc = job.source_document
 
     # Audit
     AuditEvent.objects.create(
@@ -490,7 +450,7 @@ def api_upload_document(request, project_id):
         event_type="document_uploaded",
         object_type="SourceDocument",
         object_id=str(source_doc.pk),
-        after={"filename": uploaded_file.name, "sha256": file_hash, "size": uploaded_file.size},
+        after={"filename": source_doc.filename, "sha256": source_doc.sha256, "size": source_doc.file_size},
         request_id=request_id,
     )
 
@@ -498,9 +458,9 @@ def api_upload_document(request, project_id):
         "status": "queued",
         "source_document_id": source_doc.pk,
         "job_id": job.pk,
-        "filename": uploaded_file.name,
-        "sha256": file_hash,
-        "preset": preset.slug,
+        "filename": source_doc.filename,
+        "sha256": source_doc.sha256,
+        "preset": job.preset.slug,
     }, status=201)
 
 

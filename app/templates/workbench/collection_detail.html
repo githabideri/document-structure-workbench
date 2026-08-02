@@ -22,6 +22,12 @@
         </div>
     </div>
 
+    {% if is_curator or is_admin %}
+    <div style="margin: 1rem 0">
+        <a href="{% url 'project_process' collection.id %}" class="btn btn-primary">{% trans "Process a document" %}</a>
+    </div>
+    {% endif %}
+
     <h2>{% trans "Documents" %}</h2>
     <table class="data-table">
         <thead>

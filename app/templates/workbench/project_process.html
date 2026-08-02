@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% load static i18n %}
+{% block title %}{% blocktrans %}Upload Document — {{ collection.name }}{% endblocktrans %}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .upload-container { max-width: 600px; margin: 2rem auto; }
+    .upload-form { padding: 1.5rem; background: #f9f9f9; border-radius: 8px; }
+    .upload-form h3 { margin-top: 0; }
+    .form-group { margin-bottom: 1.5rem; }
+    .form-group label { display: block; font-weight: bold; margin-bottom: 0.5rem; }
+    .form-group small { color: #666; display: block; margin-top: 0.25rem; }
+    .preset-card {
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 0.5rem;
+        cursor: pointer;
+    }
+    .preset-card:hover { border-color: #4CAF50; }
+    .preset-card input[type="radio"] { margin-right: 0.5rem; }
+    .preset-card.selected { border-color: #4CAF50; background: #e8f5e9; }
+    .file-drop {
+        border: 2px dashed #ccc;
+        border-radius: 8px;
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color 0.2s;
+    }
+    .file-drop:hover, .file-drop.dragover { border-color: #4CAF50; background: #f0fff0; }
+    .file-drop input[type="file"] { display: none; }
+    .file-info { margin-top: 0.5rem; color: #333; font-weight: bold; }
+    .processing-explanation {
+        background: #fff3cd;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upload-container">
+    <h2>{% blocktrans %}Upload Document — {{ collection.name }}{% endblocktrans %}</h2>
+
+    <div class="upload-form">
+        <form method="post" enctype="multipart/form-data" id="upload-form">
+            {% csrf_token %}
+
+            <div class="form-group">
+                <label>{% trans "Processing Purpose" %}</label>
+                {% for preset in presets %}
+                <div class="preset-card" data-preset="{{ preset.slug }}">
+                    <input type="radio" name="preset" id="preset_{{ preset.slug }}" value="{{ preset.slug }}" {% if forloop.first %}checked{% endif %}>
+                    <strong>{{ preset.name }}</strong>
+                    <br>
+                    <small>{{ preset.description_short }}</small>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="form-group">
+                <label>{% trans "PDF File" %}</label>
+                <div class="file-drop" id="file-drop">
+                    <input type="file" name="file" id="file-input" accept=".pdf,application/pdf">
+                    <p>{% trans "Click to choose or drag & drop a PDF here" %}</p>
+                    <p class="file-info" id="file-info"></p>
+                </div>
+                <small>{% trans "Maximum 50 MB. PDF only." %}</small>
+            </div>
+
+            <div class="processing-explanation">
+                <strong>{% trans "What happens next:" %}</strong>
+                <ol style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
+                    <li>{% trans "Document received and validated" %}</li>
+                    <li>{% trans "Processing queued" %}</li>
+                    <li>{% trans "Pages extracted and images generated" %}</li>
+                    <li>{% trans "Tables and regions detected" %}</li>
+                    <li>{% trans "Results imported into the workspace" %}</li>
+                    <li>{% trans "You can view results in the document workspace" %}</li>
+                </ol>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="margin-top:1rem">{% trans "Upload & Process" %}</button>
+            <a href="{% url 'collection_detail' collection.id %}" class="btn btn-secondary" style="margin-top:1rem">{% trans "Cancel" %}</a>
+        </form>
+    </div>
+</div>
+
+<script>
+    // File drop zone
+    const dropZone = document.getElementById('file-drop');
+    const fileInput = document.getElementById('file-input');
+    const fileInfo = document.getElementById('file-info');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            fileInfo.textContent = files[0].name + ' (' + (files[0].size / 1024 / 1024).toFixed(1) + ' MB)';
+        }
+    });
+
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) {
+            fileInfo.textContent = fileInput.files[0].name + ' (' + (fileInput.files[0].size / 1024 / 1024).toFixed(1) + ' MB)';
+        }
+    });
+
+    // Preset card selection
+    document.querySelectorAll('.preset-card').forEach(card => {
+        card.addEventListener('click', () => {
+            document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+            card.querySelector('input[type="radio"]').checked = true;
+        });
+    });
+    // Select first preset by default
+    document.querySelector('.preset-card')?.classList.add('selected');
+</script>
+{% endblock %}

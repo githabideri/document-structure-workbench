@@ -1,0 +1,97 @@
+{% load i18n %}
+<div class="job-status-block">
+    <div class="job-header">
+        <h3>{{ source_document.filename }}</h3>
+        <span class="job-state job-state-{{ job.state }}">{{ job.get_state_display }}</span>
+    </div>
+
+    <div class="job-progress">
+        {% if job.state == "queued" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step active">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step">{% trans "Preparing pages" %}</div>
+        <div class="progress-step">{% trans "Identifying page contents" %}</div>
+        <div class="progress-step">{% trans "Locating tables and regions" %}</div>
+        <div class="progress-step">{% trans "Importing results" %}</div>
+        {% elif job.state == "submitting" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step active">{% trans "Preparing pages" %}</div>
+        <div class="progress-step">{% trans "Identifying page contents" %}</div>
+        <div class="progress-step">{% trans "Locating tables and regions" %}</div>
+        <div class="progress-step">{% trans "Importing results" %}</div>
+        {% elif job.state == "processing" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step done">{% trans "Preparing pages" %}</div>
+        <div class="progress-step active">{% trans "Identifying page contents" %}</div>
+        <div class="progress-step">{% trans "Locating tables and regions" %}</div>
+        <div class="progress-step">{% trans "Importing results" %}</div>
+        {% elif job.state == "importing" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step done">{% trans "Preparing pages" %}</div>
+        <div class="progress-step done">{% trans "Identifying page contents" %}</div>
+        <div class="progress-step done">{% trans "Locating tables and regions" %}</div>
+        <div class="progress-step active">{% trans "Importing results" %}</div>
+        {% elif job.state == "completed" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step done">{% trans "Preparing pages" %}</div>
+        <div class="progress-step done">{% trans "Identifying page contents" %}</div>
+        <div class="progress-step done">{% trans "Locating tables and regions" %}</div>
+        <div class="progress-step done">{% trans "Importing results" %}</div>
+        <div class="progress-message success">{% trans "Processing completed successfully." %}</div>
+        {% elif job.state == "partial" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step done">{% trans "Preparing pages" %}</div>
+        <div class="progress-step done">{% trans "Identifying page contents" %}</div>
+        <div class="progress-step done">{% trans "Locating tables and regions" %}</div>
+        <div class="progress-step done">{% trans "Importing results" %}</div>
+        <div class="progress-message warning">{% trans "Processing completed with some errors." %}</div>
+        {% elif job.state == "failed" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step done">{% trans "Preparing pages" %}</div>
+        <div class="progress-step active error">{% trans "Processing failed" %}</div>
+        <div class="progress-message error">{{ job.error_message }}</div>
+        {% elif job.state == "cancelled" %}
+        <div class="progress-step done">{% trans "Document received" %}</div>
+        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
+        <div class="progress-step done">{% trans "Preparing pages" %}</div>
+        <div class="progress-step active cancelled">{% trans "Processing cancelled" %}</div>
+        {% endif %}
+    </div>
+
+    <div class="job-stats">
+        {% if job.pages_processed %}
+        <div><strong>{{ job.pages_processed }}</strong> {% trans "pages processed" %}</div>
+        {% endif %}
+        {% if job.tables_found %}
+        <div><strong>{{ job.tables_found }}</strong> {% trans "tables found" %}</div>
+        {% endif %}
+        {% if job.started_at %}
+        <div>{% trans "Started:" %} {{ job.started_at }}</div>
+        {% endif %}
+        {% if job.finished_at %}
+        <div>{% trans "Finished:" %} {{ job.finished_at }}</div>
+        {% endif %}
+    </div>
+
+    {% if job.state in "completed,partial" %}
+    <div class="job-actions" style="margin-top:1rem">
+        <a href="{% url 'document_detail' source_document.processed_document_id %}" class="btn btn-primary">{% trans "View Document" %}</a>
+        <a href="{% url 'collection_detail' source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
+    </div>
+    {% elif job.state in "queued,submitting,processing,importing" %}
+    <div hx-get="{% url 'job_status' job.id %}" hx-trigger="every 5s" hx-swap="outerHTML">
+        <p style="color:#666; font-style:italic;">{% trans "Auto-refreshing..." %}</p>
+    </div>
+    {% else %}
+    <div class="job-actions" style="margin-top:1rem">
+        <a href="{% url 'project_process' source_document.collection_id %}" class="btn btn-primary">{% trans "Upload Another" %}</a>
+        <a href="{% url 'collection_detail' source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
+    </div>
+    {% endif %}
+</div>

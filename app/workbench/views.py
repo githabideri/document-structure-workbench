@@ -851,3 +851,71 @@ def serve_htmx(request):
         return HttpResponse(htmx_path.read_text(), content_type="application/javascript")
     # Fallback to CDN
     return redirect("https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js")
+
+
+# --- Upload / Processing ---
+
+@login_required
+def project_process(request, project_id):
+    """Upload a PDF to a project and start processing."""
+    from .policy import ProjectAccessPolicy
+    from .services import DocumentIngestionService, IngestionError
+    from .models import ProcessingPreset, Collection
+
+    collection = get_object_or_404(Collection, pk=project_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_edit(collection):
+        messages.error(request, _("You do not have edit access to this project."))
+        return redirect("collection_detail", collection_id=project_id)
+
+    if request.method == "POST":
+        if "file" not in request.FILES:
+            messages.error(request, _("No file selected."))
+            return redirect("project_process", project_id=project_id)
+
+        uploaded_file = request.FILES["file"]
+        preset_slug = request.POST.get("preset", "quick-extraction")
+
+        service = DocumentIngestionService(user=request.user, policy=policy)
+        try:
+            job = service.create_upload(
+                project=collection,
+                uploaded_file=uploaded_file,
+                preset_slug=preset_slug,
+            )
+        except IngestionError as e:
+            messages.error(request, str(e))
+            return redirect("project_process", project_id=project_id)
+
+        log_audit(request, "document_uploaded", "SourceDocument", job.source_document_id)
+        messages.success(request, _("Document uploaded. Processing started."))
+        return redirect("job_status", job_id=job.pk)
+
+    # GET: show upload form
+    presets = ProcessingPreset.objects.filter(is_active=True)
+    return render(request, "workbench/project_process.html", {
+        "collection": collection,
+        "presets": presets,
+    })
+
+
+@login_required
+def job_status(request, job_id):
+    """Show processing job status with HTMX polling."""
+    from .policy import ProjectAccessPolicy
+    from .models import ProcessingJob
+
+    job = get_object_or_404(ProcessingJob, pk=job_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_job(job):
+        messages.error(request, _("You do not have access to this job."))
+        return redirect("dashboard")
+
+    # HTMX partial refresh (just the status block)
+    if request.headers.get("HX-Request"):
+        return render(request, "workbench/_job_status_block.html", {"job": job})
+
+    return render(request, "workbench/job_status.html", {
+        "job": job,
+        "source_document": job.source_document,
+    })

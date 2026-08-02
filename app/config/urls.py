@@ -23,6 +23,10 @@ urlpatterns = [
     path("documents/", views.document_list, name="document_list"),
     path("documents/<int:document_id>/", views.document_detail, name="document_detail"),
 
+    # Upload / Processing
+    path("projects/<int:project_id>/process/", views.project_process, name="project_process"),
+    path("jobs/<int:job_id>/", views.job_status, name="job_status"),
+
     # Reviews
     path("reviews/", views.review_list, name="review_list"),
     path("reviews/next/", views.review_next, name="review_next"),

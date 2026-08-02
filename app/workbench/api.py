@@ -80,9 +80,11 @@ def api_health(request):
     from django.db import connection
 
     release_sha = None
-    release_file = Path(getattr(settings, "RELEASE_FILE", ""))
-    if release_file and release_file.exists():
-        release_sha = release_file.read_text().strip()
+    release_file_path = getattr(settings, "RELEASE_FILE", "")
+    if release_file_path:
+        release_file = Path(release_file_path)
+        if release_file.exists():
+            release_sha = release_file.read_text().strip()
 
     database_ok = False
     try:

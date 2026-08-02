@@ -11,4 +11,4 @@ def release_info(request):
         release_file = Path(release_file_path)
         if release_file.exists():
             release_sha = release_file.read_text().strip()
-    return {"release_sha": release_sha}
+    return {"release_sha": release_sha, "release_sha_short": release_sha[:8] if release_sha else ""}

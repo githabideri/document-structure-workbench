@@ -1,0 +1,47 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}{{ collection.name }}{% endblock %}
+
+{% block content %}
+<div class="collection-detail">
+    <h1>{{ collection.name }}</h1>
+    <p>{{ collection.description }}</p>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ documents|length }}</div>
+            <div class="stat-label">Documents</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_tables }}</div>
+            <div class="stat-label">Tables</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_reviews }}</div>
+            <div class="stat-label">Reviews</div>
+        </div>
+    </div>
+
+    <h2>Documents</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>External ID</th>
+                <th>Filename</th>
+                <th>Pages</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for doc in documents %}
+            <tr>
+                <td><a href="{% url 'document_detail' doc.id %}">{{ doc.external_id }}</a></td>
+                <td>{{ doc.filename }}</td>
+                <td>{{ doc.page_count }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3">No documents.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

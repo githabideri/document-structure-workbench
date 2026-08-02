@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "document-structure-workbench"
+version = "0.1.0"
+description = "Web application for reviewing and comparing document structure extraction results"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Document Structure Workbench contributors"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "Django>=5.2,<5.3",
+    "gunicorn>=23.0",
+    "bleach>=6.2",
+    "markdown>=3.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-django>=4.5",
+    "pytest-cov>=4.1",
+    "requests>=2.31",
+    "gitleaks>=8.0",
+]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "workbench*", "processors*", "schemas*", "content*", "tests*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "app.config.settings"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

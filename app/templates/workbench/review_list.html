@@ -1,0 +1,42 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}My Reviews{% endblock %}
+
+{% block content %}
+<div class="review-list">
+    <h1>My Review Tasks</h1>
+
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Document</th>
+                <th>Table ID</th>
+                <th>State</th>
+                <th>Priority</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in tasks %}
+            <tr>
+                <td>{{ task.table_candidate.document.external_id }}</td>
+                <td>{{ task.stable_table_id }}</td>
+                <td>{{ task.get_state_display }}</td>
+                <td>{{ task.priority }}</td>
+                <td>
+                    {% if task.state != 'completed' %}
+                    <a href="{% url 'review_detail' task.id %}" class="btn btn-sm">Review</a>
+                    {% else %}
+                    <a href="{% url 'review_detail' task.id %}" class="btn btn-sm">View</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5">No review tasks assigned.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

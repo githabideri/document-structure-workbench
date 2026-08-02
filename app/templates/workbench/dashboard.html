@@ -1,0 +1,39 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}Dashboard - Archive Structure Workbench{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h1>Welcome, {{ user.username }}</h1>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ total_tasks }}</div>
+            <div class="stat-label">Total Tasks</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ completed }}</div>
+            <div class="stat-label">Completed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ in_progress }}</div>
+            <div class="stat-label">In Progress</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ unassigned }}</div>
+            <div class="stat-label">Available</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ needs_expert }}</div>
+            <div class="stat-label">Needs Expert</div>
+        </div>
+    </div>
+
+    <div class="actions">
+        {% if unassigned > 0 %}
+        <a href="{% url 'review_next' %}" class="btn btn-primary">Start Next Review</a>
+        {% endif %}
+        <a href="{% url 'review_list' %}" class="btn btn-secondary">View All Reviews</a>
+    </div>
+</div>
+{% endblock %}

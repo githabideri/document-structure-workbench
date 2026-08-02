@@ -1,0 +1,91 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}Decision: {{ table.stable_table_id }}{% endblock %}
+
+{% block content %}
+<div class="decision-detail">
+    <h1>Decision: {{ table.document.external_id }} — {{ table.stable_table_id }}</h1>
+
+    {% if decision %}
+    <div class="decision-card">
+        <h3>Current Decision</h3>
+        <p><strong>Decision:</strong> {{ decision.get_decision_display }}</p>
+        <p><strong>By:</strong> {{ decision.decided_by.username }}</p>
+        <p><strong>Reason:</strong> {{ decision.reason }}</p>
+        <p><strong>Date:</strong> {{ decision.created_at|date:"Y-m-d H:i" }}</p>
+    </div>
+    {% endif %}
+
+    {% if review %}
+    <div class="review-card">
+        <h3>Review</h3>
+        <p><strong>Reviewer:</strong> {{ review.reviewer.username }}</p>
+        <p><strong>Preferred:</strong> {{ review.get_preferred_result_display }}</p>
+        <p><strong>Confidence:</strong> {{ review.get_confidence_display }}</p>
+        <p><strong>Comment:</strong> {{ review.comment }}</p>
+    </div>
+    {% endif %}
+
+    <h3>Extractions</h3>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Profile</th>
+                <th>Rows</th>
+                <th>Columns</th>
+                <th>TEDS-S</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ext in extractions %}
+            <tr>
+                <td>{{ ext.extraction_run.profile }}</td>
+                <td>{{ ext.rows }}</td>
+                <td>{{ ext.columns }}</td>
+                <td>{{ ext.teds_s|floatformat:3|default:"—" }}</td>
+                <td>{{ ext.get_status_display }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">No extractions.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if not decision %}
+    <div class="decision-form">
+        <h3>Make Decision</h3>
+        <form method="post">
+            {% csrf_token %}
+            <div class="form-group">
+                <label>Decision</label>
+                <select name="decision">
+                    <option value="accepted">Accepted</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="needs_review">Needs Review</option>
+                    <option value="manual_correction">Manual Correction</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Selected Extraction</label>
+                <select name="selected_extraction_id">
+                    <option value="">None</option>
+                    {% for ext in extractions %}
+                    <option value="{{ ext.id }}">{{ ext.extraction_run.profile }} ({{ ext.rows }}×{{ ext.columns }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Reason</label>
+                <textarea name="reason" rows="3" style="width:100%"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Submit Decision</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <div class="actions">
+        <a href="{% url 'decision_list' %}" class="btn btn-secondary">Back to Decisions</a>
+    </div>
+</div>
+{% endblock %}

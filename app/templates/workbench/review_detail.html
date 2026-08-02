@@ -1,0 +1,211 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}Review: {{ document.external_id }} - {{ table_candidate.stable_table_id }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .review-container { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+    .candidate-panel { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+    .candidate-panel h3 { margin-top: 0; }
+    .table-render { overflow-x: auto; margin: 1rem 0; }
+    .table-render table { border-collapse: collapse; width: 100%; }
+    .table-render td, .table-render th { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
+    .table-render th { background: #f0f0f0; font-weight: bold; }
+    .source-area { text-align: center; margin-bottom: 1rem; }
+    .source-area img { max-width: 100%; border: 1px solid #ddd; }
+    .review-form { margin-top: 2rem; padding: 1rem; background: #f9f9f9; border-radius: 8px; }
+    .score-group { display: flex; gap: 0.5rem; align-items: center; }
+    .score-group input[type="radio"] { display: none; }
+    .score-group label { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+    .score-group input[type="radio"]:checked + label { background: #4CAF50; color: white; border-color: #4CAF50; }
+    .error-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .error-checks label { display: flex; align-items: center; gap: 0.5rem; }
+    .blinded-notice { background: #fff3cd; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .reveal-section { background: #e8f5e9; padding: 1rem; border-radius: 8px; margin-top: 1rem; }
+    .gt-section { background: #e3f2fd; padding: 1rem; border-radius: 8px; margin-top: 1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="review-page">
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% else %}
+
+    <div class="source-area">
+        <h2>{{ document.external_id }} — Page {{ table_candidate.page.page_number }} — {{ table_candidate.stable_table_id }}</h2>
+        {% if table_candidate.page.image_path %}
+        <img src="{{ table_candidate.page.image_path }}" alt="Source page" style="max-width:600px;">
+        {% endif %}
+        {% if table_candidate.crop_path %}
+        <img src="{{ table_candidate.crop_path }}" alt="Table crop" style="max-width:400px; margin-top:1rem;">
+        {% endif %}
+    </div>
+
+    {% if existing_review %}
+    <div class="reveal-section">
+        <h3>Review Submitted</h3>
+        <p><strong>Your preference:</strong> {{ existing_review.get_preferred_result_display }}</p>
+        <p><strong>Confidence:</strong> {{ existing_review.get_confidence_display }}</p>
+        {% if existing_review.comment %}<p><strong>Comment:</strong> {{ existing_review.comment }}</p>{% endif %}
+
+        {% if has_gt %}
+        <div class="gt-section">
+            <h4>Ground Truth</h4>
+            <div class="table-render">{{ gt_html|safe }}</div>
+            {% if gt_extraction %}
+            <p><strong>Rows:</strong> {{ gt_extraction.rows }}, <strong>Columns:</strong> {{ gt_extraction.columns }}</p>
+            {% endif %}
+        </div>
+
+        <h4>Technical Details</h4>
+        <p><strong>Candidate X was:</strong> {{ existing_review.candidate_a_label }}</p>
+        <p><strong>Candidate Y was:</strong> {{ existing_review.candidate_b_label }}</p>
+
+        {% if candidate_a.teds_s is not None %}
+        <p><strong>Candidate X TEDS-S:</strong> {{ candidate_a.teds_s|floatformat:3 }}</p>
+        {% endif %}
+        {% if candidate_b.teds_s is not None %}
+        <p><strong>Candidate Y TEDS-S:</strong> {{ candidate_b.teds_s|floatformat:3 }}</p>
+        {% endif %}
+
+        {% if existing_review.post_reveal_comment %}
+        <p><strong>Your post-reveal note:</strong> {{ existing_review.post_reveal_comment }}</p>
+        {% else %}
+        <form method="post" action="{% url 'review_post_reveal' task.id %}" hx-post="{% url 'review_post_reveal' task.id %}" hx-target="#post-reveal-result">
+            {% csrf_token %}
+            <label for="post_reveal_comment">Add a post-reveal note:</label>
+            <textarea name="post_reveal_comment" id="post_reveal_comment" rows="3" style="width:100%"></textarea>
+            <button type="submit" class="btn btn-secondary" style="margin-top:0.5rem">Save Note</button>
+            <div id="post-reveal-result"></div>
+        </form>
+        {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+
+    {% if not is_blinded %}
+    <div class="reveal-section">
+        <p><strong>Candidate X:</strong> {{ label_a }} | <strong>Candidate Y:</strong> {{ label_b }}</p>
+    </div>
+    {% else %}
+    <div class="blinded-notice">
+        <strong>Blinded Review:</strong> Candidates X and Y are anonymous. Model identities will be revealed after you submit your review.
+    </div>
+    {% endif %}
+
+    <div class="review-container">
+        <div class="candidate-panel">
+            <h3>Candidate {{ label_a }}</h3>
+            <p><strong>Dimensions:</strong> {{ candidate_a.rows }} × {{ candidate_a.columns }}</p>
+            {% if candidate_a.validation %}
+            <p><strong>Warnings:</strong> {{ candidate_a.validation|length }}</p>
+            {% endif %}
+            <div class="table-render">
+                {{ candidate_a_html|safe }}
+            </div>
+        </div>
+
+        <div class="candidate-panel">
+            <h3>Candidate {{ label_b }}</h3>
+            <p><strong>Dimensions:</strong> {{ candidate_b.rows }} × {{ candidate_b.columns }}</p>
+            {% if candidate_b.validation %}
+            <p><strong>Warnings:</strong> {{ candidate_b.validation|length }}</p>
+            {% endif %}
+            <div class="table-render">
+                {{ candidate_b_html|safe }}
+            </div>
+        </div>
+    </div>
+
+    <div class="review-form">
+        <h3>Review Form</h3>
+
+        <form id="review-form" hx-post="{% url 'review_submit' task.id %}" hx-target="#review-result" hx-on::after-request="if(event.detail.successfulTarget && event.detail.successfulTarget.dataset.next) window.location.href='{% url 'review_detail' task.id %}'">
+            {% csrf_token %}
+            <input type="hidden" name="candidate_a_is_standard" value="{{ candidate_a.extraction_run.profile == 'standard-docling' }}">
+
+            <div class="score-section">
+                <h4>Candidate {{ label_a }} — Structure</h4>
+                <div class="score-group">
+                    <input type="radio" name="candidate_a_score" id="a_score_3" value="3">
+                    <label for="a_score_3">3 Correct</label>
+                    <input type="radio" name="candidate_a_score" id="a_score_2" value="2">
+                    <label for="a_score_2">2 Minor</label>
+                    <input type="radio" name="candidate_a_score" id="a_score_1" value="1">
+                    <label for="a_score_1">1 Major</label>
+                    <input type="radio" name="candidate_a_score" id="a_score_0" value="0" checked>
+                    <label for="a_score_0">0 Unusable</label>
+                </div>
+
+                <h4>Candidate {{ label_b }} — Structure</h4>
+                <div class="score-group">
+                    <input type="radio" name="candidate_b_score" id="b_score_3" value="3">
+                    <label for="b_score_3">3 Correct</label>
+                    <input type="radio" name="candidate_b_score" id="b_score_2" value="2">
+                    <label for="b_score_2">2 Minor</label>
+                    <input type="radio" name="candidate_b_score" id="b_score_1" value="1">
+                    <label for="b_score_1">1 Major</label>
+                    <input type="radio" name="candidate_b_score" id="b_score_0" value="0" checked>
+                    <label for="b_score_0">0 Unusable</label>
+                </div>
+            </div>
+
+            <h4>Error Categories (select all that apply)</h4>
+            <div class="error-checks">
+                <label><input type="checkbox" name="structure_errors" value="wrong_row_count"> Wrong row count</label>
+                <label><input type="checkbox" name="structure_errors" value="wrong_column_count"> Wrong column count</label>
+                <label><input type="checkbox" name="structure_errors" value="bad_rowspan"> Bad rowspan</label>
+                <label><input type="checkbox" name="structure_errors" value="bad_colspan"> Bad colspan</label>
+                <label><input type="checkbox" name="structure_errors" value="wrong_cell_assignment"> Wrong cell assignment</label>
+                <label><input type="checkbox" name="structure_errors" value="missing_cell"> Missing cell</label>
+                <label><input type="checkbox" name="structure_errors" value="extra_cell"> Extra cell</label>
+                <label><input type="checkbox" name="structure_errors" value="header_error"> Header error</label>
+                <label><input type="checkbox" name="text_errors" value="missing_text"> Missing text</label>
+                <label><input type="checkbox" name="text_errors" value="invented_text"> Invented text</label>
+                <label><input type="checkbox" name="text_errors" value="numeric_error"> Numeric error</label>
+                <label><input type="checkbox" name="text_errors" value="ocr_error"> OCR/transcription error</label>
+                <label><input type="checkbox" name="structure_errors" value="bad_crop"> Bad crop</label>
+                <label><input type="checkbox" name="structure_errors" value="bad_detection"> Bad detection</label>
+            </div>
+
+            <h4>Preferred Result</h4>
+            <div class="score-group">
+                <input type="radio" name="preferred_result" id="pref_a" value="candidate_a">
+                <label for="pref_a">Candidate {{ label_a }}</label>
+                <input type="radio" name="preferred_result" id="pref_b" value="candidate_b">
+                <label for="pref_b">Candidate {{ label_b }}</label>
+                <input type="radio" name="preferred_result" id="pref_eq" value="equivalent" checked>
+                <label for="pref_eq">Equivalent</label>
+                <input type="radio" name="preferred_result" id="pref_neither" value="neither">
+                <label for="pref_neither">Neither</label>
+            </div>
+
+            <h4>Confidence</h4>
+            <div class="score-group">
+                <input type="radio" name="confidence" id="conf_high" value="high">
+                <label for="conf_high">High</label>
+                <input type="radio" name="confidence" id="conf_medium" value="medium" checked>
+                <label for="conf_medium">Medium</label>
+                <input type="radio" name="confidence" id="conf_low" value="low">
+                <label for="conf_low">Low</label>
+            </div>
+
+            <h4>Comment (optional)</h4>
+            <textarea name="comment" rows="3" style="width:100%"></textarea>
+
+            <button type="submit" class="btn btn-primary" style="margin-top:1rem">Submit Review</button>
+        </form>
+
+        <div id="review-result" style="margin-top:1rem"></div>
+    </div>
+    {% endif %}
+
+    <div class="actions" style="margin-top:1rem">
+        <a href="{% url 'review_list' %}" class="btn btn-secondary">Back to Reviews</a>
+        <a href="{% url 'guidelines' %}" class="btn btn-secondary">Review Guidelines</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

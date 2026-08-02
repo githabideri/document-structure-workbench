@@ -1,0 +1,39 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}Technical Report{% endblock %}
+
+{% block content %}
+<div class="technical-report">
+    <h1>Technical Report</h1>
+
+    <h2>Profile Statistics</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Profile</th>
+                <th>Tables</th>
+                <th>Mean TEDS-S</th>
+                <th>Mean TEDS</th>
+                <th>Failures</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for profile, data in stats.items %}
+            <tr>
+                <td>{{ profile }}</td>
+                <td>{{ data.count }}</td>
+                <td>{{ data.mean_teds_s|floatformat:3 }}</td>
+                <td>{{ data.mean_teds|floatformat:3 }}</td>
+                <td>{{ data.failures }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">No extraction data.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="actions">
+        <a href="{% url 'curator_dashboard' %}" class="btn btn-secondary">Back to Curator</a>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}{{ document.external_id }}{% endblock %}
+
+{% block content %}
+<div class="document-detail">
+    <h1>{{ document.external_id }}</h1>
+    <p><strong>Filename:</strong> {{ document.filename }}</p>
+    <p><strong>Pages:</strong> {{ document.page_count }}</p>
+    <p><strong>Collection:</strong> <a href="{% url 'collection_detail' document.collection.id %}">{{ document.collection.name }}</a></p>
+
+    <h2>Tables</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Table ID</th>
+                <th>Page</th>
+                <th>Extractions</th>
+                <th>Review</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for table in tables %}
+            <tr>
+                <td>{{ table.stable_table_id }}</td>
+                <td>{{ table.page.page_number }}</td>
+                <td>{{ table.extractions.count }}</td>
+                <td>
+                    {% if table.review_task %}
+                    <a href="{% url 'review_detail' table.review_task.id %}">{{ table.review_task.get_state_display }}</a>
+                    {% else %}
+                    No task
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4">No tables.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="actions">
+        <a href="{% url 'collection_detail' document.collection.id %}" class="btn btn-secondary">Back to Collection</a>
+    </div>
+</div>
+{% endblock %}

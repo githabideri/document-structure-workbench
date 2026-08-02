@@ -1,0 +1,31 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}Collections{% endblock %}
+
+{% block content %}
+<div class="collection-list">
+    <h1>Collections</h1>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for collection in collections %}
+            <tr>
+                <td>{{ collection.name }}</td>
+                <td>{{ collection.get_source_type_display }}</td>
+                <td>{{ collection.created_at|date:"Y-m-d" }}</td>
+                <td><a href="{% url 'collection_detail' collection.id %}" class="btn btn-sm">View</a></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4">No collections yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

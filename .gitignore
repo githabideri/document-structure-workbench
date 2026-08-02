@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.egg-info/
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Django
+db.sqlite3
+*.sqlite3
+staticfiles/
+media/
+uploads/
+artifacts/
+imports/
+logs/
+cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+
+# Large files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.safetensors
+*.pt
+*.bin
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Translations (generated)
+locale/**/*.mo
+
+# Local development
+local_settings.py

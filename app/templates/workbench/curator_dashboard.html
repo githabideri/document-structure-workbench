@@ -1,0 +1,75 @@
+{% load static %}
+{% extends "base.html" %}
+{% block title %}Curator Dashboard{% endblock %}
+
+{% block content %}
+<div class="curator-dashboard">
+    <h1>Curator Dashboard</h1>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ total_documents }}</div>
+            <div class="stat-label">Documents</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_tables }}</div>
+            <div class="stat-label">Tables</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_reviews }}</div>
+            <div class="stat-label">Reviews Completed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ pending_reviews }}</div>
+            <div class="stat-label">Awaiting Review</div>
+        </div>
+    </div>
+
+    <h2>Preference Distribution</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Preference</th>
+                <th>Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pref in preferences %}
+            <tr>
+                <td>{{ pref.preferred_result }}</td>
+                <td>{{ pref.count }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2">No reviews yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Error Category Totals</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Error</th>
+                <th>Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for error, count in error_counts.items|dictsort_reversed:"1" %}
+            <tr>
+                <td>{{ error }}</td>
+                <td>{{ count }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2">No errors reported.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="actions">
+        <a href="{% url 'technical_report' %}" class="btn btn-secondary">Technical Report</a>
+        <a href="{% url 'export_reviews' %}" class="btn btn-secondary">Export Reviews</a>
+        <a href="{% url 'export_decisions' %}" class="btn btn-secondary">Export Decisions</a>
+        <a href="{% url 'export_summary' %}" class="btn btn-secondary">Export Summary</a>
+    </div>
+</div>
+{% endblock %}

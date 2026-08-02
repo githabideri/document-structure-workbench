@@ -49,6 +49,7 @@ urlpatterns = [
     path("guidelines/", views.guidelines, name="guidelines"),
 
     # REST API
+    path("api/v1/health/", api.api_health, name="api_health"),
     path("api/status/", api.api_status, name="api_status"),
     path("api/collections/", api.api_collections, name="api_collections"),
     path("api/collections/<int:collection_id>/", api.api_collection_detail, name="api_collection_detail"),

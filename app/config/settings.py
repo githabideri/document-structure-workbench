@@ -15,6 +15,7 @@ ALLOWED_HOSTS = os.environ.get(
 
 # API
 API_KEY = os.environ.get("DSW_API_KEY", "")
+RELEASE_FILE = os.environ.get("DSW_RELEASE_FILE", "")
 
 # Applications
 INSTALLED_APPS = [

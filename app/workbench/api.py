@@ -70,6 +70,43 @@ def _serialize_extraction(extraction, label):
 
 
 @require_http_methods(["GET"])
+def api_health(request):
+    """Minimal health endpoint — release SHA + database check.
+
+    Returns 200 with release SHA when healthy.
+    Returns 500 when release file is missing or database is unreachable.
+    """
+    from pathlib import Path
+    from django.db import connection
+
+    release_sha = None
+    release_file = Path(getattr(settings, "RELEASE_FILE", ""))
+    if release_file and release_file.exists():
+        release_sha = release_file.read_text().strip()
+
+    database_ok = False
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        database_ok = True
+    except Exception:
+        pass
+
+    if not release_sha or not database_ok:
+        return JsonResponse({
+            "status": "error",
+            "release": release_sha,
+            "database": "ok" if database_ok else "unreachable",
+        }, status=500)
+
+    return JsonResponse({
+        "status": "ok",
+        "release": release_sha,
+        "database": "ok",
+    })
+
+
+@require_http_methods(["GET"])
 def api_status(request):
     """API health check and summary."""
     return JsonResponse({

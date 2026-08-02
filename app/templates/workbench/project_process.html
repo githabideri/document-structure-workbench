@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static i18n %}
-{% block title %}{% blocktrans %}Upload Document — {{ collection.name }}{% endblocktrans %}{% endblock %}
+{% block title %}{% blocktrans with name=collection.name %}Upload Document — {{ name }}{% endblocktrans %}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -43,7 +43,7 @@
 
 {% block content %}
 <div class="upload-container">
-    <h2>{% blocktrans %}Upload Document — {{ collection.name }}{% endblocktrans %}</h2>
+    <h2>{% blocktrans with name=collection.name %}Upload Document — {{ name }}{% endblocktrans %}</h2>
 
     <div class="upload-form">
         <form method="post" enctype="multipart/form-data" id="upload-form">

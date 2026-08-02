@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static i18n %}
-{% block title %}{% blocktrans %}Job Status — {{ source_document.filename }}{% endblocktrans %}{% endblock %}
+{% block title %}{% blocktrans with filename=source_document.filename %}Job Status — {{ filename }}{% endblocktrans %}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -43,7 +43,7 @@
 
 {% block content %}
 <div class="job-container">
-    <h2>{% blocktrans %}Processing: {{ source_document.filename }}{% endblocktrans %}</h2>
+    <h2>{% blocktrans with filename=source_document.filename %}Processing: {{ filename }}{% endblocktrans %}</h2>
 
     {% include "workbench/_job_status_block.html" with source_document=source_document %}
 </div>

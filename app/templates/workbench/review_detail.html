@@ -61,14 +61,17 @@
         </div>
 
         <h4>{% trans "Technical Details" %}</h4>
-        <p><strong>{% trans "Candidate X was:" %}</strong> {{ existing_review.candidate_a_label }}</p>
-        <p><strong>{% trans "Candidate Y was:" %}</strong> {{ existing_review.candidate_b_label }}</p>
-
-        {% if candidate_a.teds_s is not None %}
-        <p><strong>Candidate X TEDS-S:</strong> {{ candidate_a.teds_s|floatformat:3 }}</p>
+        {% if existing_review.candidate_x %}
+        <p><strong>{% trans "Candidate X was:" %}</strong> {{ existing_review.candidate_x.extraction_run.profile }}</p>
+        {% if existing_review.candidate_x.teds_s is not None %}
+        <p><strong>Candidate X TEDS-S:</strong> {{ existing_review.candidate_x.teds_s|floatformat:3 }}</p>
         {% endif %}
-        {% if candidate_b.teds_s is not None %}
-        <p><strong>Candidate Y TEDS-S:</strong> {{ candidate_b.teds_s|floatformat:3 }}</p>
+        {% endif %}
+        {% if existing_review.candidate_y %}
+        <p><strong>{% trans "Candidate Y was:" %}</strong> {{ existing_review.candidate_y.extraction_run.profile }}</p>
+        {% if existing_review.candidate_y.teds_s is not None %}
+        <p><strong>Candidate Y TEDS-S:</strong> {{ existing_review.candidate_y.teds_s|floatformat:3 }}</p>
+        {% endif %}
         {% endif %}
 
         {% if existing_review.post_reveal_comment %}
@@ -89,7 +92,7 @@
 
     {% if not is_blinded %}
     <div class="reveal-section">
-        <p><strong>{% trans "Candidate X:" %}</strong> {{ label_a }} | <strong>{% trans "Candidate Y:" %}</strong> {{ label_b }}</p>
+        <p><strong>{% trans "Candidate X:" %}</strong> {{ candidate_x.extraction_run.profile }} | <strong>{% trans "Candidate Y:" %}</strong> {{ candidate_y.extraction_run.profile }}</p>
     </div>
     {% else %}
     <div class="blinded-notice">
@@ -99,24 +102,24 @@
 
     <div class="review-container">
         <div class="candidate-panel">
-            <h3>{% blocktrans %}Candidate {{ label_a }}{% endblocktrans %}</h3>
-            <p><strong>{% trans "Dimensions:" %}</strong> {{ candidate_a.rows }} × {{ candidate_a.columns }}</p>
-            {% if candidate_a.validation %}
-            <p><strong>{% trans "Warnings:" %}</strong> {{ candidate_a.validation|length }}</p>
+            <h3>{% trans "Candidate X" %}</h3>
+            <p><strong>{% trans "Dimensions:" %}</strong> {{ candidate_x.rows }} × {{ candidate_x.columns }}</p>
+            {% if candidate_x.validation %}
+            <p><strong>{% trans "Warnings:" %}</strong> {{ candidate_x.validation|length }}</p>
             {% endif %}
             <div class="table-render">
-                {{ candidate_a_html|safe }}
+                {{ candidate_x_html|safe }}
             </div>
         </div>
 
         <div class="candidate-panel">
-            <h3>{% blocktrans %}Candidate {{ label_b }}{% endblocktrans %}</h3>
-            <p><strong>{% trans "Dimensions:" %}</strong> {{ candidate_b.rows }} × {{ candidate_b.columns }}</p>
-            {% if candidate_b.validation %}
-            <p><strong>{% trans "Warnings:" %}</strong> {{ candidate_b.validation|length }}</p>
+            <h3>{% trans "Candidate Y" %}</h3>
+            <p><strong>{% trans "Dimensions:" %}</strong> {{ candidate_y.rows }} × {{ candidate_y.columns }}</p>
+            {% if candidate_y.validation %}
+            <p><strong>{% trans "Warnings:" %}</strong> {{ candidate_y.validation|length }}</p>
             {% endif %}
             <div class="table-render">
-                {{ candidate_b_html|safe }}
+                {{ candidate_y_html|safe }}
             </div>
         </div>
     </div>
@@ -126,31 +129,29 @@
 
         <form id="review-form" hx-post="{% url 'review_submit' task.id %}" hx-target="#review-result" hx-on::after-request="if(event.detail.successfulTarget && event.detail.successfulTarget.dataset.next) window.location.href='{% url 'review_detail' task.id %}'">
             {% csrf_token %}
-            <input type="hidden" name="candidate_a_is_standard" value="{{ candidate_a.extraction_run.profile == 'standard-docling' }}">
-
             <div class="score-section">
-                <h4>{% blocktrans %}Candidate {{ label_a }} — Structure{% endblocktrans %}</h4>
+                <h4>{% trans "Candidate X — Structure" %}</h4>
                 <div class="score-group">
-                    <input type="radio" name="candidate_a_score" id="a_score_3" value="3">
-                    <label for="a_score_3">{% trans "3 Correct" %}</label>
-                    <input type="radio" name="candidate_a_score" id="a_score_2" value="2">
-                    <label for="a_score_2">{% trans "2 Minor" %}</label>
-                    <input type="radio" name="candidate_a_score" id="a_score_1" value="1">
-                    <label for="a_score_1">{% trans "1 Major" %}</label>
-                    <input type="radio" name="candidate_a_score" id="a_score_0" value="0" checked>
-                    <label for="a_score_0">{% trans "0 Unusable" %}</label>
+                    <input type="radio" name="candidate_x_score" id="x_score_3" value="3">
+                    <label for="x_score_3">{% trans "3 Correct" %}</label>
+                    <input type="radio" name="candidate_x_score" id="x_score_2" value="2">
+                    <label for="x_score_2">{% trans "2 Minor" %}</label>
+                    <input type="radio" name="candidate_x_score" id="x_score_1" value="1">
+                    <label for="x_score_1">{% trans "1 Major" %}</label>
+                    <input type="radio" name="candidate_x_score" id="x_score_0" value="0" checked>
+                    <label for="x_score_0">{% trans "0 Unusable" %}</label>
                 </div>
 
-                <h4>{% blocktrans %}Candidate {{ label_b }} — Structure{% endblocktrans %}</h4>
+                <h4>{% trans "Candidate Y — Structure" %}</h4>
                 <div class="score-group">
-                    <input type="radio" name="candidate_b_score" id="b_score_3" value="3">
-                    <label for="b_score_3">{% trans "3 Correct" %}</label>
-                    <input type="radio" name="candidate_b_score" id="b_score_2" value="2">
-                    <label for="b_score_2">{% trans "2 Minor" %}</label>
-                    <input type="radio" name="candidate_b_score" id="b_score_1" value="1">
-                    <label for="b_score_1">{% trans "1 Major" %}</label>
-                    <input type="radio" name="candidate_b_score" id="b_score_0" value="0" checked>
-                    <label for="b_score_0">{% trans "0 Unusable" %}</label>
+                    <input type="radio" name="candidate_y_score" id="y_score_3" value="3">
+                    <label for="y_score_3">{% trans "3 Correct" %}</label>
+                    <input type="radio" name="candidate_y_score" id="y_score_2" value="2">
+                    <label for="y_score_2">{% trans "2 Minor" %}</label>
+                    <input type="radio" name="candidate_y_score" id="y_score_1" value="1">
+                    <label for="y_score_1">{% trans "1 Major" %}</label>
+                    <input type="radio" name="candidate_y_score" id="y_score_0" value="0" checked>
+                    <label for="y_score_0">{% trans "0 Unusable" %}</label>
                 </div>
             </div>
 
@@ -174,10 +175,10 @@
 
             <h4>{% trans "Preferred Result" %}</h4>
             <div class="score-group">
-                <input type="radio" name="preferred_result" id="pref_a" value="candidate_a">
-                <label for="pref_a">{% blocktrans %}Candidate {{ label_a }}{% endblocktrans %}</label>
-                <input type="radio" name="preferred_result" id="pref_b" value="candidate_b">
-                <label for="pref_b">{% blocktrans %}Candidate {{ label_b }}{% endblocktrans %}</label>
+                <input type="radio" name="preferred_result" id="pref_x" value="candidate_x">
+                <label for="pref_x">{% trans "Candidate X" %}</label>
+                <input type="radio" name="preferred_result" id="pref_y" value="candidate_y">
+                <label for="pref_y">{% trans "Candidate Y" %}</label>
                 <input type="radio" name="preferred_result" id="pref_eq" value="equivalent" checked>
                 <label for="pref_eq">{% trans "Equivalent" %}</label>
                 <input type="radio" name="preferred_result" id="pref_neither" value="neither">

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% load static i18n %}
+{% block title %}{% blocktrans %}Review Result: {{ task.table_candidate.document.external_id }}{% endblocktrans %}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .review-container { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+    .candidate-panel { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+    .candidate-panel h3 { margin-top: 0; }
+    .table-render { overflow-x: auto; margin: 1rem 0; }
+    .table-render table { border-collapse: collapse; width: 100%; }
+    .table-render td, .table-render th { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
+    .table-render th { background: #f0f0f0; font-weight: bold; }
+    .source-area { text-align: center; margin-bottom: 1rem; }
+    .source-area img { max-width: 100%; border: 1px solid #ddd; }
+    .reveal-section { background: #e8f5e9; padding: 1rem; border-radius: 8px; margin-top: 1rem; }
+    .gt-section { background: #e3f2fd; padding: 1rem; border-radius: 8px; margin-top: 1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="review-page">
+    <div class="source-area">
+        <h2>{% blocktrans %}{{ task.table_candidate.document.external_id }} — Page {{ task.table_candidate.page.page_number }} — {{ task.table_candidate.stable_table_id }}{% endblocktrans %}</h2>
+        {% if task.table_candidate.page_id %}
+        {% with page=task.table_candidate.page %}
+        {% if page.image_path %}
+        <img src="{% url 'page_image' page.id %}" alt="{% trans 'Source page' %}" style="max-width:600px;">
+        {% endif %}
+        {% if task.table_candidate.crop_path %}
+        <img src="{% url 'table_crop' task.table_candidate.id %}" alt="{% trans 'Table crop' %}" style="max-width:400px; margin-top:1rem;">
+        {% endif %}
+        {% endwith %}
+        {% endif %}
+    </div>
+
+    <div class="reveal-section">
+        <h3>{% trans "Review Submitted" %}</h3>
+        <p><strong>{% trans "Your preference:" %}</strong> {{ review.get_preferred_result_display }}</p>
+        <p><strong>{% trans "Confidence:" %}</strong> {{ review.get_confidence_display }}</p>
+        {% if review.comment %}<p><strong>{% trans "Comment:" %}</strong> {{ review.comment }}</p>{% endif %}
+
+        <h4>{% trans "Model Identities Revealed" %}</h4>
+        {% if review.candidate_x %}
+        <p><strong>{% trans "Candidate X was:" %}</strong> {{ review.candidate_x.extraction_run.profile }}</p>
+        {% if review.candidate_x.teds_s is not None %}
+        <p><strong>Candidate X TEDS-S:</strong> {{ review.candidate_x.teds_s|floatformat:3 }}</p>
+        {% endif %}
+        {% endif %}
+        {% if review.candidate_y %}
+        <p><strong>{% trans "Candidate Y was:" %}</strong> {{ review.candidate_y.extraction_run.profile }}</p>
+        {% if review.candidate_y.teds_s is not None %}
+        <p><strong>Candidate Y TEDS-S:</strong> {{ review.candidate_y.teds_s|floatformat:3 }}</p>
+        {% endif %}
+        {% endif %}
+
+        {% if has_gt %}
+        <div class="gt-section">
+            <h4>{% trans "Ground Truth" %}</h4>
+            <div class="table-render">{{ gt_html|safe }}</div>
+            {% if gt_extraction %}
+            <p><strong>{% trans "Rows:" %}</strong> {{ gt_extraction.rows }}, <strong>{% trans "Columns:" %}</strong> {{ gt_extraction.columns }}</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if review.post_reveal_comment %}
+        <p><strong>{% trans "Your post-reveal note:" %}</strong> {{ review.post_reveal_comment }}</p>
+        {% else %}
+        <form method="post" action="{% url 'review_post_reveal' task.id %}" hx-post="{% url 'review_post_reveal' task.id %}" hx-target="#post-reveal-result">
+            {% csrf_token %}
+            <label for="post_reveal_comment">{% trans "Add a post-reveal note:" %}</label>
+            <textarea name="post_reveal_comment" id="post_reveal_comment" rows="3" style="width:100%"></textarea>
+            <button type="submit" class="btn btn-secondary" style="margin-top:0.5rem">{% trans "Save Note" %}</button>
+            <div id="post-reveal-result"></div>
+        </form>
+        {% endif %}
+    </div>
+
+    <div class="actions" style="margin-top:1rem">
+        <a href="{% url 'review_list' %}" class="btn btn-secondary">{% trans "Back to Reviews" %}</a>
+        <a href="{% url 'review_next' %}" class="btn btn-primary">{% trans "Next Review" %}</a>
+    </div>
+</div>
+{% endblock %}

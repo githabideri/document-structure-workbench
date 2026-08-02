@@ -18,7 +18,7 @@
                     <a href="{% url 'review_list' %}" class="{% if 'review' in request.resolver_match.url_name %}active{% endif %}">{% trans "My Reviews" %}</a>
                     <a href="{% url 'collection_list' %}">{% trans "Projects" %}</a>
                     <a href="{% url 'guidelines' %}">{% trans "Guidelines" %}</a>
-                    {% if user.groups.name == 'Curator' or user.groups.name == 'Administrator' %}
+                    {% if is_curator %}
                     <a href="{% url 'curator_dashboard' %}">{% trans "Curator" %}</a>
                     {% endif %}
                     <a href="{% url 'user_settings' %}" title="{% trans 'Settings' %}">⚙</a>

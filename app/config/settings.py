@@ -57,6 +57,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "django.template.context_processors.i18n",
                 "workbench.context_processors.release_info",
+                "workbench.context_processors.user_roles"",
             ],
         },
     },

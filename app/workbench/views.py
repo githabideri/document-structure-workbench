@@ -310,8 +310,8 @@ def review_submit(request, task_id):
             candidate_x_score=int(request.POST.get("candidate_x_score", 0)),
             candidate_y_score=int(request.POST.get("candidate_y_score", 0)),
             preferred_result=request.POST.get("preferred_result", "equivalent"),
-            structure_errors=json.loads(request.POST.get("structure_errors", "[]")),
-            text_errors=json.loads(request.POST.get("text_errors", "[]")),
+            structure_errors=request.POST.getlist("structure_errors"),
+            text_errors=request.POST.getlist("text_errors"),
             comment=request.POST.get("comment", ""),
             confidence=request.POST.get("confidence", "medium"),
         )
@@ -323,7 +323,7 @@ def review_submit(request, task_id):
     log_audit(request, "review_created", "Review", review.id)
 
     messages.success(request, _("Review submitted successfully."))
-    return redirect("review_reveal", pk=task.pk)
+    return redirect("review_reveal", task_id=task.pk)
 
 
 @login_required
@@ -353,6 +353,7 @@ def review_reveal(request, task_id):
         "review": review,
         "gt_extraction": gt_extraction,
         "gt_html": bleach.clean(gt_extraction.raw_html, tags=allowed_tags, attributes=allowed_attrs) if gt_extraction and gt_extraction.raw_html else "",
+        "has_gt": gt_extraction is not None and gt_extraction.raw_html,
         "is_curator": is_curator(request.user),
     })
 

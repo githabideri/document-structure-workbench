@@ -123,7 +123,7 @@ CSRF_COOKIE_SECURE = os.environ.get("DSW_SECURE_COOKIES", "false").lower() == "t
 SESSION_COOKIE_SECURE = os.environ.get("DSW_SECURE_COOKIES", "false").lower() == "true"
 
 # Paths (overridable for deployment)
-ARTIFACTS_BASE_DIR = Path(os.environ.get("DSW_ARTIFACTS_DIR", "/var/lib/dsw/artifacts"))
+ARTIFACTS_BASE_DIR = Path(os.environ.get("DSW_ARTIFACTS_DIR", os.environ.get("DSW_ARTIFACTS_ROOT", "/var/lib/dsw/artifacts")))
 IMPORTS_BASE_DIR = Path(os.environ.get("DSW_IMPORTS_DIR", "/var/lib/dsw/imports"))
 
 # Logging

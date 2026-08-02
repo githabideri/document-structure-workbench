@@ -429,19 +429,100 @@ class ApiToken(models.Model):
 
     @staticmethod
     def generate_token():
-        """Generate a random 48-char token and return (raw, hash)."""
+        """Generate a random 48-char token. Returns raw string."""
         import secrets
-        from django.utils.crypto import get_random_string
         raw = secrets.token_urlsafe(36)  # ~48 chars
-        return raw, raw  # hash later in save()
+        return raw
+
+    @classmethod
+    def hash_token(cls, raw_token):
+        """Hash a raw token for storage."""
+        import hashlib
+        return hashlib.sha256(raw_token.encode()).hexdigest()
 
     @classmethod
     def verify_token(cls, raw_token):
         """Look up a token by its hash. Returns the token or None."""
+        hashed = cls.hash_token(raw_token)
         try:
-            return cls.objects.get(token_hash=raw_token)
+            return cls.objects.get(token_hash=hashed)
         except cls.DoesNotExist:
             return None
+
+    def is_valid(self):
+        """Check if this token is usable (not expired, not revoked, owner active)."""
+        from django.utils import timezone
+        if self.revoked_at:
+            return False
+        if self.expires_at and self.expires_at < timezone.now():
+            return False
+        if self.user_id:
+            try:
+                return self.user.is_active
+            except User.DoesNotExist:
+                return False
+        if self.service_account_id:
+            try:
+                return self.service_account.is_active
+            except ServiceAccount.DoesNotExist:
+                return False
+        return True
+
+    def touch(self):
+        """Update last_used_at (call sparingly to avoid excessive writes)."""
+        from django.utils import timezone
+        self.last_used_at = timezone.now()
+        self.save(update_fields=["last_used_at"])
+
+
+# ---------------------------------------------------------------------------
+# Project membership & authorization
+# ---------------------------------------------------------------------------
+
+class ProjectMembership(models.Model):
+    """Membership of a user in a project."""
+
+    ROLE_CHOICES = [
+        ("owner", "Owner"),
+        ("editor", "Editor"),
+        ("reviewer", "Reviewer"),
+        ("viewer", "Viewer"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    project = models.ForeignKey(
+        "Collection", on_delete=models.CASCADE,
+        related_name="memberships",
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name="project_memberships",
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="viewer")
+    invited_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="invited_memberships",
+    )
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ["project", "user"]
+        ordering = ["-joined_at"]
+
+    def __str__(self):
+        return f"{self.user.get_username()} @ {self.project.name} ({self.role})"
+
+    @property
+    def is_owner(self):
+        return self.role == "owner"
+
+    @property
+    def can_edit(self):
+        return self.role in ("owner", "editor")
+
+    @property
+    def can_review(self):
+        return self.role in ("owner", "editor", "reviewer")
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +610,8 @@ class ProcessingJob(models.Model):
         ProcessingPreset, on_delete=models.PROTECT,
         related_name="processing_jobs",
     )
+    # Snapshot of preset config at job creation time
+    preset_snapshot = JSONField(default=dict, blank=True)
     state = models.CharField(max_length=20, choices=JOB_STATES, default="queued")
     external_job_id = models.CharField(max_length=200, blank=True)
     processor = models.CharField(max_length=50, blank=True)
@@ -546,8 +629,50 @@ class ProcessingJob(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
+    # Allowed state transitions
+    _TRANSITIONS = {
+        "queued": ["submitting", "cancelled"],
+        "submitting": ["processing", "failed", "cancelled"],
+        "processing": ["importing", "failed", "cancelled"],
+        "importing": ["completed", "partial", "failed"],
+        "completed": [],
+        "partial": [],
+        "failed": [],
+        "cancelled": [],
+    }
+
     def __str__(self):
         return f"Job {self.id}: {self.source_document.filename} ({self.state})"
+
+    def transition_to(self, new_state):
+        """Transition to a new state, validating the transition is allowed."""
+        allowed = self._TRANSITIONS.get(self.state, [])
+        if new_state not in allowed:
+            raise ValidationError(
+                f"Cannot transition from '{self.state}' to '{new_state}'. "
+                f"Allowed: {allowed}"
+            )
+        old_state = self.state
+        self.state = new_state
+        from django.utils import timezone
+        if new_state in ("completed", "partial", "failed", "cancelled"):
+            self.finished_at = timezone.now()
+        if new_state == "submitting":
+            self.started_at = timezone.now()
+        self.save(update_fields=["state", "started_at", "finished_at"])
+        return old_state
+
+    def capture_preset_snapshot(self):
+        """Capture a snapshot of the current preset configuration."""
+        self.preset_snapshot = {
+            "slug": self.preset.slug,
+            "name": self.preset.name,
+            "profile_a_enabled": self.preset.profile_a_enabled,
+            "profile_b_enabled": self.preset.profile_b_enabled,
+            "generate_crops": self.preset.generate_crops,
+            "create_review_tasks": self.preset.create_review_tasks,
+        }
+        self.save(update_fields=["preset_snapshot"])
 
 
 class ProcessingArtifact(models.Model):
@@ -577,6 +702,19 @@ class ProcessingArtifact(models.Model):
 
     class Meta:
         ordering = ["job", "page_number", "region_id"]
+
+    def clean(self):
+        super().clean()
+        # File paths must be application-controlled relative identifiers,
+        # not arbitrary paths from HTTP/API input
+        if self.file_path:
+            import os
+            # Normalize and reject absolute paths or path traversal
+            normalized = os.path.normpath(self.file_path)
+            if normalized.startswith("/") or ".." in normalized.split(os.sep):
+                raise ValidationError({
+                    "file_path": "Artifact paths must be relative, application-controlled identifiers, not absolute paths or paths containing '..'."
+                })
 
     def __str__(self):
         return f"{self.get_artifact_type_display()} - Job {self.job_id}"
@@ -620,6 +758,22 @@ class PageRegion(models.Model):
 
     class Meta:
         ordering = ["source_document", "page_number", "top", "left"]
+
+    def clean(self):
+        super().clean()
+        # Validate normalized coordinates: 0 <= left < right <= 1, 0 <= top < bottom <= 1
+        if self.left is not None and self.right is not None:
+            if not (0 <= self.left < self.right <= 1):
+                raise ValidationError({
+                    "left": "left must be >= 0 and < right",
+                    "right": "right must be > left and <= 1",
+                })
+        if self.top is not None and self.bottom is not None:
+            if not (0 <= self.top < self.bottom <= 1):
+                raise ValidationError({
+                    "top": "top must be >= 0 and < bottom",
+                    "bottom": "bottom must be > top and <= 1",
+                })
 
     def __str__(self):
         return f"{self.get_region_type_display()} - Page {self.page_number}"

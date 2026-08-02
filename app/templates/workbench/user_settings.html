@@ -89,6 +89,7 @@
                     <th>{% trans "Scopes" %}</th>
                     <th>{% trans "Created" %}</th>
                     <th>{% trans "Status" %}</th>
+                    <th>{% trans "Actions" %}</th>
                 </tr>
             </thead>
             <tbody>
@@ -109,6 +110,16 @@
                         <span class="badge badge-warning">{% trans "Expired" %}</span>
                         {% else %}
                         <span class="badge badge-success">{% trans "Active" %}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not token.revoked_at %}
+                        <form method="post" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="revoke_api_token">
+                            <input type="hidden" name="token_id" value="{{ token.pk }}">
+                            <button type="submit" class="btn btn-danger btn-sm">{% trans "Revoke" %}</button>
+                        </form>
                         {% endif %}
                     </td>
                 </tr>

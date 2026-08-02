@@ -9,7 +9,10 @@ from workbench.models import UserPreferences
 
 
 class UserLanguageMiddleware:
-    """Apply saved UI language for authenticated users."""
+    """Apply saved UI language for authenticated users.
+
+    Also sets Content-Language header on all responses for authenticated users.
+    """
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -22,4 +25,6 @@ class UserLanguageMiddleware:
                 translation.activate(lang)
                 request.LANGUAGE_CODE = translation.get_language()
         response = self.get_response(request)
+        # Set Content-Language header
+        response["Content-Language"] = translation.get_language()
         return response

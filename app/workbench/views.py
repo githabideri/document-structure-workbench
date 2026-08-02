@@ -619,7 +619,7 @@ def user_settings(request):
                     user=request.user,
                     name=token_name,
                     token_prefix=raw_token[:8],
-                    token_hash=raw_token,
+                    token_hash=ApiToken.hash_token(raw_token),
                     scopes=["projects:read", "documents:read", "tasks:read",
                             "reviews:write", "statistics:read"],
                 )
@@ -629,6 +629,18 @@ def user_settings(request):
                     f"Token created: {raw_token}. Copy it now — it won't be shown again.",
                 )
 
+        elif action == "revoke_api_token":
+            token_id = request.POST.get("token_id")
+            token = ApiToken.objects.filter(user=request.user, pk=token_id).first()
+            if token:
+                from django.utils import timezone
+                token.revoked_at = timezone.now()
+                token.save(update_fields=["revoked_at"])
+                from django.contrib import messages
+                messages.success(request, "Token revoked.")
+            else:
+                from django.contrib import messages
+                messages.error(request, "Token not found.")
         elif action == "change_password":
             old_password = request.POST.get("old_password", "")
             new_password = request.POST.get("new_password", "")

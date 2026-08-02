@@ -1,4 +1,4 @@
-"""URL configuration for Archive Structure Workbench."""
+"""URL configuration for Document Structure Workbench."""
 from django.contrib import admin
 from django.urls import path
 from django.contrib.auth import views as auth_views
@@ -15,7 +15,7 @@ urlpatterns = [
     # Dashboard
     path("", views.dashboard, name="dashboard"),
 
-    # Collections
+    # Collections (legacy, kept for DP-Bench review)
     path("collections/", views.collection_list, name="collection_list"),
     path("collections/<int:collection_id>/", views.collection_detail, name="collection_detail"),
 
@@ -51,17 +51,19 @@ urlpatterns = [
     # User Settings
     path("settings/", views.user_settings, name="user_settings"),
 
-    # REST API
+    # REST API v1 (secure, token-authenticated)
     path("api/v1/health/", api.api_health, name="api_health"),
-    path("api/status/", api.api_status, name="api_status"),
-    path("api/collections/", api.api_collections, name="api_collections"),
-    path("api/collections/<int:collection_id>/", api.api_collection_detail, name="api_collection_detail"),
-    path("api/tasks/", api.api_tasks, name="api_tasks"),
-    path("api/tasks/<int:task_id>/", api.api_task_detail, name="api_task_detail"),
-    path("api/tasks/<int:task_id>/submit/", api.api_task_submit, name="api_task_submit"),
-    path("api/tasks/<int:task_id>/skip/", api.api_task_skip, name="api_task_skip"),
-    path("api/tasks/<int:task_id>/flag-expert/", api.api_task_flag_expert, name="api_task_flag_expert"),
-    path("api/statistics/", api.api_statistics, name="api_statistics"),
+    path("api/v1/me/", api.api_me, name="api_me"),
+    path("api/v1/projects/", api.api_projects, name="api_projects"),
+    path("api/v1/projects/<int:project_id>/", api.api_project_detail, name="api_project_detail"),
+    path("api/v1/projects/<int:project_id>/documents/", api.api_documents, name="api_documents"),
+    path("api/v1/projects/<int:project_id>/upload/", api.api_upload_document, name="api_upload_document"),
+    path("api/v1/presets/", api.api_presets, name="api_presets"),
+    path("api/v1/jobs/<int:job_id>/", api.api_job_detail, name="api_job_detail"),
+    path("api/v1/tasks/", api.api_tasks, name="api_tasks"),
+    path("api/v1/tasks/<int:task_id>/", api.api_task_detail, name="api_task_detail"),
+    path("api/v1/tasks/<int:task_id>/submit/", api.api_task_submit, name="api_task_submit"),
+    path("api/v1/statistics/", api.api_statistics, name="api_statistics"),
 
     # Static assets
     path("static/htmx.min.js", views.serve_htmx, name="serve_htmx"),

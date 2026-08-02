@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Document Structure Workbench 0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-02 18:40+0000\n"
+"POT-Creation-Date: 2026-08-02 19:12+0000\n"
 "PO-Revision-Date: 2026-08-02 18:40+0000\n"
 "Last-Translator: Document Structure Workbench Team\n"
 "Language-Team: German\n"
@@ -110,6 +110,7 @@ msgstr "Alle Bewertungen anzeigen"
 #, python-format
 msgid "Review: %(document.external_id)s - %(table_candidate.stable_table_id)s"
 msgstr "Bewertung: %(document.external_id)s - %(table_candidate.stable_table_id)s"
+"Bewertung: %(document.external_id)s - %(table_candidate.stable_table_id)s"
 
 #: app/templates/workbench/review_detail.html:38
 #, python-format
@@ -386,7 +387,7 @@ msgstr "Einführende Erklärungen anzeigen"
 
 #: app/templates/workbench/user_settings.html:45
 msgid "Display plain-language explanations alongside technical details."
-msgstr ""
+msgstr "Einfache, verständliche Erklärungen neben technischen Details anzeigen."
 "Einfache, verständliche Erklärungen neben technischen Details anzeigen."
 
 #: app/templates/workbench/user_settings.html:48
@@ -437,26 +438,38 @@ msgstr "Erstellt"
 msgid "Status"
 msgstr "Status"
 
-#: app/templates/workbench/user_settings.html:107
+#: app/templates/workbench/user_settings.html:92
+#, fuzzy
+#| msgid "Active"
+msgid "Actions"
+msgstr "Aktionen"
+
+#: app/templates/workbench/user_settings.html:108
 msgid "Revoked"
 msgstr "Widerrufen"
 
-#: app/templates/workbench/user_settings.html:109
+#: app/templates/workbench/user_settings.html:110
 msgid "Expired"
 msgstr "Abgelaufen"
 
-#: app/templates/workbench/user_settings.html:111
+#: app/templates/workbench/user_settings.html:112
 msgid "Active"
 msgstr "Aktiv"
 
-#: app/templates/workbench/user_settings.html:125
+#: app/templates/workbench/user_settings.html:121
+#, fuzzy
+#| msgid "Revoked"
+msgid "Revoke"
+msgstr "Widerrufen"
+
+#: app/templates/workbench/user_settings.html:136
 msgid "Token name"
 msgstr "Token-Name"
 
-#: app/templates/workbench/user_settings.html:127
+#: app/templates/workbench/user_settings.html:138
 msgid "e.g. deployment-tool"
 msgstr "z. B. deployment-tool"
 
-#: app/templates/workbench/user_settings.html:130
+#: app/templates/workbench/user_settings.html:141
 msgid "Create token"
 msgstr "Token erstellen"

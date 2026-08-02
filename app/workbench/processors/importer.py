@@ -2,19 +2,26 @@
 Result importer — takes ProcessorResult and creates database records.
 
 Creates:
-    Document (processed)
+    Document (processed, linked to SourceDocument)
     Page (with image paths, dimensions, text)
-    PageRegion (with normalized coordinates)
+    PageRegion (with normalized coordinates 0-1)
     TableCandidate (with crop paths)
     ExtractionRun (per profile)
     TableExtraction (per table, per profile)
     ProcessingArtifact (for layout JSON, page text, etc.)
+
+Key rules:
+    - Bounding boxes are normalized to 0-1 using real page dimensions
+    - Page text is stored in full (no truncation)
+    - full_clean() is called before saving to enforce model validation
+    - Duplicate processed Documents are not created on re-import
 """
 import json
 import logging
 from pathlib import Path
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from ..models import (
@@ -58,14 +65,14 @@ class ResultImporter:
         }
 
         with transaction.atomic():
-            # Create processed Document linked to SourceDocument
-            document = self._create_document()
+            # Create or get processed Document linked to SourceDocument
+            document = self._get_or_create_document(result)
 
             # Import pages
             counts["pages"] = self._import_pages(document, result)
 
             # Import regions
-            counts["regions"] = self._import_regions(result)
+            counts["regions"] = self._import_regions(result, document)
 
             # Import tables and extractions
             counts["tables"], counts["extractions"] = self._import_tables(document, result)
@@ -84,11 +91,20 @@ class ResultImporter:
         )
         return counts
 
-    def _create_document(self) -> Document:
-        """Create the processed Document linked to SourceDocument."""
-        # Check if a processed document already exists
-        if hasattr(self.source_doc, "processed_document"):
-            return self.source_doc.processed_document
+    def _get_or_create_document(self, result: ProcessorResult) -> Document:
+        """
+        Get or create the processed Document linked to SourceDocument.
+
+        Uses SourceDocument.processed_document FK to prevent duplicates.
+        """
+        # Check if a processed document already exists via FK
+        if hasattr(self.source_doc, "processed_document") and self.source_doc.processed_document:
+            doc = self.source_doc.processed_document
+            # Update page_count if we have better data
+            if result.pages_processed and doc.page_count != result.pages_processed:
+                doc.page_count = result.pages_processed
+                doc.save(update_fields=["page_count"])
+            return doc
 
         # Create Document in the collection
         document = Document.objects.create(
@@ -96,19 +112,20 @@ class ResultImporter:
             external_id=self.source_doc.filename.replace(".pdf", ""),
             filename=self.source_doc.filename,
             sha256=self.source_doc.sha256,
-            page_count=self.job.pages_processed or 0,
+            page_count=result.pages_processed or 0,
             source_path=self.source_doc.file_path,
         )
 
-        # Link SourceDocument to Document
-        # Note: SourceDocument doesn't have a processed_document FK yet —
-        # that's Section 6. For now, we link via collection + filename.
+        # Link SourceDocument to Document via FK
+        self.source_doc.processed_document = document
+        self.source_doc.save(update_fields=["processed_document"])
+
         return document
 
     def _import_pages(self, document: Document, result: ProcessorResult) -> int:
-        """Import page records with image paths and text."""
+        """Import page records with image paths, dimensions, and full text."""
         count = 0
-        for page_num, text in result.page_texts.items():
+        for page_num in range(1, result.pages_processed + 1):
             page, created = Page.objects.get_or_create(
                 document=document,
                 page_number=page_num,
@@ -119,36 +136,58 @@ class ResultImporter:
             if created:
                 count += 1
 
-            # Store page text as artifact
+            # Store page text as artifact (FULL text, no truncation)
+            text = result.page_texts.get(page_num, "")
             if text:
-                ProcessingArtifact.objects.get_or_create(
+                ProcessingArtifact.objects.update_or_create(
                     job=self.job,
                     artifact_type="page_text",
                     page_number=page_num,
                     defaults={
-                        "data": {"text": text[:10000]},  # Truncate for storage
+                        "data": {"text": text},  # Full text — no truncation
                     },
                 )
 
         return count
 
-    def _import_regions(self, result: ProcessorResult) -> int:
-        """Import page regions with normalized coordinates."""
+    def _import_regions(self, result: ProcessorResult, document: Document) -> int:
+        """Import page regions with normalized coordinates (0-1 range)."""
         count = 0
+        page_dimensions = result.processor_metadata.get("page_dimensions", {})
+
         for region in result.regions:
-            # Normalize bbox: Docling uses [x0, y0, x1, y1] in pixels
-            # We need normalized [left, top, right, bottom] in 0-1 range
+            page_num = region["page_number"]
             bbox = region.get("bbox", [0, 0, 0, 0])
-            if len(bbox) == 4:
-                left, top, right, bottom = self._normalize_bbox(bbox)
-            else:
-                left, top, right, bottom = 0, 0, 0, 0
+
+            # Normalize bbox using real page dimensions
+            left, top, right, bottom = self._normalize_bbox(bbox, page_num, page_dimensions)
+
+            # Validate before saving
+            try:
+                PageRegion(
+                    source_document=self.source_doc,
+                    job=self.job,
+                    page_number=page_num,
+                    region_type=region.get("region_type", "text")[:50],
+                    left=left,
+                    top=top,
+                    right=right,
+                    bottom=bottom,
+                    confidence=region.get("confidence"),
+                    metadata=region.get("metadata", {}),
+                ).full_clean()
+            except ValidationError as e:
+                logger.warning(
+                    "Skipping invalid region on page %d: %s",
+                    page_num, e.message,
+                )
+                continue
 
             PageRegion.objects.create(
                 source_document=self.source_doc,
                 job=self.job,
-                page_number=region["page_number"],
-                region_type=region.get("region_type", "text"),
+                page_number=page_num,
+                region_type=region.get("region_type", "text")[:50],
                 left=left,
                 top=top,
                 right=right,
@@ -160,7 +199,7 @@ class ResultImporter:
 
         return count
 
-    def _import_tables(self, document: Document, result: ProcessorResult):
+    def _import_tables(self, document: Document, result: ProcessorResult) -> tuple:
         """Import table candidates and extractions."""
         tables_count = 0
         extractions_count = 0
@@ -183,7 +222,7 @@ class ResultImporter:
             if created:
                 tables_count += 1
 
-            # Create ExtractionRun for each profile
+            # Create ExtractionRun for standard profile
             profile = "standard-docling"
             run, _ = ExtractionRun.objects.get_or_create(
                 document=document,
@@ -198,7 +237,7 @@ class ResultImporter:
             )
 
             # Create TableExtraction
-            extraction = TableExtraction.objects.get_or_create(
+            extraction, created = TableExtraction.objects.get_or_create(
                 table_candidate=table,
                 extraction_run=run,
                 defaults={
@@ -208,8 +247,9 @@ class ResultImporter:
                     "raw_otsl": table_data.get("otsl", ""),
                     "status": "success" if table_data.get("html") else "missing",
                 },
-            )[0]
-            extractions_count += 1
+            )
+            if created:
+                extractions_count += 1
 
         return tables_count, extractions_count
 
@@ -228,31 +268,48 @@ class ResultImporter:
         return count
 
     @staticmethod
-    def _normalize_bbox(bbox: list) -> tuple:
+    def _normalize_bbox(bbox: list, page_num: int, page_dimensions: dict) -> tuple:
         """
         Normalize bounding box to 0-1 range.
 
-        Input: [x0, y0, x1, y1] in pixels (Docling format)
-        Output: (left, top, right, bottom) normalized to 0-1
+        Input: [x0, y0, x1, y1] — may be pixels or already normalized
+        Output: (left, top, right, bottom) in 0-1 range
 
-        For the MVP, we assume bbox is already normalized (0-1 range).
-        In production, this would use page dimensions from the processor.
+        Uses actual page dimensions from Docling when available.
         """
         if len(bbox) != 4:
-            return (0, 0, 0, 0)
+            return (0.0, 0.0, 0.0, 0.0)
 
-        left, top, right, bottom = bbox
+        x0, y0, x1, y1 = bbox
 
-        # If values are > 1, assume pixels and normalize later
-        # For now, pass through as-is (assumes normalized input)
-        if left > 1 or top > 1 or right > 1 or bottom > 1:
-            # Placeholder: will be normalized when page dimensions are known
-            pass
+        # Check if bbox is already normalized (all values in 0-1)
+        if all(0 <= v <= 1 for v in bbox):
+            left, top, right, bottom = x0, y0, x1, y1
+        else:
+            # Pixel coordinates — normalize using page dimensions
+            dims = page_dimensions.get(page_num, {})
+            width = dims.get("width", 1)
+            height = dims.get("height", 1)
+
+            if width > 0 and height > 0:
+                left = max(0.0, min(1.0, x0 / width))
+                top = max(0.0, min(1.0, y0 / height))
+                right = max(0.0, min(1.0, x1 / width))
+                bottom = max(0.0, min(1.0, y1 / height))
+            else:
+                # No dimensions available — assume already normalized
+                left, top, right, bottom = x0, y0, x1, y1
 
         # Ensure left < right, top < bottom
         if left > right:
             left, right = right, left
         if top > bottom:
             top, bottom = bottom, top
+
+        # Clamp to 0-1
+        left = max(0.0, min(1.0, left))
+        top = max(0.0, min(1.0, top))
+        right = max(0.0, min(1.0, right))
+        bottom = max(0.0, min(1.0, bottom))
 
         return (left, top, right, bottom)

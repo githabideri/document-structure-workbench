@@ -134,39 +134,12 @@ def require_scope(*required_scopes):
 
 
 # ---------------------------------------------------------------------------
-# Project membership helpers
+# Project access — use ProjectAccessPolicy (no legacy helpers)
 # ---------------------------------------------------------------------------
 
-def _get_user_membership(token, project_id):
-    """Get the user's membership in a project, or None."""
-    if token.user_id:
-        return ProjectMembership.objects.filter(
-            project_id=project_id, user_id=token.user_id
-        ).first()
-    # Service accounts can access any project they have a token scoped to
-    if token.project_id:
-        if token.project_id == project_id:
-            return type("FakeMembership", (), {
-                "role": "editor",
-                "is_owner": True,
-                "can_edit": True,
-                "can_review": True,
-            })()
-    return None
-
-
-def _check_project_access(token, project_id, min_role="viewer"):
-    """Check if the token owner can access the project."""
-    # Service accounts scoped to the project can always access
-    if token.service_account_id and token.project_id == project_id:
-        return True
-    if token.user_id:
-        membership = _get_user_membership(token, project_id)
-        if membership is None:
-            return False
-        role_order = {"viewer": 0, "reviewer": 1, "editor": 2, "owner": 3}
-        return role_order.get(membership.role, 0) >= role_order.get(min_role, 0)
-    return False
+# All project access checks use ProjectAccessPolicy.
+# Legacy _get_user_membership and _check_project_access have been removed.
+# See workbench/policy.py for the centralized authorization logic.
 
 
 # ---------------------------------------------------------------------------
@@ -337,11 +310,10 @@ def api_projects(request):
 def api_project_detail(request, project_id):
     """Get project detail with membership info."""
     token = request._api_token  # noqa: SLF001
-
-    if not _check_project_access(token, project_id):
-        return JsonResponse({"error": "Access denied"}, status=403)
-
     project = get_object_or_404(Collection, pk=project_id)
+    policy = ProjectAccessPolicy(token=token)
+    if not policy.can_view(project):
+        return JsonResponse({"error": "Access denied"}, status=403)
 
     result = {
         "id": project.pk,
@@ -373,11 +345,10 @@ def api_project_detail(request, project_id):
 def api_documents(request, project_id):
     """List documents in a project."""
     token = request._api_token  # noqa: SLF001
-
-    if not _check_project_access(token, project_id):
-        return JsonResponse({"error": "Access denied"}, status=403)
-
     project = get_object_or_404(Collection, pk=project_id)
+    policy = ProjectAccessPolicy(token=token)
+    if not policy.can_view(project):
+        return JsonResponse({"error": "Access denied"}, status=403)
 
     # Include both legacy Document and new SourceDocument
     docs = []
@@ -472,8 +443,8 @@ def api_job_detail(request, job_id):
     job = get_object_or_404(ProcessingJob, pk=job_id)
 
     # Check access via source document's collection
-    project_id = job.source_document.collection_id
-    if project_id and not _check_project_access(token, project_id):
+    policy = ProjectAccessPolicy(token=token)
+    if not policy.can_access_job(job):
         return JsonResponse({"error": "Access denied"}, status=403)
 
     result = {

@@ -120,8 +120,7 @@ class Command(BaseCommand):
         logger.info("Processing job %d: %s", job.pk, job.source_document.filename)
 
         try:
-            # 1. Submit to Docling
-            job.transition_to("submitting")
+            # 1. Submit to Docling (state already "submitting" from claim)
             external_job_id = self.processor.submit(
                 job.source_document,
                 job.preset_snapshot or {},

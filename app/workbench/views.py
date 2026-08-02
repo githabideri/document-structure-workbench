@@ -923,13 +923,34 @@ def job_status(request, job_id):
 
 # --- Secure artifact serving ---
 
+def _resolve_artifact_path(relative_path: str) -> Path:
+    """Resolve and validate an artifact file path.
+
+    Uses Path.is_relative_to() for secure path traversal protection.
+    Raises Http404 if path escapes the artifacts base directory.
+    """
+    from django.http import Http404
+
+    artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
+    file_path = artifacts_base / relative_path
+
+    try:
+        resolved = file_path.resolve()
+        resolved.is_relative_to(artifacts_base.resolve())
+    except (OSError, ValueError):
+        raise Http404("Invalid file path.")
+
+    if not resolved.exists():
+        raise Http404("File not found on disk.")
+
+    return resolved
+
+
 @login_required
 def page_image(request, page_id):
     """Serve a page image with permission check."""
     from .policy import ProjectAccessPolicy
     from django.http import FileResponse, Http404
-    from pathlib import Path
-    import os
 
     page = get_object_or_404(Page, pk=page_id)
     policy = ProjectAccessPolicy(user=request.user)
@@ -940,20 +961,7 @@ def page_image(request, page_id):
     if not page.image_path:
         raise Http404("No image available for this page.")
 
-    artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
-    file_path = artifacts_base / page.image_path
-
-    # Security: resolve and verify path stays below artifacts base
-    try:
-        resolved = file_path.resolve()
-        if not str(resolved).startswith(str(artifacts_base.resolve())):
-            raise Http404("Invalid file path.")
-    except OSError:
-        raise Http404("File not found.")
-
-    if not resolved.exists():
-        raise Http404("Image file not found on disk.")
-
+    resolved = _resolve_artifact_path(page.image_path)
     return FileResponse(open(resolved, "rb"), content_type="image/png")
 
 
@@ -962,8 +970,6 @@ def table_crop(request, table_id):
     """Serve a table crop image with permission check."""
     from .policy import ProjectAccessPolicy
     from django.http import FileResponse, Http404
-    from pathlib import Path
-    import os
 
     table = get_object_or_404(TableCandidate, pk=table_id)
     policy = ProjectAccessPolicy(user=request.user)
@@ -974,20 +980,7 @@ def table_crop(request, table_id):
     if not table.crop_path:
         raise Http404("No crop available for this table.")
 
-    artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
-    file_path = artifacts_base / table.crop_path
-
-    # Security: resolve and verify path stays below artifacts base
-    try:
-        resolved = file_path.resolve()
-        if not str(resolved).startswith(str(artifacts_base.resolve())):
-            raise Http404("Invalid file path.")
-    except OSError:
-        raise Http404("File not found.")
-
-    if not resolved.exists():
-        raise Http404("Crop file not found on disk.")
-
+    resolved = _resolve_artifact_path(table.crop_path)
     return FileResponse(open(resolved, "rb"), content_type="image/png")
 
 
@@ -997,8 +990,6 @@ def artifact_content(request, artifact_id):
     from .policy import ProjectAccessPolicy
     from .models import ProcessingArtifact
     from django.http import FileResponse, Http404, JsonResponse
-    from pathlib import Path
-    import os
 
     artifact = get_object_or_404(ProcessingArtifact, pk=artifact_id)
     policy = ProjectAccessPolicy(user=request.user)
@@ -1013,19 +1004,7 @@ def artifact_content(request, artifact_id):
     if not artifact.file_path:
         raise Http404("No file for this artifact.")
 
-    artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
-    file_path = artifacts_base / artifact.file_path
-
-    # Security: resolve and verify path stays below artifacts base
-    try:
-        resolved = file_path.resolve()
-        if not str(resolved).startswith(str(artifacts_base.resolve())):
-            raise Http404("Invalid file path.")
-    except OSError:
-        raise Http404("File not found.")
-
-    if not resolved.exists():
-        raise Http404("Artifact file not found on disk.")
+    resolved = _resolve_artifact_path(artifact.file_path)
 
     # Determine content type
     content_type = "application/octet-stream"

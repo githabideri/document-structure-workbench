@@ -144,16 +144,14 @@ class ProjectAccessPolicy:
         ).first()
 
     def _check_token_access(self, project, min_role="viewer"):
-        """Check if a token can access the project at the given role level."""
+        """Check if a token can access the project at the given role level.
+
+        Key rule: A token scoped to a project grants VIEWER access only.
+        It does NOT automatically grant editor, reviewer, or owner authority.
+        For elevated access, the token's underlying user must have a
+        ProjectMembership row with the required role.
+        """
         from .models import ProjectMembership
-
-        # Token scoped to this project
-        if self.token.project_id == project.pk:
-            return True
-
-        # Service accounts scoped to the project
-        if self.token.service_account_id and self.token.project_id == project.pk:
-            return True
 
         # Human user token: check actual membership
         if self.token.user_id:
@@ -161,6 +159,22 @@ class ProjectAccessPolicy:
                 project=project, user_id=self.token.user_id
             ).first()
             if membership is None:
+                # Token scoped to project grants viewer-only access
+                if self.token.project_id == project.pk:
+                    return min_role == "viewer"
+                return False
+            role_order = {"viewer": 0, "reviewer": 1, "editor": 2, "owner": 3}
+            return role_order.get(membership.role, 0) >= role_order.get(min_role, 0)
+
+        # Service account token: check membership or token scope
+        if self.token.service_account_id:
+            membership = ProjectMembership.objects.filter(
+                project=project, user=self.token.service_account
+            ).first()
+            if membership is None:
+                # Token scoped to project grants viewer-only access
+                if self.token.project_id == project.pk:
+                    return min_role == "viewer"
                 return False
             role_order = {"viewer": 0, "reviewer": 1, "editor": 2, "owner": 3}
             return role_order.get(membership.role, 0) >= role_order.get(min_role, 0)

@@ -557,6 +557,14 @@ class SourceDocument(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     is_archived = models.BooleanField(default=False)
+    processed_document = models.ForeignKey(
+        "Document",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_documents",
+        help_text="Canonical processed Document for this source.",
+    )
 
     class Meta:
         ordering = ["-created_at"]

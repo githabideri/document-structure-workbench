@@ -4,13 +4,16 @@ Document ingestion service — shared by API and web upload.
 Handles:
 - File validation (PDF extension, MIME type, signature, size)
 - Safe storage (generated name, no user-controlled paths)
-- SHA-256 calculation (single pass during write)
+- SHA-256 calculation (single pass during write, streamed to temp file)
 - Duplicate detection (same project + same SHA)
 - Transactional consistency (file + DB in/out sync)
 - Project access enforcement
+- Orphan cleanup on failures
 """
 import hashlib
+import logging
 import os
+import tempfile
 from pathlib import Path
 
 from django.conf import settings
@@ -23,6 +26,8 @@ from .models import (
     ProcessingPreset,
     SourceDocument,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class IngestionError(Exception):
@@ -69,72 +74,88 @@ class DocumentIngestionService:
         Raises:
             IngestionError: If validation fails.
         """
-        # --- 1. Check project access ---
-        if not self.policy.can_edit(project):
-            raise IngestionError("You do not have edit access to this project.")
-
-        # --- 2. Validate file ---
-        self._validate_file(uploaded_file)
-
-        # --- 3. Compute SHA-256 and write file ---
-        file_hash, storage_path = self._write_file(project, uploaded_file)
-
-        # --- 4. Check for duplicates ---
-        existing = SourceDocument.objects.filter(
-            collection=project,
-            sha256=file_hash,
-            is_archived=False,
-        ).first()
-        if existing:
-            # Return existing job if available
-            existing_job = existing.processing_jobs.filter(
-                state__in=["queued", "submitting", "processing", "importing"]
-            ).first()
-            if existing_job:
-                raise IngestionError(
-                    f"Document already uploaded (SHA: {file_hash[:12]}...). "
-                    f"Job {existing_job.pk} is {existing_job.state}. "
-                    f"Use reprocess to run extraction again."
-                )
-            # Allow re-upload if no active job (returns existing SourceDocument)
-            source_doc = existing
-
-        # --- 5. Create SourceDocument + ProcessingJob atomically ---
-        if not source_doc:
-            source_doc = None
+        temp_path = None  # Track temp file for cleanup
 
         try:
-            preset = ProcessingPreset.objects.get(
-                slug=preset_slug, is_active=True
-            )
-        except ProcessingPreset.DoesNotExist:
-            raise IngestionError(
-                f"Processing preset '{preset_slug}' not found or inactive."
-            )
+            # --- 1. Check project access ---
+            if not self.policy.can_edit(project):
+                raise IngestionError("You do not have edit access to this project.")
 
-        if not source_doc:
-            source_doc = SourceDocument(
+            # --- 2. Validate file ---
+            self._validate_file(uploaded_file)
+
+            # --- 3. Validate preset BEFORE writing file ---
+            try:
+                preset = ProcessingPreset.objects.get(
+                    slug=preset_slug, is_active=True
+                )
+            except ProcessingPreset.DoesNotExist:
+                raise IngestionError(
+                    f"Processing preset '{preset_slug}' not found or inactive."
+                )
+
+            # --- 4. Stream to temp file while hashing ---
+            file_hash, temp_path = self._stream_to_temp(project, uploaded_file)
+
+            # --- 5. Check for duplicates ---
+            existing = SourceDocument.objects.filter(
                 collection=project,
-                source_type="upload",
-                filename=self._sanitize_filename(uploaded_file.name),
-                file_path=storage_path,
                 sha256=file_hash,
-                file_size=uploaded_file.size,
-                uploaded_by=self.user,
-            )
+                is_archived=False,
+            ).first()
+            if existing:
+                existing_job = existing.processing_jobs.filter(
+                    state__in=["queued", "submitting", "processing", "importing"]
+                ).first()
+                if existing_job:
+                    # Clean up temp — not needed
+                    self._cleanup_temp(temp_path)
+                    raise IngestionError(
+                        f"Document already uploaded (SHA: {file_hash[:12]}...). "
+                        f"Job {existing_job.pk} is {existing_job.state}. "
+                        f"Use reprocess to run extraction again."
+                    )
+                # Re-use existing SourceDocument (keep its file_path)
+                self._cleanup_temp(temp_path)
+                source_doc = existing
+            else:
+                source_doc = None
 
-        with transaction.atomic():
-            source_doc.save()
+            # --- 6. Finalize file placement and create records ---
+            if source_doc is None:
+                source_doc = SourceDocument(
+                    collection=project,
+                    source_type="upload",
+                    filename=self._sanitize_filename(uploaded_file.name),
+                    file_path="",  # Set after move
+                    sha256=file_hash,
+                    file_size=uploaded_file.size,
+                    uploaded_by=self.user,
+                )
 
-            job = ProcessingJob.objects.create(
-                source_document=source_doc,
-                preset=preset,
-                state="queued",
-                created_by=self.user,
-            )
-            job.capture_preset_snapshot()
+            with transaction.atomic():
+                if not source_doc.file_path:
+                    # New upload — move temp to final location
+                    storage_path = self._finalize_file(
+                        project, temp_path, file_hash, uploaded_file.name
+                    )
+                    source_doc.file_path = storage_path
+                    source_doc.save()
+                # else: existing SourceDocument with valid file_path — keep as-is
 
-        return job
+                job = ProcessingJob.objects.create(
+                    source_document=source_doc,
+                    preset=preset,
+                    state="queued",
+                    created_by=self.user,
+                )
+                job.capture_preset_snapshot()
+
+            return job
+
+        except Exception:
+            self._cleanup_temp(temp_path)
+            raise
 
     # ------------------------------------------------------------------
     # Validation
@@ -168,51 +189,82 @@ class DocumentIngestionService:
             )
 
     # ------------------------------------------------------------------
-    # Storage
+    # Storage — stream to temp, then finalize
     # ------------------------------------------------------------------
 
-    def _write_file(self, project, uploaded_file):
+    def _stream_to_temp(self, project, uploaded_file):
         """
-        Write the uploaded file to safe storage.
+        Stream the uploaded file to a temporary file while computing SHA-256.
 
         Returns:
-            (sha256_hex, relative_storage_path)
+            (sha256_hex, temp_file_path)
+
+        The caller is responsible for either finalizing (moving) or cleaning up
+        the temp file.
         """
         artifacts_base = Path(getattr(
             settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"
         ))
-        uploads_dir = artifacts_base / "uploads"
-        uploads_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = artifacts_base / "tmp_uploads"
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
-        # Compute SHA-256 while writing (single pass)
         sha256 = hashlib.sha256()
-        chunks = []
+        fd, temp_path = tempfile.mkstemp(dir=str(temp_dir), suffix=".pdf.tmp")
+        os.close(fd)  # Close the fd; we'll use pathlib for writing
 
-        for chunk in uploaded_file.chunks():
-            sha256.update(chunk)
-            chunks.append(chunk)
+        try:
+            with open(temp_path, "wb") as f:
+                for chunk in uploaded_file.chunks():
+                    sha256.update(chunk)
+                    f.write(chunk)
+        except Exception:
+            self._cleanup_temp(temp_path)
+            raise
 
         file_hash = sha256.hexdigest()
+        return file_hash, temp_path
 
-        # Safe filename: {hash[:12]}_{sanitized_name}.pdf
-        safe_name = self._sanitize_filename(uploaded_file.name)
+    def _finalize_file(self, project, temp_path, file_hash, original_name):
+        """
+        Move temp file to final storage location.
+
+        Returns:
+            relative_storage_path (e.g., "uploads/{hash}_{name}.pdf")
+        """
+        temp_path = Path(temp_path)
+        if not temp_path.exists():
+            raise IngestionError("Temporary file was lost during processing.")
+
+        uploads_dir = Path(getattr(
+            settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"
+        )) / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_name = self._sanitize_filename(original_name)
         filename = f"{file_hash[:12]}_{safe_name}"
-
-        # Ensure the target is below uploads_dir
         target = uploads_dir / filename
-        target.resolve().startswith(uploads_dir.resolve()) or (
-            # Additional safety: reject if resolved path escapes
-            not str(target.resolve()).startswith(str(uploads_dir.resolve()))
-        )
 
-        # Write file
-        with open(target, "wb") as f:
-            for chunk in chunks:
-                f.write(chunk)
+        # Security: verify target is below uploads_dir
+        try:
+            target.resolve().is_relative_to(uploads_dir.resolve())
+        except ValueError:
+            raise IngestionError("Invalid upload path detected.")
 
-        # Return relative path
-        storage_path = f"uploads/{filename}"
-        return file_hash, storage_path
+        # Move temp to final location
+        temp_path.rename(target)
+
+        return f"uploads/{filename}"
+
+    def _cleanup_temp(self, temp_path):
+        """Remove a temporary file if it exists."""
+        if temp_path:
+            try:
+                path = Path(temp_path)
+                if path.exists():
+                    path.unlink()
+                    logger.debug("Cleaned up temp file: %s", temp_path)
+            except OSError as e:
+                logger.warning("Failed to clean up temp file %s: %s", temp_path, e)
 
     # ------------------------------------------------------------------
     # Helpers

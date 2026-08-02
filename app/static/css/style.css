@@ -245,3 +245,116 @@ h4 { margin: 0.75rem 0 0.5rem; font-size: 1rem; }
     max-width: 1200px;
     margin: 0 auto;
 }
+
+/* Primary actions (dashboard) */
+.primary-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem 0;
+}
+
+.action-card {
+    display: block;
+    padding: 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--foreground);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.action-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.action-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.action-card h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1.1rem;
+}
+
+.action-card p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--secondary);
+}
+
+/* Settings page */
+.settings-grid {
+    display: grid;
+    gap: 2rem;
+}
+
+.settings-section {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.settings-section h2 {
+    margin-top: 0;
+}
+
+.settings-form {
+    max-width: 500px;
+}
+
+.settings-form .form-group {
+    margin-bottom: 1rem;
+}
+
+.settings-form label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-weight: 600;
+}
+
+.settings-form select,
+.settings-form input[type="text"],
+.settings-form input[type="password"] {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.help-text {
+    font-size: 0.8rem;
+    color: var(--secondary);
+    margin-top: 0.25rem;
+}
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.checkbox-group label {
+    margin-bottom: 0;
+}
+
+.scope-badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    margin: 0.125rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-family: monospace;
+}
+
+/* Page header */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}

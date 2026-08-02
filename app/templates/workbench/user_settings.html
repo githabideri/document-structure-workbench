@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{% trans "Settings" %}</h1>
+    <a href="{% url 'dashboard' %}" class="btn btn-secondary">{% trans "Back to Dashboard" %}</a>
+</div>
+
+<div class="settings-grid">
+
+    <!-- General preferences -->
+    <section class="settings-section">
+        <h2>{% trans "General" %}</h2>
+
+        <form method="post" class="settings-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="update_preferences">
+
+            <div class="form-group">
+                <label for="id_ui_language">{% trans "Interface language" %}</label>
+                <select name="ui_language" id="id_ui_language">
+                    {% for code, name in prefs.ui_language.field.choices %}
+                    <option value="{{ code }}" {% if prefs.ui_language == code %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+                <p class="help-text">{% trans "This language is used for the user interface. It does not affect document processing." %}</p>
+            </div>
+
+            <div class="form-group">
+                <label for="id_timezone">{% trans "Timezone" %}</label>
+                <select name="timezone" id="id_timezone">
+                    {% for tz in "UTC,Europe/Vienna,Europe/Berlin,Europe/Zurich,America/New_York" %}
+                    <option value="{{ tz }}" {% if prefs.timezone == tz %}selected{% endif %}>{{ tz }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group checkbox-group">
+                <input type="checkbox" name="guided_explanations" id="id_guided_explanations"
+                    {% if prefs.guided_explanations %}checked{% endif %}>
+                <label for="id_guided_explanations">{% trans "Show guided explanations" %}</label>
+                <p class="help-text">{% trans "Display plain-language explanations alongside technical details." %}</p>
+            </div>
+
+            <button type="submit" class="btn btn-primary">{% trans "Save preferences" %}</button>
+        </form>
+    </section>
+
+    <!-- Password -->
+    <section class="settings-section">
+        <h2>{% trans "Password" %}</h2>
+
+        <form method="post" class="settings-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="change_password">
+
+            <div class="form-group">
+                <label for="id_old_password">{% trans "Current password" %}</label>
+                <input type="password" name="old_password" id="id_old_password" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_new_password">{% trans "New password" %}</label>
+                <input type="password" name="new_password" id="id_new_password" required minlength="8">
+            </div>
+
+            <div class="form-group">
+                <label for="id_confirm_password">{% trans "Confirm new password" %}</label>
+                <input type="password" name="confirm_password" id="id_confirm_password" required minlength="8">
+            </div>
+
+            <button type="submit" class="btn btn-primary">{% trans "Change password" %}</button>
+        </form>
+    </section>
+
+    <!-- API Tokens -->
+    <section class="settings-section">
+        <h2>{% trans "API Tokens" %}</h2>
+
+        {% if tokens %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>{% trans "Token" %}</th>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Scopes" %}</th>
+                    <th>{% trans "Created" %}</th>
+                    <th>{% trans "Status" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for token in tokens %}
+                <tr>
+                    <td class="mono">{{ token.token_prefix }}...</td>
+                    <td>{{ token.name }}</td>
+                    <td>
+                        {% for scope in token.scopes %}
+                        <code class="scope-badge">{{ scope }}</code>
+                        {% endfor %}
+                    </td>
+                    <td>{{ token.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        {% if token.revoked_at %}
+                        <span class="badge badge-danger">{% trans "Revoked" %}</span>
+                        {% elif token.expires_at and token.expires_at < now %}
+                        <span class="badge badge-warning">{% trans "Expired" %}</span>
+                        {% else %}
+                        <span class="badge badge-success">{% trans "Active" %}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <form method="post" class="settings-form" style="margin-top: 1rem;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_api_token">
+
+            <div class="form-group">
+                <label for="id_token_name">{% trans "Token name" %}</label>
+                <input type="text" name="token_name" id="id_token_name"
+                       placeholder="{% trans 'e.g. deployment-tool' %}" required>
+            </div>
+
+            <button type="submit" class="btn btn-secondary">{% trans "Create token" %}</button>
+        </form>
+    </section>
+
+</div>
+{% endblock %}

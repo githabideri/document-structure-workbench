@@ -48,6 +48,9 @@ urlpatterns = [
     # Guidelines
     path("guidelines/", views.guidelines, name="guidelines"),
 
+    # User Settings
+    path("settings/", views.user_settings, name="user_settings"),
+
     # REST API
     path("api/v1/health/", api.api_health, name="api_health"),
     path("api/status/", api.api_status, name="api_status"),

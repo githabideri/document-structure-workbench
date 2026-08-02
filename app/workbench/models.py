@@ -1,5 +1,5 @@
 """
-Archive Structure Workbench - Core Data Models.
+Document Structure Workbench - Core Data Models.
 """
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -8,8 +8,42 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import JSONField
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
+
+# Language codes used across the platform
+LANGUAGES = [
+    ("en", "English"),
+    ("de", "Deutsch"),
+]
+
+
+class UserPreferences(models.Model):
+    """Per-user UI preferences. One row per user."""
+
+    id = models.AutoField(primary_key=True)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="preferences")
+    ui_language = models.CharField(max_length=10, choices=LANGUAGES, default="en")
+    timezone = models.CharField(max_length=50, default="Europe/Vienna")
+    guided_explanations = models.BooleanField(default=True)
+    onboarding_completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "User preferences"
+        verbose_name_plural = "User preferences"
+
+    def __str__(self):
+        return f"Preferences for {self.user.get_username()}"
+
+    def get_absolute_url(self):
+        return reverse("user_settings")
+
+    @classmethod
+    def get_or_create_for_user(cls, user):
+        """Get or create preferences, ensuring a row always exists."""
+        obj, created = cls.objects.get_or_create(user=user)
+        return obj
 
 
 class Collection(models.Model):
@@ -320,3 +354,272 @@ class AuditEvent(models.Model):
 
     def __str__(self):
         return f"{self.event_type} - {self.object_type} {self.object_id}"
+
+
+class ServiceAccount(models.Model):
+    """Non-human identity for agents, CI, deployment tools."""
+
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="service_accounts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Service account"
+
+    def __str__(self):
+        return self.name
+
+
+class ApiToken(models.Model):
+    """Scoped API token for human users or service accounts."""
+
+    # Canonical scope choices (add as needed)
+    SCOPE_CHOICES = [
+        ("projects:read", "Read projects"),
+        ("documents:read", "Read documents"),
+        ("documents:upload", "Upload documents"),
+        ("jobs:submit", "Submit processing jobs"),
+        ("jobs:read", "Read job status and results"),
+        ("tasks:read", "Read review tasks"),
+        ("reviews:write", "Submit reviews"),
+        ("statistics:read", "Read statistics"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="api_tokens",
+    )
+    service_account = models.ForeignKey(
+        ServiceAccount, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="api_tokens",
+    )
+    name = models.CharField(max_length=100)
+    token_prefix = models.CharField(max_length=8)
+    token_hash = models.CharField(max_length=128, db_index=True)
+    scopes = JSONField(default=list)
+    project = models.ForeignKey(
+        "Collection", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="api_tokens",
+    )
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "API token"
+
+    def __str__(self):
+        return f"{self.name} ({self.token_prefix}...)"
+
+    def clean(self):
+        if not self.user_id and not self.service_account_id:
+            raise ValidationError("Exactly one of user or service_account must be set.")
+        if self.user_id and self.service_account_id:
+            raise ValidationError("Only one of user or service_account may be set.")
+
+    @staticmethod
+    def generate_token():
+        """Generate a random 48-char token and return (raw, hash)."""
+        import secrets
+        from django.utils.crypto import get_random_string
+        raw = secrets.token_urlsafe(36)  # ~48 chars
+        return raw, raw  # hash later in save()
+
+    @classmethod
+    def verify_token(cls, raw_token):
+        """Look up a token by its hash. Returns the token or None."""
+        try:
+            return cls.objects.get(token_hash=raw_token)
+        except cls.DoesNotExist:
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Generic document ingestion layer
+# ---------------------------------------------------------------------------
+
+class SourceDocument(models.Model):
+    """A source document (uploaded, benchmark, API, network share)."""
+
+    SOURCE_TYPES = [
+        ("upload", "User upload"),
+        ("benchmark", "Benchmark dataset"),
+        ("api", "API submission"),
+        ("network_share", "Network share"),
+        ("batch_import", "Batch import"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    collection = models.ForeignKey(
+        Collection, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="source_documents",
+    )
+    source_type = models.CharField(max_length=20, choices=SOURCE_TYPES, default="upload")
+    filename = models.CharField(max_length=500)
+    file_path = models.CharField(max_length=1000, blank=True)
+    sha256 = models.CharField(max_length=64, blank=True)
+    file_size = models.PositiveBigIntegerField(default=0)
+    page_count = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="source_documents",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_archived = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.filename} ({self.get_source_type_display()})"
+
+
+class ProcessingPreset(models.Model):
+    """A named processing configuration presented to users."""
+
+    id = models.AutoField(primary_key=True)
+    slug = models.SlugField(max_length=50, unique=True)
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    description_short = models.CharField(max_length=200, blank=True)
+    profile_a_enabled = models.BooleanField(default=True)
+    profile_b_enabled = models.BooleanField(default=False)
+    generate_crops = models.BooleanField(default=False)
+    create_review_tasks = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.slug})"
+
+
+class ProcessingJob(models.Model):
+    """A document processing job submitted by a user or worker."""
+
+    JOB_STATES = [
+        ("queued", "Queued"),
+        ("submitting", "Submitting to processor"),
+        ("processing", "Processing"),
+        ("importing", "Importing results"),
+        ("completed", "Completed"),
+        ("partial", "Partially completed"),
+        ("failed", "Failed"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    source_document = models.ForeignKey(
+        SourceDocument, on_delete=models.CASCADE,
+        related_name="processing_jobs",
+    )
+    preset = models.ForeignKey(
+        ProcessingPreset, on_delete=models.PROTECT,
+        related_name="processing_jobs",
+    )
+    state = models.CharField(max_length=20, choices=JOB_STATES, default="queued")
+    external_job_id = models.CharField(max_length=200, blank=True)
+    processor = models.CharField(max_length=50, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+    pages_processed = models.PositiveIntegerField(default=0)
+    tables_found = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="processing_jobs",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Job {self.id}: {self.source_document.filename} ({self.state})"
+
+
+class ProcessingArtifact(models.Model):
+    """A file or data artifact produced by a processing job."""
+
+    ARTIFACT_TYPES = [
+        ("page_image", "Page image"),
+        ("table_crop", "Table crop image"),
+        ("table_extraction", "Table extraction result"),
+        ("page_text", "Page text"),
+        ("layout_json", "Layout detection JSON"),
+        ("otsl", "OTSL table markup"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    job = models.ForeignKey(
+        ProcessingJob, on_delete=models.CASCADE,
+        related_name="artifacts",
+    )
+    artifact_type = models.CharField(max_length=30, choices=ARTIFACT_TYPES)
+    page_number = models.PositiveIntegerField(null=True, blank=True)
+    region_id = models.CharField(max_length=100, blank=True)
+    file_path = models.CharField(max_length=1000, blank=True)
+    data = JSONField(default=dict, blank=True)
+    metadata = JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["job", "page_number", "region_id"]
+
+    def __str__(self):
+        return f"{self.get_artifact_type_display()} - Job {self.job_id}"
+
+
+class PageRegion(models.Model):
+    """A detected region within a document page (generic, not table-specific)."""
+
+    REGION_TYPES = [
+        ("text", "Text block"),
+        ("title", "Title / heading"),
+        ("table", "Table"),
+        ("figure", "Figure / image"),
+        ("form", "Form"),
+        ("list", "List"),
+        ("header", "Page header"),
+        ("footer", "Page footer"),
+        ("other", "Other"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    source_document = models.ForeignKey(
+        SourceDocument, on_delete=models.CASCADE,
+        related_name="regions",
+    )
+    job = models.ForeignKey(
+        ProcessingJob, on_delete=models.CASCADE,
+        related_name="regions",
+    )
+    page_number = models.PositiveIntegerField()
+    region_type = models.CharField(max_length=20, choices=REGION_TYPES)
+    # Normalized coordinates: top-left origin, page-relative
+    left = models.FloatField()
+    top = models.FloatField()
+    right = models.FloatField()
+    bottom = models.FloatField()
+    page_width = models.FloatField(null=True, blank=True)
+    page_height = models.FloatField(null=True, blank=True)
+    confidence = models.FloatField(null=True, blank=True)
+    metadata = JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["source_document", "page_number", "top", "left"]
+
+    def __str__(self):
+        return f"{self.get_region_type_display()} - Page {self.page_number}"

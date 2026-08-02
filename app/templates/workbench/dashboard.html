@@ -1,39 +1,60 @@
-{% load static %}
+{% load static i18n %}
 {% extends "base.html" %}
-{% block title %}Dashboard - Archive Structure Workbench{% endblock %}
+{% block title %}{% trans "Dashboard" %}{% endblock %}
 
 {% block content %}
 <div class="dashboard">
-    <h1>Welcome, {{ user.username }}</h1>
 
+    <h1>{% blocktrans %}Welcome, {{ username }}{% endblocktrans %}</h1>
+
+    <!-- Primary actions -->
+    <div class="primary-actions">
+        <a href="#" class="action-card" id="action-upload">
+            <div class="action-icon">📄</div>
+            <h2>{% trans "Process a document" %}</h2>
+            <p>{% trans "Upload a PDF and extract its content" %}</p>
+        </a>
+        <a href="{% url 'review_next' %}" class="action-card" id="action-review">
+            <div class="action-icon">🔍</div>
+            <h2>{% trans "Review results" %}</h2>
+            <p>{% trans "Compare and evaluate extraction results" %}</p>
+        </a>
+        <a href="{% url 'collection_list' %}" class="action-card" id="action-learn">
+            <div class="action-icon">📚</div>
+            <h2>{% trans "Learn with examples" %}</h2>
+            <p>{% trans "Explore benchmark documents with ground truth" %}</p>
+        </a>
+    </div>
+
+    <!-- Stats -->
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-value">{{ total_tasks }}</div>
-            <div class="stat-label">Total Tasks</div>
+            <div class="stat-label">{% trans "Total Tasks" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ completed }}</div>
-            <div class="stat-label">Completed</div>
+            <div class="stat-label">{% trans "Completed" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ in_progress }}</div>
-            <div class="stat-label">In Progress</div>
+            <div class="stat-label">{% trans "In Progress" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ unassigned }}</div>
-            <div class="stat-label">Available</div>
+            <div class="stat-label">{% trans "Available" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ needs_expert }}</div>
-            <div class="stat-label">Needs Expert</div>
+            <div class="stat-label">{% trans "Needs Expert" %}</div>
         </div>
     </div>
 
     <div class="actions">
         {% if unassigned > 0 %}
-        <a href="{% url 'review_next' %}" class="btn btn-primary">Start Next Review</a>
+        <a href="{% url 'review_next' %}" class="btn btn-primary">{% trans "Start Next Review" %}</a>
         {% endif %}
-        <a href="{% url 'review_list' %}" class="btn btn-secondary">View All Reviews</a>
+        <a href="{% url 'review_list' %}" class="btn btn-secondary">{% trans "View All Reviews" %}</a>
     </div>
 </div>
 {% endblock %}

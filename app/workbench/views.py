@@ -84,6 +84,7 @@ def dashboard(request):
     total = tasks.count()
 
     return render(request, "workbench/dashboard.html", {
+        "username": request.user.get_username(),
         "total_tasks": total,
         "completed": completed,
         "in_progress": in_progress,
@@ -585,6 +586,81 @@ def export_summary(request):
 @login_required
 def guidelines(request):
     return render(request, "workbench/guidelines.html")
+
+
+# --- User Settings ---
+
+@login_required
+def user_settings(request):
+    """User profile and language settings page."""
+    from django.utils.crypto import get_random_string
+    from workbench.models import UserPreferences, ApiToken
+    from django.utils.hashing import make_password
+
+    prefs = UserPreferences.get_or_create_for_user(request.user)
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        if action == "update_preferences":
+            prefs.ui_language = request.POST.get("ui_language", prefs.ui_language)
+            prefs.timezone = request.POST.get("timezone", prefs.timezone)
+            prefs.guided_explanations = "guided_explanations" in request.POST
+            prefs.save()
+            from django.contrib import messages
+            messages.success(request, "Preferences saved.")
+
+        elif action == "create_api_token":
+            token_name = request.POST.get("token_name", "API Token").strip()
+            if token_name:
+                import secrets
+                raw_token = secrets.token_urlsafe(36)
+                ApiToken.objects.create(
+                    user=request.user,
+                    name=token_name,
+                    token_prefix=raw_token[:8],
+                    token_hash=raw_token,
+                    scopes=["projects:read", "documents:read", "tasks:read",
+                            "reviews:write", "statistics:read"],
+                )
+                from django.contrib import messages
+                messages.success(
+                    request,
+                    f"Token created: {raw_token}. Copy it now — it won't be shown again.",
+                )
+
+        elif action == "change_password":
+            old_password = request.POST.get("old_password", "")
+            new_password = request.POST.get("new_password", "")
+            confirm_password = request.POST.get("confirm_password", "")
+
+            if not request.user.check_password(old_password):
+                from django.contrib import messages
+                messages.error(request, "Current password is incorrect.")
+            elif new_password != confirm_password:
+                from django.contrib import messages
+                messages.error(request, "New passwords do not match.")
+            elif len(new_password) < 8:
+                from django.contrib import messages
+                messages.error(request, "New password must be at least 8 characters.")
+            else:
+                request.user.set_password(new_password)
+                request.user.save()
+                from django.contrib import messages
+                messages.success(request, "Password changed.")
+
+        return redirect("user_settings")
+
+    # Get user's existing tokens
+    tokens = ApiToken.objects.filter(user=request.user).order_by("-created_at")
+    from django.utils import timezone
+    now = timezone.now()
+
+    return render(request, "workbench/user_settings.html", {
+        "prefs": prefs,
+        "tokens": tokens,
+        "now": now,
+    })
 
 
 # --- Static assets ---

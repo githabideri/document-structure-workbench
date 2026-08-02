@@ -595,7 +595,7 @@ def user_settings(request):
     """User profile and language settings page."""
     from django.utils.crypto import get_random_string
     from workbench.models import UserPreferences, ApiToken
-    from django.utils.hashing import make_password
+    
 
     prefs = UserPreferences.get_or_create_for_user(request.user)
 

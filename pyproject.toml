@@ -1,14 +1,10 @@
-[build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
-
 [project]
 name = "document-structure-workbench"
 version = "0.1.0"
 description = "Web application for reviewing and comparing document structure extraction results"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 authors = [
     {name = "Document Structure Workbench contributors"},
 ]
@@ -30,20 +26,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
+
+[dependency-groups]
 dev = [
     "pytest>=7.0",
     "pytest-django>=4.5",
     "pytest-cov>=4.1",
     "requests>=2.31",
-    "gitleaks>=8.0",
-]
-postgres = [
-    "psycopg2-binary>=2.9",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["app*", "workbench*", "processors*", "schemas*", "content*", "tests*"]
+[tool.uv]
+package = false
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "app.config.settings"

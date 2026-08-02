@@ -8,7 +8,10 @@
     --warning: #f59e0b;
     --danger: #ef4444;
     --bg: #f9fafb;
+    --bg-secondary: #f3f4f6;
     --text: #111827;
+    --foreground: #111827;
+    --accent: #2563eb;
     --border: #e5e7eb;
 }
 

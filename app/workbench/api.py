@@ -408,6 +408,7 @@ def api_documents(request, project_id):
 # Processing Jobs
 # ---------------------------------------------------------------------------
 
+@csrf_exempt
 @require_http_methods(["POST"])
 @require_scope("documents:upload", "jobs:submit")
 def api_upload_document(request, project_id):

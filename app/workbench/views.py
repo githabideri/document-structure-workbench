@@ -40,6 +40,40 @@ def is_admin(user):
     return user.groups.filter(name="Administrator").exists()
 
 
+# --- Project access decorator ---
+
+def require_project_access(view_func, project_kwarg="collection_id"):
+    """Decorator that enforces project membership before rendering.
+
+    Skips check for global administrators.
+    """
+    from functools import wraps
+    from .policy import ProjectAccessPolicy
+
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        # Global admins bypass
+        if is_admin(request.user):
+            return view_func(request, *args, **kwargs)
+
+        project_id = kwargs.get(project_kwarg)
+        if project_id is None:
+            return view_func(request, *args, **kwargs)
+
+        from .models import Collection
+        project = Collection.objects.filter(pk=project_id).first()
+        if not project:
+            return view_func(request, *args, **kwargs)
+
+        policy = ProjectAccessPolicy(user=request.user)
+        if not policy.can_view(project):
+            messages.error(request, _("You do not have access to this project."))
+            return redirect("collection_list")
+
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
 # --- Audit helper ---
 
 def log_audit(request, event_type, object_type="", object_id="", before=None, after=None):
@@ -102,13 +136,21 @@ def dashboard(request):
 
 @login_required
 def collection_list(request):
-    collections = Collection.objects.all()
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    collections = policy.visible_projects()
     return render(request, "workbench/collection_list.html", {"collections": collections})
 
 
 @login_required
 def collection_detail(request, collection_id):
+    from .policy import ProjectAccessPolicy
     collection = get_object_or_404(Collection, pk=collection_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(collection):
+        messages.error(request, _("You do not have access to this project."))
+        return redirect("collection_list")
+
     documents = collection.documents.filter(is_archived=False)
     tables = TableCandidate.objects.filter(document__collection=collection)
     reviews = Review.objects.filter(review_task__table_candidate__document__collection=collection)
@@ -125,7 +167,10 @@ def collection_detail(request, collection_id):
 
 @login_required
 def document_list(request):
-    documents = Document.objects.filter(is_archived=False)
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_collections = policy.visible_projects()
+    documents = Document.objects.filter(is_archived=False, collection__in=visible_collections)
     collection_id = request.GET.get("collection")
     if collection_id:
         documents = documents.filter(collection_id=collection_id)
@@ -135,7 +180,13 @@ def document_list(request):
 
 @login_required
 def document_detail(request, document_id):
+    from .policy import ProjectAccessPolicy
     document = get_object_or_404(Document, pk=document_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(document.collection):
+        messages.error(request, _("You do not have access to this document."))
+        return redirect("document_list")
+
     tables = document.tables.select_related("page").prefetch_related("extractions")
     pages = document.pages.all()
 
@@ -150,9 +201,19 @@ def document_detail(request, document_id):
 
 @login_required
 def review_list(request):
-    tasks = ReviewTask.objects.filter(assigned_to=request.user)
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+
+    # Only show tasks from projects the user can access
+    tasks = ReviewTask.objects.filter(
+        assigned_to=request.user,
+        table_candidate__document__collection__in=visible_projects
+    )
     if is_curator(request.user):
-        tasks = ReviewTask.objects.all()
+        tasks = ReviewTask.objects.filter(
+            table_candidate__document__collection__in=visible_projects
+        )
 
     return render(request, "workbench/review_list.html", {"tasks": tasks})
 
@@ -175,7 +236,11 @@ def review_next(request):
 @login_required
 def review_skip(request, task_id):
     """Skip a task for now (keeps it available, doesn't count as completed)."""
+    from .policy import ProjectAccessPolicy
     task = get_object_or_404(ReviewTask, pk=task_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_task(task):
+        return redirect("review_list")
     if task.assigned_to != request.user and not is_curator(request.user):
         return redirect("review_list")
 
@@ -190,7 +255,11 @@ def review_skip(request, task_id):
 @login_required
 def review_needs_expert(request, task_id):
     """Mark a task as needing expert review."""
+    from .policy import ProjectAccessPolicy
     task = get_object_or_404(ReviewTask, pk=task_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_task(task):
+        return redirect("review_list")
     if task.assigned_to != request.user and not is_curator(request.user):
         return redirect("review_list")
 
@@ -204,7 +273,14 @@ def review_needs_expert(request, task_id):
 
 @login_required
 def review_detail(request, task_id):
+    from .policy import ProjectAccessPolicy
     task = get_object_or_404(ReviewTask, pk=task_id)
+
+    # Check project access
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_task(task):
+        messages.error(request, _("You do not have access to this task."))
+        return redirect("review_list")
 
     # Check if user is assigned or is a curator
     if task.assigned_to != request.user and not is_curator(request.user):
@@ -277,7 +353,14 @@ def review_detail(request, task_id):
 @require_POST
 def review_submit(request, task_id):
     """Submit a review. Uses Post/Redirect/Get pattern."""
+    from .policy import ProjectAccessPolicy
     task = get_object_or_404(ReviewTask, pk=task_id)
+
+    # Check project access
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_task(task):
+        messages.error(request, _("You do not have access to this task."))
+        return redirect("review_list")
 
     # Check if user is assigned or is a curator
     if task.assigned_to != request.user and not is_curator(request.user):
@@ -329,7 +412,14 @@ def review_submit(request, task_id):
 @login_required
 def review_reveal(request, task_id):
     """Show the reveal page after review submission."""
+    from .policy import ProjectAccessPolicy
     task = get_object_or_404(ReviewTask, pk=task_id)
+
+    # Check project access
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_task(task):
+        messages.error(request, _("You do not have access to this task."))
+        return redirect("review_list")
 
     # Check if user is assigned or is a curator
     if task.assigned_to != request.user and not is_curator(request.user):
@@ -362,7 +452,12 @@ def review_reveal(request, task_id):
 @require_POST
 def review_post_reveal(request, task_id):
     """Add a post-reveal comment. Does not modify original scores."""
+    from .policy import ProjectAccessPolicy
     task = get_object_or_404(ReviewTask, pk=task_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_access_task(task):
+        return redirect("review_list")
+
     review = Review.objects.filter(review_task=task).first()
 
     if not review:
@@ -382,14 +477,25 @@ def review_post_reveal(request, task_id):
 @login_required
 @user_passes_test(is_curator)
 def decision_list(request):
-    tables = TableCandidate.objects.select_related("decision", "document")
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+    tables = TableCandidate.objects.filter(
+        document__collection__in=visible_projects
+    ).select_related("decision", "document")
     return render(request, "workbench/decision_list.html", {"tables": tables})
 
 
 @login_required
 @user_passes_test(is_curator)
 def decision_detail(request, table_id):
+    from .policy import ProjectAccessPolicy
     table = get_object_or_404(TableCandidate, pk=table_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(table.document.collection):
+        messages.error(request, _("You do not have access to this table."))
+        return redirect("decision_list")
+
     decision = None
     if hasattr(table, "decision"):
         decision = table.decision
@@ -410,7 +516,13 @@ def decision_detail(request, table_id):
 @user_passes_test(is_curator)
 @require_POST
 def decision_submit(request, table_id):
+    from .policy import ProjectAccessPolicy
     table = get_object_or_404(TableCandidate, pk=table_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(table.document.collection):
+        messages.error(request, _("You do not have access to this table."))
+        return redirect("decision_list")
+
     extraction_id = request.POST.get("selected_extraction_id")
 
     extraction = None
@@ -437,18 +549,35 @@ def decision_submit(request, table_id):
 @login_required
 @user_passes_test(is_curator)
 def curator_dashboard(request):
-    collections = Collection.objects.all()
-    total_documents = Document.objects.filter(is_archived=False).count()
-    total_tables = TableCandidate.objects.count()
-    total_reviews = Review.objects.count()
-    pending_reviews = ReviewTask.objects.filter(state__in=["unassigned", "assigned", "in_progress"]).count()
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+    collections = visible_projects
+
+    total_documents = Document.objects.filter(
+        is_archived=False, collection__in=visible_projects
+    ).count()
+    total_tables = TableCandidate.objects.filter(
+        document__collection__in=visible_projects
+    ).count()
+    total_reviews = Review.objects.filter(
+        review_task__table_candidate__document__collection__in=visible_projects
+    ).count()
+    pending_reviews = ReviewTask.objects.filter(
+        state__in=["unassigned", "assigned", "in_progress"],
+        table_candidate__document__collection__in=visible_projects
+    ).count()
 
     # Preference distribution
-    preferences = Review.objects.values("preferred_result").annotate(count=Count("id"))
+    preferences = Review.objects.filter(
+        review_task__table_candidate__document__collection__in=visible_projects
+    ).values("preferred_result").annotate(count=Count("id"))
 
     # Error category totals
     error_counts = {}
-    for review in Review.objects.all():
+    for review in Review.objects.filter(
+        review_task__table_candidate__document__collection__in=visible_projects
+    ).all():
         for err in review.structure_errors:
             error_counts[err] = error_counts.get(err, 0) + 1
         for err in review.text_errors:
@@ -469,8 +598,15 @@ def curator_dashboard(request):
 @user_passes_test(is_curator)
 def technical_report(request):
     """Technical report with TEDS metrics."""
-    runs = ExtractionRun.objects.select_related("document")
-    extractions = TableExtraction.objects.select_related("table_candidate", "extraction_run")
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+    runs = ExtractionRun.objects.filter(
+        document__collection__in=visible_projects
+    ).select_related("document")
+    extractions = TableExtraction.objects.filter(
+        table_candidate__document__collection__in=visible_projects
+    ).select_related("table_candidate", "extraction_run")
 
     stats = {}
     for profile in ["standard-docling", "granite-table-crop"]:
@@ -497,7 +633,12 @@ def technical_report(request):
 @login_required
 @user_passes_test(is_curator)
 def export_reviews(request):
-    reviews = Review.objects.select_related("review_task__table_candidate", "reviewer")
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+    reviews = Review.objects.filter(
+        review_task__table_candidate__document__collection__in=visible_projects
+    ).select_related("review_task__table_candidate", "reviewer")
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="reviews.csv"'
 
@@ -530,7 +671,12 @@ def export_reviews(request):
 @login_required
 @user_passes_test(is_curator)
 def export_decisions(request):
-    decisions = Decision.objects.select_related("table_candidate", "decided_by")
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+    decisions = Decision.objects.filter(
+        table_candidate__document__collection__in=visible_projects
+    ).select_related("table_candidate", "decided_by")
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="decisions.csv"'
 
@@ -555,13 +701,22 @@ def export_decisions(request):
 @user_passes_test(is_curator)
 def export_summary(request):
     """Export benchmark summary JSON."""
-    extractions = TableExtraction.objects.select_related("table_candidate", "extraction_run")
-    reviews = Review.objects.select_related("review_task__table_candidate")
+    from .policy import ProjectAccessPolicy
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+    extractions = TableExtraction.objects.filter(
+        table_candidate__document__collection__in=visible_projects
+    ).select_related("table_candidate", "extraction_run")
+    reviews = Review.objects.filter(
+        review_task__table_candidate__document__collection__in=visible_projects
+    ).select_related("review_task__table_candidate")
 
     summary = {
         "exported_at": AuditEvent.objects.latest("created_at").created_at.isoformat() if AuditEvent.objects.exists() else "",
         "collection": "DP-Bench full tables",
-        "total_tables": TableCandidate.objects.count(),
+        "total_tables": TableCandidate.objects.filter(
+            document__collection__in=visible_projects
+        ).count(),
         "total_reviews": reviews.count(),
         "profiles": {},
     }

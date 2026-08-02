@@ -39,6 +39,12 @@
         {% block content %}{% endblock %}
     </main>
 
+    <footer class="footer">
+        <div class="footer-container">
+            Archive Structure Workbench{% if release_sha %} — build {{ release_sha[:8] }}{% endif %}
+        </div>
+    </footer>
+
     <script src="{% url 'serve_htmx' %}"></script>
     {% block extra_scripts %}{% endblock %}
 </body>

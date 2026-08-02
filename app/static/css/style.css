@@ -230,3 +230,18 @@ h1 { margin-bottom: 1rem; }
 h2 { margin: 1.5rem 0 0.5rem; font-size: 1.2rem; }
 h3 { margin: 1rem 0 0.5rem; font-size: 1.1rem; }
 h4 { margin: 0.75rem 0 0.5rem; font-size: 1rem; }
+
+/* Footer */
+.footer {
+    margin-top: 3rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--secondary);
+}
+
+.footer-container {
+    max-width: 1200px;
+    margin: 0 auto;
+}

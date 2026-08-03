@@ -224,7 +224,12 @@
         link.addEventListener('click', openRegion);
         // SVG anchors do not expose HTMLElement.click() consistently across
         // browsers, so bind the actual rectangle as well.
-        box.addEventListener('click', (event) => { event.stopPropagation(); openRegion(event); });
+        box?.addEventListener('click', (event) => { event.stopPropagation(); openRegion(event); });
+        if (link.classList.contains('region-hit')) {
+            link.addEventListener('pointerup', (event) => {
+                if (!dragged && !suppressClick) { event.stopPropagation(); openRegion(event); }
+            });
+        }
     });
     document.querySelector('[data-filter-count="all"]')?.append(`(${links.length})`);
     Object.entries(counts).forEach(([type, count]) => document.querySelector(`[data-filter-count="${type}"]`)?.append(`(${count})`));

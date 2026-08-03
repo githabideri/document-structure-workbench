@@ -169,7 +169,7 @@
     }, {passive: false});
     viewport?.addEventListener('pointerdown', (event) => {
         pointers.set(event.pointerId, event);
-        viewport.setPointerCapture(event.pointerId);
+        if (!event.target.closest?.('.region-hit')) viewport.setPointerCapture(event.pointerId);
         dragged = false;
         if (pointers.size === 1) dragStart = {x: event.clientX, y: event.clientY, offsetX, offsetY};
         if (pointers.size === 2) {

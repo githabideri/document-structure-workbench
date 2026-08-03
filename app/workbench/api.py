@@ -41,6 +41,7 @@ from .models import (
     ServiceAccount, SourceDocument, TableCandidate, TableExtraction,
     UserPreferences,
 )
+from .policy import ProjectAccessPolicy
 
 
 # ---------------------------------------------------------------------------

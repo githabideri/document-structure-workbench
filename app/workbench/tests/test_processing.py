@@ -1532,6 +1532,19 @@ class ProcessingStatusViewTest(TestCase):
         self.assertNotContains(response, "hx-trigger")
         self.assertContains(response, reverse("document_detail", args=[document.pk]))
 
+    def test_queued_job_polls_and_does_not_show_terminal_actions(self):
+        self.job.state = "queued"
+        self.job.external_job_id = ""
+        self.job.save(update_fields=["state", "external_job_id"])
+
+        response = self.client.get(
+            reverse("job_status", args=[self.job.pk]),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertContains(response, 'hx-trigger="every 5s"')
+        self.assertNotContains(response, "Upload Another")
+        self.assertNotContains(response, "Add another document")
+
     def test_status_uses_only_observable_stage_labels(self):
         response = self.client.get(reverse("job_status", args=[self.job.pk]))
         self.assertContains(response, "Upload received")

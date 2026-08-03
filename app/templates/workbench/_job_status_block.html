@@ -2,7 +2,7 @@
 <div
     id="job-status"
     class="job-status-block"
-    {% if job.is_active %}
+    {% if job.state == "queued" or job.is_active %}
     hx-get="{% url 'job_status' job.id %}"
     hx-trigger="every 5s"
     hx-target="this"
@@ -55,7 +55,7 @@
         <a href="{% url 'document_detail' job.result_document_id %}" class="btn btn-primary">{% trans "View Document" %}</a>
         <a href="{% url 'collection_detail' job.source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
     </div>
-    {% elif not job.is_active %}
+    {% elif job.state == "partial" or job.state == "submission_uncertain" or job.state == "interrupted" or job.state == "failed" or job.state == "cancelled" %}
     <div class="job-actions">
         <a href="{% url 'document_new' %}?project={{ job.source_document.collection_id }}" class="btn btn-primary">{% trans "Add another document" %}</a>
         <a href="{% url 'collection_detail' job.source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>

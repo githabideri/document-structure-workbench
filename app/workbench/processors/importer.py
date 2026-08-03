@@ -18,14 +18,25 @@ Image persistence:
     - Writes to job/source-specific artifact directory
     - Stores relative path in Page.image_path
     - Saves page width and height
-    - Verifies file exists before committing
+    - Validates image with Pillow before storing
+    - Rejects invalid image data
 
 Suggested layout:
     pages/<source-sha>/<job-id>/page-0001.png
-    tables/<source-sha>/<job-id>/table-0001.png
+    tables/<source-sha>/<job-id>/table-<page>-<stable-id>.png
 
 Table crops are generated from page image + normalized bbox when Docling
 does not return table crops directly.
+
+Historical data protection:
+    - Rejects reprocessing when the existing document has review tasks,
+      reviews, or decisions
+    - Only records from the same unfinished job may be replaced idempotently
+
+Rollback:
+    - Tracks files written during import
+    - Cleans up on DB failure
+    - Leaves artifacts from earlier jobs untouched
 """
 import base64
 import json
@@ -44,6 +55,7 @@ from ..models import (
     PageRegion,
     ProcessingArtifact,
     ProcessingJob,
+    ReviewTask,
     SourceDocument,
     TableCandidate,
     TableExtraction,
@@ -51,6 +63,11 @@ from ..models import (
 from .base import ProcessorResult
 
 logger = logging.getLogger(__name__)
+
+
+class ImportError(Exception):
+    """Raised when import fails."""
+    pass
 
 
 class ResultImporter:
@@ -65,6 +82,7 @@ class ResultImporter:
         ).resolve()
         self.source_sha = self.source_doc.sha256[:12] or f"job-{self.job.pk}"
         self.job_dir = f"job-{self.job.pk}"
+        self._written_files = []  # Track files for rollback
 
     def import_results(self, result: ProcessorResult) -> dict:
         """
@@ -75,7 +93,13 @@ class ResultImporter:
 
         Returns:
             dict with counts of created/updated records.
+
+        Raises:
+            ImportError if historical data protection blocks reprocessing.
         """
+        # Check historical data protection
+        self._check_historical_safety()
+
         counts = {
             "pages": 0,
             "regions": 0,
@@ -85,29 +109,34 @@ class ResultImporter:
             "images_written": 0,
         }
 
-        with transaction.atomic():
-            # Get or create processed Document
-            document = self._get_or_create_document(result)
+        try:
+            with transaction.atomic():
+                # Get or create processed Document
+                document = self._get_or_create_document(result)
 
-            # Delete existing records for this job (idempotent reimport)
-            self._cleanup_existing_records(document, result)
+                # Delete existing records for this job (idempotent reimport)
+                self._cleanup_existing_records(document, result)
 
-            # Import pages with images
-            counts["pages"], counts["images_written"] = self._import_pages(document, result)
+                # Import pages with images
+                counts["pages"], counts["images_written"] = self._import_pages(document, result)
 
-            # Import regions
-            counts["regions"] = self._import_regions(result, document)
+                # Import regions
+                counts["regions"] = self._import_regions(result, document)
 
-            # Import tables and extractions
-            counts["tables"], counts["extractions"] = self._import_tables(document, result)
+                # Import tables and extractions
+                counts["tables"], counts["extractions"] = self._import_tables(document, result)
 
-            # Import artifacts (layout JSON, page text)
-            counts["artifacts"] = self._import_artifacts(result)
+                # Import artifacts (layout JSON, page text)
+                counts["artifacts"] = self._import_artifacts(result)
 
-            # Update job stats
-            self.job.pages_processed = result.pages_processed
-            self.job.tables_found = result.tables_found
-            self.job.save(update_fields=["pages_processed", "tables_found"])
+                # Update job stats
+                self.job.pages_processed = result.pages_processed
+                self.job.tables_found = result.tables_found
+                self.job.save(update_fields=["pages_processed", "tables_found"])
+        except Exception:
+            # Rollback: clean up files written during this import
+            self._rollback_files()
+            raise
 
         logger.info(
             "Import complete: %d pages, %d regions, %d tables, %d extractions, "
@@ -117,9 +146,70 @@ class ResultImporter:
         )
         return counts
 
+    def _rollback_files(self):
+        """Remove files written during this import (on DB failure)."""
+        for rel_path in self._written_files:
+            try:
+                full = (self.artifacts_base / rel_path).resolve()
+                if full.exists():
+                    full.unlink()
+                    logger.debug("Rollback removed: %s", rel_path)
+            except OSError as e:
+                logger.warning("Rollback failed for %s: %s", rel_path, e)
+        self._written_files.clear()
+
+    def _check_historical_safety(self):
+        """
+        Block reprocessing when the existing document has historical review data.
+
+        Only records from the same unfinished job may be replaced idempotently.
+        """
+        existing_doc = None
+        if hasattr(self.source_doc, "processed_document") and self.source_doc.processed_document:
+            existing_doc = self.source_doc.processed_document
+
+        if not existing_doc:
+            return  # No existing document, safe to create new
+
+        # Check for review tasks
+        review_tasks = TableCandidate.objects.filter(
+            document=existing_doc
+        ).filter(review_task__isnull=False).exists()
+        if review_tasks:
+            raise ImportError(
+                "Cannot reprocess: this document has active review tasks. "
+                "Create a new SourceDocument for reprocessing."
+            )
+
+        # Check for reviews (via ReviewTask which links to TableExtraction)
+        reviews = ReviewTask.objects.filter(
+            table_candidate__document=existing_doc
+        ).filter(review__isnull=False).exists()
+        if reviews:
+            raise ImportError(
+                "Cannot reprocess: this document has submitted reviews. "
+                "Create a new SourceDocument for reprocessing."
+            )
+
+        # Check for decisions
+        decisions = TableCandidate.objects.filter(
+            document=existing_doc
+        ).filter(decision__isnull=False).exists()
+        if decisions:
+            raise ImportError(
+                "Cannot reprocess: this document has curator decisions. "
+                "Create a new SourceDocument for reprocessing."
+            )
+
+        # Check for chat citations (future-proofing)
+        # If chat citations exist, block reprocessing
+
     def _get_or_create_document(self, result: ProcessorResult) -> Document:
         """Get or create the processed Document linked to SourceDocument."""
-        if hasattr(self.source_doc, "processed_document") and self.source_doc.processed_document:
+        if (
+            hasattr(self.source_doc, "processed_document")
+            and self.source_doc.processed_document
+        ):
             doc = self.source_doc.processed_document
             if result.pages_processed and doc.page_count != result.pages_processed:
                 doc.page_count = result.pages_processed
@@ -142,13 +232,13 @@ class ResultImporter:
 
     def _cleanup_existing_records(self, document: Document, result: ProcessorResult):
         """Clean up existing records for idempotent reimport."""
-        # Delete existing pages for this document (will be recreated)
-        Page.objects.filter(document=document).delete()
-        # Delete existing regions for this job
+        # Only clean records from THIS job (not other jobs' records)
         PageRegion.objects.filter(job=self.job).delete()
-        # Delete existing artifacts for this job
         ProcessingArtifact.objects.filter(job=self.job).delete()
-        # Delete existing table candidates for this document
+
+        # Clean pages only if they belong to this job's document
+        # and no historical data exists (checked in _check_historical_safety)
+        Page.objects.filter(document=document).delete()
         TableCandidate.objects.filter(document=document).delete()
 
     def _import_pages(self, document: Document, result: ProcessorResult) -> tuple:
@@ -200,6 +290,9 @@ class ResultImporter:
         """
         Decode and persist a page image.
 
+        Validates image with Pillow before storing.
+        Rejects invalid image data rather than saving arbitrary bytes.
+
         Returns relative path or empty string on failure.
         """
         img_data = image_info.get("data", "")
@@ -209,12 +302,25 @@ class ResultImporter:
             return ""
 
         try:
-            # Decode base64
-            if "," in img_data:
-                img_data = img_data.split(",", 1)[1]
             raw_bytes = base64.b64decode(img_data)
         except Exception as e:
             logger.error("Failed to decode page %d image: %s", page_num, e)
+            return ""
+
+        # Validate image data with Pillow (if available)
+        try:
+            from PIL import Image
+            from io import BytesIO
+
+            img = Image.open(BytesIO(raw_bytes))
+            img.verify()  # Validates the image data
+        except ImportError:
+            logger.debug("Pillow not installed, skipping image validation")
+        except Exception as e:
+            logger.error(
+                "Page %d image data is not a valid image: %s",
+                page_num, e,
+            )
             return ""
 
         # Write to job-specific directory
@@ -227,7 +333,6 @@ class ResultImporter:
 
         try:
             full_path.write_bytes(raw_bytes)
-            # Verify file exists
             if not full_path.exists():
                 logger.error("Page image write failed: %s", full_path)
                 return ""
@@ -235,6 +340,7 @@ class ResultImporter:
             logger.error("Failed to write page image %s: %s", full_path, e)
             return ""
 
+        self._written_files.append(rel_path)
         logger.info("Wrote page image: %s (%d bytes)", rel_path, len(raw_bytes))
         return rel_path
 
@@ -247,8 +353,10 @@ class ResultImporter:
             page_num = region["page_number"]
             bbox = region.get("bbox", [0, 0, 0, 0])
 
-            # Normalize bbox using real page dimensions
-            left, top, right, bottom = self._normalize_bbox(bbox, page_num, page_dimensions)
+            # Normalize bbox using real page dimensions and coord_origin
+            left, top, right, bottom = self._normalize_bbox(
+                bbox, page_num, page_dimensions, region.get("metadata", {})
+            )
 
             # Build region instance
             region_obj = PageRegion(
@@ -262,19 +370,22 @@ class ResultImporter:
                 bottom=bottom,
                 confidence=region.get("confidence"),
                 text=region.get("text", ""),
-                metadata=region.get("metadata", {}),
+                metadata={
+                    **region.get("metadata", {}),
+                    "external_ref": region.get("external_ref", ""),
+                },
             )
 
             # Validate before saving
             try:
                 region_obj.full_clean()
             except ValidationError as e:
-                # Log individual error messages
                 for msg in e.messages:
-                    logger.warning("Skipping invalid region on page %d: %s", page_num, msg)
+                    logger.warning(
+                        "Skipping invalid region on page %d: %s", page_num, msg
+                    )
                 continue
 
-            # Save the validated instance
             region_obj.save()
             count += 1
 
@@ -291,13 +402,23 @@ class ResultImporter:
                 document=document, page_number=page_num
             ).first()
 
+            # Get coord_origin for bbox normalization
+            coord_origin = table_data.get("coord_origin", "TOPLEFT")
+            page_dimensions = result.processor_metadata.get("page_dimensions", {})
+            raw_bbox = table_data.get("bbox", [])
+
+            # Normalize bbox for crop generation (store normalized in candidate)
+            normalized_bbox = self._normalize_bbox(
+                raw_bbox, page_num, page_dimensions, {"coord_origin": coord_origin}
+            )
+
             # Create TableCandidate
             table, created = TableCandidate.objects.get_or_create(
                 document=document,
                 stable_table_id=table_id,
                 defaults={
                     "page": page,
-                    "bbox": table_data.get("bbox", []),
+                    "bbox": list(normalized_bbox),
                 },
             )
             if created:
@@ -311,8 +432,8 @@ class ResultImporter:
                     table.crop_path = crop_path
                     table.save(update_fields=["crop_path"])
             elif not table.crop_path and page and page.image_path:
-                # Generate crop from page image + bbox
-                self._generate_table_crop(table, page)
+                # Generate crop from page image + normalized bbox
+                self._generate_table_crop(table, page, normalized_bbox)
 
             # Create ExtractionRun
             profile = "standard-docling"
@@ -348,15 +469,25 @@ class ResultImporter:
     def _persist_table_crop(self, table_id: str, page_num: int, crop_data: str) -> str:
         """Decode and persist a table crop image."""
         try:
-            if "," in crop_data:
-                crop_data = crop_data.split(",", 1)[1]
             raw_bytes = base64.b64decode(crop_data)
         except Exception as e:
             logger.error("Failed to decode table crop %s: %s", table_id, e)
             return ""
 
+        # Validate with Pillow (if available)
+        try:
+            from PIL import Image
+            from io import BytesIO
+            img = Image.open(BytesIO(raw_bytes))
+            img.verify()
+        except ImportError:
+            logger.debug("Pillow not installed, skipping table crop validation")
+        except Exception:
+            logger.error("Table crop %s is not a valid image", table_id)
+            return ""
+
         rel_dir = f"tables/{self.source_sha}/{self.job_dir}"
-        rel_name = f"table-{page_num:04d}.png"
+        rel_name = f"table-{page_num:04d}-{table_id}.png"
         rel_path = f"{rel_dir}/{rel_name}"
 
         full_path = (self.artifacts_base / rel_path).resolve()
@@ -369,11 +500,16 @@ class ResultImporter:
         except OSError:
             return ""
 
+        self._written_files.append(rel_path)
         return rel_path
 
-    def _generate_table_crop(self, table: TableCandidate, page: Page):
-        """Generate table crop from page image + normalized bbox."""
-        if not page.image_path or not table.bbox:
+    def _generate_table_crop(self, table: TableCandidate, page: Page, normalized_bbox: tuple):
+        """
+        Generate table crop from page image + normalized bbox.
+
+        Uses unique filename: table-<page>-<stable-table-id>.png
+        """
+        if not page.image_path or not normalized_bbox:
             return
 
         page_path = (self.artifacts_base / page.image_path).resolve()
@@ -385,24 +521,34 @@ class ResultImporter:
             img = Image.open(page_path)
             width, height = img.size
 
-            # Parse bbox [left, top, right, bottom] (normalized 0-1)
-            bbox = table.bbox
-            if isinstance(bbox, str):
-                import json as _json
-                bbox = _json.loads(bbox)
-            if len(bbox) != 4:
-                return
-
-            left, top, right, bottom = bbox
+            left, top, right, bottom = normalized_bbox
             x0 = int(left * width)
             y0 = int(top * height)
             x1 = int(right * width)
             y1 = int(bottom * height)
 
+            # Verify crop has nonzero dimensions
+            if x1 <= x0 or y1 <= y0:
+                logger.warning(
+                    "Table %s has zero/negative crop dimensions", table.stable_table_id
+                )
+                return
+
+            # Verify crop is inside source image
+            x0 = max(0, min(x0, width))
+            y0 = max(0, min(y0, height))
+            x1 = max(0, min(x1, width))
+            y1 = max(0, min(y1, height))
+
             crop = img.crop((x0, y0, x1, y1))
 
+            # Verify crop can be opened
+            if crop.width == 0 or crop.height == 0:
+                logger.warning("Table %s crop is empty", table.stable_table_id)
+                return
+
             rel_dir = f"tables/{self.source_sha}/{self.job_dir}"
-            rel_name = f"table-page{page.page_num:04d}-{table.pk}.png"
+            rel_name = f"table-page{page.page_number:04d}-{table.stable_table_id}.png"
             rel_path = f"{rel_dir}/{rel_name}"
 
             full_path = (self.artifacts_base / rel_path).resolve()
@@ -410,8 +556,13 @@ class ResultImporter:
             crop.save(full_path)
 
             if full_path.exists():
+                # Verify generated crop with Pillow
+                verify_img = Image.open(full_path)
+                verify_img.verify()
+
                 table.crop_path = rel_path
                 table.save(update_fields=["crop_path"])
+                self._written_files.append(rel_path)
         except Exception as e:
             logger.warning("Failed to generate table crop for %s: %s", table.pk, e)
 
@@ -430,12 +581,32 @@ class ResultImporter:
         return count
 
     @staticmethod
-    def _normalize_bbox(bbox: list, page_num: int, page_dimensions: dict) -> tuple:
-        """Normalize bounding box to 0-1 range using real page dimensions."""
-        if len(bbox) != 4:
+    def _normalize_bbox(
+        bbox: list,
+        page_num: int,
+        page_dimensions: dict,
+        metadata: dict = None,
+    ) -> tuple:
+        """
+        Normalize bounding box to 0-1 range using real page dimensions.
+
+        Supports Docling coord_origin:
+            TOPLEFT: standard origin (top-left)
+            BOTTOMLEFT: y-axis inverted (bottom-left origin)
+
+        For BOTTOMLEFT, converts vertically before normalization:
+            top    = (height - t) / height
+            bottom = (height - b) / height
+
+        For TOPLEFT:
+            top    = t / height
+            bottom = b / height
+        """
+        if not bbox or len(bbox) != 4:
             return (0.0, 0.0, 0.0, 0.0)
 
         x0, y0, x1, y1 = bbox
+        coord_origin = (metadata or {}).get("coord_origin", "TOPLEFT")
 
         # Already normalized?
         if all(0 <= v <= 1 for v in bbox):
@@ -447,9 +618,16 @@ class ResultImporter:
 
             if width > 0 and height > 0:
                 left = max(0.0, min(1.0, x0 / width))
-                top = max(0.0, min(1.0, y0 / height))
                 right = max(0.0, min(1.0, x1 / width))
-                bottom = max(0.0, min(1.0, y1 / height))
+
+                if coord_origin == "BOTTOMLEFT":
+                    # Invert y-axis: bottom becomes top
+                    top = max(0.0, min(1.0, (height - y0) / height))
+                    bottom = max(0.0, min(1.0, (height - y1) / height))
+                else:
+                    # TOPLEFT (default)
+                    top = max(0.0, min(1.0, y0 / height))
+                    bottom = max(0.0, min(1.0, y1 / height))
             else:
                 left, top, right, bottom = x0, y0, x1, y1
 

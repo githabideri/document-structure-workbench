@@ -7,7 +7,22 @@ Official async sequence:
     3. GET  /v1/result/<task_id>  (fetch result)
 
 Response wrapper:
-    response["document"]["json_content"]  — the Docling document JSON
+    response["document"]["json_content"]  — the Docling document JSON (DoclingDocument)
+
+DoclingDocument schema (v2.5+):
+    pages: mapping keyed by page number (integer keys)
+        page.image: embedded image URI (data:image/png;base64,...)
+        page.size: {width, height}
+    texts: global list of text items
+        text.self_ref: "#/texts/N"
+        text.prov: list of provenance entries
+            prov.page_no, prov.bbox ({l,t,r,b,coord_origin}), prov.charspan
+    tables: global list
+        table.self_ref: "#/tables/N"
+        table.prov: provenance list
+        table.data: {table_cells, num_rows, num_cols}
+    pictures: global list
+    body: document hierarchy
 
 Configuration (Django settings):
     DSW_DOCLING_API_URL        — base URL (e.g. http://docling:5001)
@@ -17,10 +32,8 @@ Configuration (Django settings):
 
 submit() always returns a string task ID.
 """
-import base64
 import json
 import logging
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -64,7 +77,9 @@ class DoclingServeProcessor(DocumentProcessor):
                 "Set DSW_DOCLING_API_URL to your Docling Serve instance."
             )
 
-        file_path = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts")) / source_document.file_path
+        file_path = Path(
+            getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts")
+        ) / source_document.file_path
 
         if not file_path.exists():
             raise FileNotFoundError(f"Source file not found: {file_path}")
@@ -115,7 +130,6 @@ class DoclingServeProcessor(DocumentProcessor):
             raise ConnectionError(f"Docling server unreachable: {self.server_url}")
         except requests.RequestException as e:
             logger.error("Docling submission failed: %s", e)
-            logger.error("Response: %s", getattr(e, "response", None))
             raise
 
         task_id = result.get("task_id")
@@ -126,7 +140,16 @@ class DoclingServeProcessor(DocumentProcessor):
         return task_id
 
     def get_status(self, external_job_id: str) -> dict:
-        """Poll via GET /v1/status/poll/<task_id>."""
+        """
+        Poll via GET /v1/status/poll/<task_id>.
+
+        Reads documented fields:
+            task_status  — primary status field
+            error_message — error text
+            failure — structured failure object with message
+
+        Retains legacy "status" fallback for compatibility.
+        """
         try:
             resp = requests.get(
                 f"{self.server_url}/v1/status/poll/{external_job_id}",
@@ -136,11 +159,17 @@ class DoclingServeProcessor(DocumentProcessor):
             resp.raise_for_status()
             data = resp.json()
 
-            status = data.get("status", "unknown")
+            # Read documented fields with legacy fallback
+            task_status = data.get("task_status", data.get("status", "unknown"))
+            error_message = data.get("error_message")
+            failure = data.get("failure") or {}
+            if not error_message:
+                error_message = failure.get("message")
+
             return {
-                "state": status,
+                "state": task_status,
                 "progress": data.get("progress", 0),
-                "error": data.get("error"),
+                "error": error_message,
             }
         except requests.RequestException as e:
             logger.error("Status poll failed for %s: %s", external_job_id, e)
@@ -159,7 +188,6 @@ class DoclingServeProcessor(DocumentProcessor):
         except requests.RequestException as e:
             raise RuntimeError(f"Failed to fetch results for {external_job_id}: {e}")
 
-        # Parse the documented response wrapper
         return self._parse_results(response)
 
     def cancel(self, external_job_id: str) -> bool:
@@ -171,10 +199,17 @@ class DoclingServeProcessor(DocumentProcessor):
         """
         Parse Docling Serve v1 async response.
 
-        Structure:
+        Navigates:
             response["document"]["json_content"]  — Docling document JSON
 
-        The json_content is the full Docling document with pages, tables, etc.
+        Supports the actual DoclingDocument structure:
+            pages: mapping keyed by page number (integer keys)
+            texts: global list of text items
+            tables: global list
+            pictures: global list
+            body: document hierarchy
+
+        Also supports legacy page-local structure for backward compatibility.
         """
         result = ProcessorResult()
 
@@ -191,7 +226,155 @@ class DoclingServeProcessor(DocumentProcessor):
                 result.error_summary = "Invalid JSON in Docling response"
                 return result
 
-        pages = json_content.get("pages", [])
+        # Detect structure type
+        has_global_lists = "texts" in json_content or "tables" in json_content
+        has_page_list = "pages" in json_content
+
+        if has_global_lists:
+            # Real DoclingDocument structure
+            return self._parse_docling_document(json_content, result)
+        elif has_page_list:
+            # Legacy page-local structure (backward compat)
+            return self._parse_legacy_pages(json_content, result)
+        else:
+            logger.error("Unknown Docling response structure")
+            result.error_summary = "Unrecognized Docling response format"
+            return result
+
+    def _parse_docling_document(self, doc: dict, result: ProcessorResult) -> ProcessorResult:
+        """
+        Parse the actual DoclingDocument structure.
+
+        Structure:
+            pages: dict keyed by page number
+                page.image: "data:image/png;base64,..."
+                page.size: {width, height}
+            texts: list of text items
+                text.self_ref: "#/texts/N"
+                text.prov: [{page_no, bbox, charspan}]
+            tables: list
+                table.self_ref: "#/tables/N"
+                table.prov: [{page_no, bbox, charspan}]
+                table.data: {table_cells, num_rows, num_cols}
+            pictures: list
+        """
+        # Parse pages metadata
+        pages_map = doc.get("pages", {})
+        if isinstance(pages_map, dict):
+            # Keys are page numbers (may be string or int)
+            result.pages_processed = len(pages_map)
+            for page_key, page_data in pages_map.items():
+                page_num = int(page_key)
+
+                # Page dimensions
+                size = page_data.get("size", {})
+                width = size.get("width", 0)
+                height = size.get("height", 0)
+                if width and height:
+                    result.processor_metadata.setdefault("page_dimensions", {})[page_num] = {
+                        "width": width,
+                        "height": height,
+                    }
+
+                # Page image (embedded data URI)
+                image_data = page_data.get("image", "")
+                if image_data:
+                    result.page_images[page_num] = self._extract_image_data(image_data)
+
+        # Parse global texts → regions
+        texts = doc.get("texts", [])
+        for text_item in texts:
+            self_ref = text_item.get("self_ref", "")
+            text_content = text_item.get("text", "")
+            label = text_item.get("label", "text")
+            content_layer = text_item.get("content_layer", "body")
+            prov_list = text_item.get("prov", [])
+
+            for prov in prov_list:
+                page_num = prov.get("page_no", 1)
+                bbox = prov.get("bbox", {})
+
+                result.regions.append({
+                    "page_number": page_num,
+                    "region_type": self._label_to_region_type(label),
+                    "bbox": self._parse_bbox_dict(bbox),
+                    "text": text_content,
+                    "confidence": None,
+                    "external_ref": self_ref,
+                    "content_layer": content_layer,
+                    "metadata": {
+                        "label": label,
+                        "content_layer": content_layer,
+                        "coord_origin": bbox.get("coord_origin", "TOPLEFT") if isinstance(bbox, dict) else "TOPLEFT",
+                    },
+                })
+
+            # Accumulate page text from prov entries
+            if prov_list:
+                for prov in prov_list:
+                    page_num = prov.get("page_no", 1)
+                    result.page_texts.setdefault(page_num, [])
+                    result.page_texts[page_num].append(text_content)
+
+        # Parse global tables
+        tables = doc.get("tables", [])
+        for table_item in tables:
+            self_ref = table_item.get("self_ref", "")
+            prov_list = table_item.get("prov", [])
+            table_data = table_item.get("data", {})
+
+            result.tables_found += 1
+
+            # Extract table cells info
+            table_cells = table_data.get("table_cells", [])
+            num_rows = table_data.get("num_rows", 0)
+            num_cols = table_data.get("num_cols", 0)
+
+            for prov in prov_list:
+                page_num = prov.get("page_no", 1)
+                bbox = prov.get("bbox", {})
+
+                table_id = self._ref_to_id(self_ref) or f"table_{result.tables_found}"
+
+                # Generate HTML from table cells
+                html = self._generate_table_html(table_cells, table_data)
+
+                result.table_extractions[table_id] = {
+                    "page_number": page_num,
+                    "html": html,
+                    "otsl": "",
+                    "bbox": self._parse_bbox_dict(bbox),
+                    "rows": num_rows,
+                    "columns": num_cols,
+                    "confidence": None,
+                    "cells": table_cells,
+                    "crop_data": "",
+                    "external_ref": self_ref,
+                    "coord_origin": bbox.get("coord_origin", "TOPLEFT") if isinstance(bbox, dict) else "TOPLEFT",
+                }
+
+        # Parse pictures (for future use)
+        pictures = doc.get("pictures", [])
+        if pictures:
+            result.processor_metadata["pictures_found"] = len(pictures)
+
+        # Join accumulated page texts
+        for page_num in list(result.page_texts.keys()):
+            if isinstance(result.page_texts[page_num], list):
+                result.page_texts[page_num] = "\n".join(result.page_texts[page_num])
+
+        # Processor metadata
+        result.processor_metadata.setdefault("processor", "docling")
+        result.processor_metadata.setdefault(
+            "version",
+            response.get("metadata", {}).get("docling_version", "unknown"),
+        )
+
+        return result
+
+    def _parse_legacy_pages(self, doc: dict, result: ProcessorResult) -> ProcessorResult:
+        """Parse legacy page-local structure (backward compat)."""
+        pages = doc.get("pages", [])
         result.pages_processed = len(pages)
 
         for page_data in pages:
@@ -214,15 +397,11 @@ class DoclingServeProcessor(DocumentProcessor):
             page_images = page_data.get("images", [])
             for img in page_images:
                 img_data = img.get("data", "")
-                img_ref = img.get("ref", "")
                 if img_data:
-                    # Store metadata for importer to decode
                     result.page_images[page_num] = {
                         "data": img_data,
                         "format": img.get("format", "png"),
                     }
-                elif img_ref:
-                    result.page_images[page_num] = {"ref": img_ref}
 
             # Page text
             text_parts = []
@@ -233,9 +412,8 @@ class DoclingServeProcessor(DocumentProcessor):
                     if text:
                         text_parts.append(text)
 
-            page_text = "\n".join(text_parts) if text_parts else ""
-            if page_text:
-                result.page_texts[page_num] = page_text
+            if text_parts:
+                result.page_texts[page_num] = "\n".join(text_parts)
 
             # Regions
             for region in page_data.get("regions", []):
@@ -268,11 +446,126 @@ class DoclingServeProcessor(DocumentProcessor):
                     "crop_data": table.get("crop", table.get("crop_data", "")),
                 }
 
-        # Processor metadata
         result.processor_metadata.setdefault("processor", "docling")
-        result.processor_metadata.setdefault(
-            "version",
-            response.get("metadata", {}).get("docling_version", "unknown"),
-        )
-
         return result
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_image_data(image_value: str) -> dict:
+        """Extract image data from various formats (data URI, base64, ref)."""
+        if not image_value:
+            return {}
+
+        # Data URI: "data:image/png;base64,..."
+        if image_value.startswith("data:"):
+            # Extract MIME type and base64 data
+            header, b64_data = image_value.split(",", 1)
+            mime = header.split(":")[1].split(";")[0] if ":" in header else "image/png"
+            fmt = mime.split("/")[-1] if "/" in mime else "png"
+            return {"data": b64_data, "format": fmt}
+
+        # Plain base64 (no header)
+        return {"data": image_value, "format": "png"}
+
+    @staticmethod
+    def _parse_bbox_dict(bbox) -> list:
+        """Convert bbox dict or list to [left, top, right, bottom] list."""
+        if isinstance(bbox, dict):
+            return [
+                bbox.get("l", 0),
+                bbox.get("t", 0),
+                bbox.get("r", 0),
+                bbox.get("b", 0),
+            ]
+        if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+            return list(bbox[:4])
+        return [0, 0, 0, 0]
+
+    @staticmethod
+    def _label_to_region_type(label: str) -> str:
+        """Map Docling label to PageRegion.region_type."""
+        mapping = {
+            "title": "title",
+            "text": "text",
+            "paragraph": "text",
+            "caption": "text",
+            "footnote": "text",
+            "table": "table",
+            "figure": "figure",
+            "picture": "figure",
+            "formula": "other",
+            "list_item": "list",
+            "code": "other",
+            "header": "header",
+            "footer": "footer",
+        }
+        return mapping.get(label.lower(), "text")
+
+    @staticmethod
+    def _ref_to_id(ref: str) -> str:
+        """Convert self_ref like '#/tables/2' to stable ID 'table_2'."""
+        if not ref:
+            return ""
+        parts = ref.strip("#/").split("/")
+        if len(parts) >= 2:
+            kind = parts[0].rstrip("s")  # "tables" → "table"
+            num = parts[1]
+            return f"{kind}_{num}"
+        return ref.strip("#/")
+
+    @staticmethod
+    def _generate_table_html(table_cells: list, table_data: dict) -> str:
+        """
+        Generate HTML table from Docling table_cells.
+
+        Each cell has:
+            row_index, col_index, row_span, col_span, text, start, end
+        """
+        if not table_cells:
+            return ""
+
+        # Build grid
+        num_rows = table_data.get("num_rows", 0)
+        num_cols = table_data.get("num_cols", 0)
+
+        if not num_rows or not num_cols:
+            # Infer from cells
+            max_row = max((c.get("row_index", 0) for c in table_cells), default=0)
+            max_col = max((c.get("col_index", 0) for c in table_cells), default=0)
+            num_rows = max_row + 1
+            num_cols = max_col + 1
+
+        # Create cell map
+        grid = {}
+        for cell in table_cells:
+            ri = cell.get("row_index", 0)
+            ci = cell.get("col_index", 0)
+            grid[(ri, ci)] = cell
+
+        # Generate HTML
+        html_parts = ["<table>"]
+        for ri in range(num_rows):
+            html_parts.append("<tr>")
+            for ci in range(num_cols):
+                cell = grid.get((ri, ci))
+                if cell:
+                    text = cell.get("text", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    is_header = cell.get("type", "") in ("header_cell", "header")
+                    tag = "th" if is_header else "td"
+                    rowspan = cell.get("row_span", 1)
+                    colspan = cell.get("col_span", 1)
+                    attrs = ""
+                    if rowspan > 1:
+                        attrs += f' rowspan="{rowspan}"'
+                    if colspan > 1:
+                        attrs += f' colspan="{colspan}"'
+                    html_parts.append(f"<{tag}{attrs}>{text}</{tag}>")
+                else:
+                    html_parts.append("<td></td>")
+            html_parts.append("</tr>")
+        html_parts.append("</table>")
+
+        return "".join(html_parts)

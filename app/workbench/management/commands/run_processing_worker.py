@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from workbench.models import ProcessingJob
 from workbench.processors.docling_serve import DoclingServeProcessor
-from workbench.processors.importer import ResultImporter
+from workbench.processors.importer import ImportError as ImporterError, ResultImporter
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +155,8 @@ class Command(BaseCommand):
             self._fail_job(job, f"Source file not found: {e}")
         except ConnectionError as e:
             self._fail_job(job, f"Docling server unreachable: {e}")
+        except ImporterError as e:
+            self._fail_job(job, f"Import error: {e}")
         except Exception as e:
             logger.exception("Job %d failed: %s", job.pk, e)
             self._fail_job(job, str(e))
@@ -168,13 +170,14 @@ class Command(BaseCommand):
         while time.time() - start < timeout:
             status = self.processor.get_status(task_id)
 
-            if status["state"] in ("success", "completed"):
+            state = status.get("state", "unknown")
+
+            if state in ("success", "completed"):
                 return
-            elif status["state"] in ("failed", "error"):
-                raise RuntimeError(
-                    f"Docling task failed: {status.get('error', 'unknown error')}"
-                )
-            elif status["state"] == "cancelled":
+            elif state in ("failed", "error"):
+                error_msg = status.get("error", "unknown error")
+                raise RuntimeError(f"Docling task failed: {error_msg}")
+            elif state == "cancelled":
                 raise RuntimeError("Docling task was cancelled")
 
             progress = status.get("progress", 0)

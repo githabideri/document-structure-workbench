@@ -13,7 +13,7 @@ class ProcessorResult:
     """Standardized result from a document processor."""
     pages_processed: int = 0
     tables_found: int = 0
-    page_images: dict = field(default_factory=dict)  # page_num -> relative_path
+    page_images: dict = field(default_factory=dict)  # page_num -> {data, format}
     page_texts: dict = field(default_factory=dict)  # page_num -> text
     layout_json: Optional[str] = None  # relative path to layout JSON
     regions: list = field(default_factory=list)  # list of region dicts

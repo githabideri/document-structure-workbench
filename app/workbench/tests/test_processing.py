@@ -113,7 +113,11 @@ DOCLING_FIXTURE = {
                     "size": {"width": 1224, "height": 1584},
                     "images": [
                         {
-                            "data": base64.b64encode(b"fake-png-image-data").decode(),
+                            # Real 2x2 PNG (Pillow-valid)
+                            "data": (
+                                "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFkl"
+                                "EQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
+                            ),
                             "format": "png",
                         },
                     ],
@@ -429,6 +433,183 @@ class DoclingProcessorTest(TestCase):
             result.processor_metadata["page_dimensions"][1]["width"], 1224
         )
 
+    # ------------------------------------------------------------------
+    # Status parsing tests (item 1)
+    # ------------------------------------------------------------------
+
+    def test_status_pending(self):
+        """Pending/started response reads task_status correctly."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+
+        with patch("workbench.processors.docling_serve.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "task_status": "pending",
+                "progress": 0,
+            }
+            mock_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_resp
+
+            status = processor.get_status("task-1")
+            self.assertEqual(status["state"], "pending")
+            self.assertEqual(status["progress"], 0)
+            self.assertIsNone(status["error"])
+
+    def test_status_success(self):
+        """Success response reads task_status correctly."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+
+        with patch("workbench.processors.docling_serve.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "task_status": "success",
+                "progress": 100,
+            }
+            mock_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_resp
+
+            status = processor.get_status("task-1")
+            self.assertEqual(status["state"], "success")
+            self.assertEqual(status["progress"], 100)
+
+    def test_status_failure_with_error_message(self):
+        """Failure response with error_message is read correctly."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+
+        with patch("workbench.processors.docling_serve.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "task_status": "failed",
+                "error_message": "PDF is corrupted",
+                "progress": 0,
+            }
+            mock_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_resp
+
+            status = processor.get_status("task-1")
+            self.assertEqual(status["state"], "failed")
+            self.assertEqual(status["error"], "PDF is corrupted")
+
+    def test_status_failure_with_structured_failure(self):
+        """Failure response with structured failure object is read correctly."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+
+        with patch("workbench.processors.docling_serve.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "task_status": "failed",
+                "failure": {
+                    "message": "Timeout after 300s",
+                    "code": "TIMEOUT",
+                },
+                "progress": 45,
+            }
+            mock_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_resp
+
+            status = processor.get_status("task-1")
+            self.assertEqual(status["state"], "failed")
+            self.assertEqual(status["error"], "Timeout after 300s")
+
+    def test_status_legacy_fallback(self):
+        """Legacy 'status' field is used as fallback when task_status absent."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+
+        with patch("workbench.processors.docling_serve.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "status": "completed",  # legacy field
+                "progress": 100,
+            }
+            mock_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_resp
+
+            status = processor.get_status("task-1")
+            self.assertEqual(status["state"], "completed")
+
+    def test_status_malformed_response(self):
+        """Malformed response returns error state."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+
+        with patch("workbench.processors.docling_serve.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {}
+            mock_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_resp
+
+            status = processor.get_status("task-1")
+            self.assertEqual(status["state"], "unknown")
+
+    # ------------------------------------------------------------------
+    # Coordinate normalization tests (item 4)
+    # ------------------------------------------------------------------
+
+    def test_normalize_bbox_topleft(self):
+        """TOPLEFT coord_origin: standard normalization."""
+        from workbench.processors.importer import ResultImporter
+
+        bbox = [100, 200, 400, 500]
+        dims = {1: {"width": 1000, "height": 800}}
+
+        result = ResultImporter._normalize_bbox(
+            bbox, 1, dims, {"coord_origin": "TOPLEFT"}
+        )
+
+        self.assertAlmostEqual(result[0], 0.1)   # left = 100/1000
+        self.assertAlmostEqual(result[1], 0.25)  # top = 200/800
+        self.assertAlmostEqual(result[2], 0.4)   # right = 400/1000
+        self.assertAlmostEqual(result[3], 0.625) # bottom = 500/800
+
+    def test_normalize_bbox_bottomleft(self):
+        """BOTTOMLEFT coord_origin: vertical inversion before normalization."""
+        from workbench.processors.importer import ResultImporter
+
+        bbox = [100, 200, 400, 500]
+        dims = {1: {"width": 1000, "height": 800}}
+
+        result = ResultImporter._normalize_bbox(
+            bbox, 1, dims, {"coord_origin": "BOTTOMLEFT"}
+        )
+
+        self.assertAlmostEqual(result[0], 0.1)    # left = 100/1000
+        self.assertAlmostEqual(result[1], 0.375)  # top = (800-500)/800
+        self.assertAlmostEqual(result[2], 0.4)    # right = 400/1000
+        self.assertAlmostEqual(result[3], 0.75)   # bottom = (800-200)/800
+
+    def test_normalize_already_normalized(self):
+        """Already-normalized bbox (0-1) is returned as-is."""
+        from workbench.processors.importer import ResultImporter
+
+        bbox = [0.1, 0.2, 0.8, 0.9]
+        dims = {1: {"width": 1000, "height": 800}}
+
+        result = ResultImporter._normalize_bbox(
+            bbox, 1, dims, {"coord_origin": "TOPLEFT"}
+        )
+
+        self.assertEqual(result, (0.1, 0.2, 0.8, 0.9))
+
+    def test_normalize_invalid_bbox(self):
+        """Invalid bbox returns zeros."""
+        from workbench.processors.importer import ResultImporter
+
+        result = ResultImporter._normalize_bbox(
+            [1, 2], 1, {}, {}
+        )
+        self.assertEqual(result, (0.0, 0.0, 0.0, 0.0))
+
 
 class ResultImporterTest(TestCase):
     """Test the ResultImporter with real Docling fixture."""
@@ -461,13 +642,19 @@ class ResultImporterTest(TestCase):
 
         job = self._create_job()
 
+        # Real 2x2 PNG (Pillow-valid)
+        REAL_PNG_B64 = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDA"
+            "xMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
+        )
+
         # Build result from fixture
         result = ProcessorResult(
             pages_processed=1,
             tables_found=1,
             page_images={
                 1: {
-                    "data": base64.b64encode(b"fake-png-data").decode(),
+                    "data": REAL_PNG_B64,
                     "format": "png",
                 },
             },

@@ -270,6 +270,10 @@ def document_detail(request, document_id):
     for region in regions:
         region.overlay_width = region.right - region.left
         region.overlay_height = region.bottom - region.top
+        region.overlay_left_percent = region.left * 100
+        region.overlay_top_percent = region.top * 100
+        region.overlay_width_percent = region.overlay_width * 100
+        region.overlay_height_percent = region.overlay_height * 100
     page_regions = [region for region in regions if page and region.page_id == page.id]
     selected_region = None
     region_id = request.GET.get("region")

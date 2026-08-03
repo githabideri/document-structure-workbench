@@ -70,7 +70,7 @@
                     <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
                         {% for region in page_regions %}
                         <a href="?page={{ selected_page.page_number }}&region={{ region.id }}" class="region-hit region-link" data-region-id="{{ region.id }}" data-region-type="{{ region.region_type }}"
-                           style="left:{{ region.left|floatformat:'6' }}%;top:{{ region.top|floatformat:'6' }}%;width:{{ region.overlay_width|floatformat:'6' }}%;height:{{ region.overlay_height|floatformat:'6' }}%;"
+                           style="left:{{ region.overlay_left_percent|floatformat:'4' }}%;top:{{ region.overlay_top_percent|floatformat:'4' }}%;width:{{ region.overlay_width_percent|floatformat:'4' }}%;height:{{ region.overlay_height_percent|floatformat:'4' }}%;"
                            aria-label="{{ region.get_region_type_display }}">{{ region.get_region_type_display }}</a>
                         {% endfor %}
                     </div>

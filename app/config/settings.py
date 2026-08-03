@@ -140,6 +140,12 @@ DSW_PROCESSING_MAX_STATUS_ERRORS = int(
     os.environ.get("DSW_PROCESSING_MAX_STATUS_ERRORS", "5")
 )
 
+# Optional read-only research assistant (OpenAI-compatible llama.cpp server).
+DSW_CHAT_BASE_URL = os.environ.get("DSW_CHAT_BASE_URL", "")
+DSW_CHAT_API_KEY = os.environ.get("DSW_CHAT_API_KEY", "")
+DSW_CHAT_MODEL = os.environ.get("DSW_CHAT_MODEL", "")
+DSW_CHAT_TIMEOUT = int(os.environ.get("DSW_CHAT_TIMEOUT", "120"))
+
 # Fail clearly when API URL is absent in production
 if not DEBUG and not DSW_DOCLING_API_URL:
     import warnings

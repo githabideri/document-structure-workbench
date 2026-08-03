@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "Ask the collection" %}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>{% trans "Ask the collection" %}</h1><p class="page-intro">{% trans "Read-only answers grounded in selected processed documents." %}</p></div></div>
+{% if error %}<div class="message message-error">{{ error }}</div>{% endif %}
+<form method="post" class="chat-form">{% csrf_token %}
+  <fieldset><legend>{% trans "Include documents in full" %}</legend>
+  {% for source in sources %}<label class="checkbox-row"><input type="checkbox" name="source" value="{{ source.id }}" {% if source.id|stringformat:'s' in selected_ids %}checked{% endif %}> {{ source.filename }} <small>({{ source.collection.name }})</small></label>{% empty %}<p>{% trans "No accessible processed documents." %}</p>{% endfor %}
+  </fieldset>
+  <label for="question">{% trans "Question" %}</label><textarea id="question" name="question" rows="4" required placeholder="{% trans 'What does this document describe?' %}"></textarea>
+  <button class="btn btn-primary" type="submit">{% trans "Ask" %}</button>
+</form>
+{% if answer %}<section class="chat-answer"><h2>{% trans "Answer" %}</h2><div class="answer-text">{{ answer|linebreaks }}</div>{% if citations %}<h3>{% trans "Sources" %}</h3><ul>{% for marker, passage in citations %}<li><a href="{% url 'document_detail' passage.source_document_id %}?revision={{ passage.processed_revision_id }}&page={{ passage.page.page_number }}{% if passage.page_region_id %}&region={{ passage.page_region_id }}{% endif %}">[{{ marker }}] {{ passage.source_document.filename }} · {% trans "Page" %} {{ passage.page.page_number }}</a></li>{% endfor %}</ul>{% endif %}</section>{% endif %}
+{% endblock %}

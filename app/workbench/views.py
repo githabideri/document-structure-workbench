@@ -257,6 +257,34 @@ def search_view(request):
 
 
 @login_required
+def chat_view(request):
+    from .policy import ProjectAccessPolicy
+    from .chat import ask_read_only
+    policy = ProjectAccessPolicy(user=request.user)
+    projects = list(policy.visible_projects())
+    sources = list(SourceDocument.objects.filter(collection__in=projects, is_archived=False).select_related("collection", "active_document")[:100])
+    answer = None
+    citations = []
+    error = None
+    selected_ids = request.POST.getlist("source") if request.method == "POST" else request.GET.getlist("source")
+    if request.method == "POST":
+        question = request.POST.get("question", "").strip()
+        if not question or not selected_ids:
+            error = _("Choose at least one document and enter a question.")
+        else:
+            allowed = {str(source.id) for source in sources}
+            selected_ids = [sid for sid in selected_ids if sid in allowed]
+            try:
+                answer, citations = ask_read_only(question, selected_ids, projects)
+            except Exception as exc:
+                error = str(exc)
+    return render(request, "workbench/chat.html", {
+        "sources": sources, "selected_ids": set(selected_ids),
+        "answer": answer, "citations": citations, "error": error,
+    })
+
+
+@login_required
 def help_page(request):
     """Plain-language orientation for the primary document workflow."""
     return render(request, "workbench/help.html")

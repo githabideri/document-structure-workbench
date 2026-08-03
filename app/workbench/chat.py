@@ -38,7 +38,7 @@ def ask_read_only(question, source_ids, projects):
         response = requests.post(
             f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
-            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": 1200,
+            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": 4096,
                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": question}]},
             timeout=settings.DSW_CHAT_TIMEOUT,
         )
@@ -47,7 +47,9 @@ def ask_read_only(question, source_ids, projects):
         raise RuntimeError("The configured chat provider is unreachable. Check the DSW host network route.") from exc
     response.raise_for_status()
     payload = response.json()
-    answer = payload["choices"][0]["message"]["content"]
+    answer = payload["choices"][0]["message"].get("content", "")
+    if not answer:
+        raise RuntimeError("The chat provider returned reasoning but no final answer. Try again with a shorter question.")
     valid_markers = {marker for marker in citations}
     cited = {marker for marker in valid_markers if f"[{marker}]" in answer}
     return answer, [(marker, citations[marker]) for marker in sorted(cited)]

@@ -38,11 +38,23 @@
         <section class="workspace-scan" aria-label="{% trans 'Original page scan' %}">
             <div class="workspace-panel-heading">
                 <h2>{% trans "Original scan" %}</h2>
-                {% if selected_page %}<span>{% trans "Page" %} {{ selected_page.page_number }}</span>{% endif %}
+                {% if selected_page %}
+                <div class="scan-navigation">
+                    {% if previous_page %}<a href="?page={{ previous_page.page_number }}" aria-label="{% trans 'Previous page' %}">←</a>{% endif %}
+                    <span>{% trans "Page" %} {{ selected_page.page_number }}</span>
+                    {% if next_page %}<a href="?page={{ next_page.page_number }}" aria-label="{% trans 'Next page' %}">→</a>{% endif %}
+                </div>
+                {% endif %}
             </div>
             {% if selected_page and selected_page.image_path %}
+            <div class="scan-toolbar" aria-label="{% trans 'Scan controls' %}">
+                <button type="button" class="btn btn-sm btn-secondary" data-zoom-out aria-label="{% trans 'Zoom out' %}">−</button>
+                <span data-zoom-value>100%</span>
+                <button type="button" class="btn btn-sm btn-secondary" data-zoom-in aria-label="{% trans 'Zoom in' %}">+</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-zoom-fit>{% trans "Fit" %}</button>
+            </div>
             <div class="scan-viewport" id="scan-viewport">
-                <div class="scan-stage" id="scan-stage">
+                <div class="scan-stage" id="scan-stage" data-zoom="1">
                     <img id="page-image" src="{% url 'page_image' selected_page.id %}" alt="{% trans 'Original document page' %}">
                     <svg class="region-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="{% trans 'Detected regions' %}">
                         {% for region in page_regions %}
@@ -56,6 +68,11 @@
                         {% endfor %}
                     </svg>
                 </div>
+            </div>
+            <div class="region-filters" aria-label="{% trans 'Region filters' %}">
+                <span class="filter-label">{% trans "Show" %}</span>
+                <button type="button" class="filter-button is-active" data-region-filter="all">{% trans "All" %} <span data-filter-count="all"></span></button>
+                {% for value, label in region_types %}<button type="button" class="filter-button" data-region-filter="{{ value }}">{{ label }} <span data-filter-count="{{ value }}"></span></button>{% endfor %}
             </div>
             <div class="scan-legend"><span class="legend-swatch"></span>{% trans "Detected structure" %} · {% trans "click a region to inspect it" %}</div>
             {% else %}
@@ -93,7 +110,7 @@
                 <h3>{% trans "Full page text" %}</h3>
                 {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
             </section>
-            {% if tables %}<section class="page-tables"><h3>{% trans "Tables" %}</h3><p>{% blocktrans count counter=tables|length %}{{ counter }} table detected{% plural %}{{ counter }} tables detected{% endblocktrans %}</p></section>{% endif %}
+            {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.raw_html %}<div class="table-preview">{{ extraction.raw_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
         </aside>
     </div>
 </div>
@@ -104,6 +121,35 @@
 (() => {
     const selected = document.querySelector('[data-selected-region]');
     if (selected) document.getElementById(`region-${selected.dataset.selectedRegion}`)?.scrollIntoView({block: 'nearest'});
+
+    const stage = document.getElementById('scan-stage');
+    const zoomValue = document.querySelector('[data-zoom-value]');
+    let zoom = 1;
+    const updateZoom = () => {
+        if (!stage) return;
+        stage.style.transform = `scale(${zoom})`;
+        stage.style.transformOrigin = 'top center';
+        zoomValue.textContent = `${Math.round(zoom * 100)}%`;
+    };
+    document.querySelector('[data-zoom-in]')?.addEventListener('click', () => { zoom = Math.min(3, zoom + .25); updateZoom(); });
+    document.querySelector('[data-zoom-out]')?.addEventListener('click', () => { zoom = Math.max(.5, zoom - .25); updateZoom(); });
+    document.querySelector('[data-zoom-fit]')?.addEventListener('click', () => { zoom = 1; updateZoom(); });
+
+    const links = [...document.querySelectorAll('.region-link')];
+    const counts = {};
+    links.forEach((link) => {
+        const box = link.querySelector('.region-box');
+        const type = [...box.classList].find((name) => name.startsWith('region-'))?.replace('region-', '') || 'other';
+        counts[type] = (counts[type] || 0) + 1;
+        link.dataset.regionType = type;
+    });
+    document.querySelector('[data-filter-count="all"]')?.append(`(${links.length})`);
+    Object.entries(counts).forEach(([type, count]) => document.querySelector(`[data-filter-count="${type}"]`)?.append(`(${count})`));
+    document.querySelectorAll('[data-region-filter]').forEach((button) => button.addEventListener('click', () => {
+        document.querySelectorAll('[data-region-filter]').forEach((item) => item.classList.toggle('is-active', item === button));
+        const filter = button.dataset.regionFilter;
+        links.forEach((link) => { link.hidden = filter !== 'all' && link.dataset.regionType !== filter; });
+    }));
 })();
 </script>
 {% endblock %}

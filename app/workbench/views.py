@@ -259,6 +259,9 @@ def document_detail(request, document_id):
     page = next((item for item in pages if item.page_number == requested_page), None)
     if page is None and pages:
         page = pages[0]
+    page_index = pages.index(page) if page in pages else -1
+    previous_page = pages[page_index - 1] if page_index > 0 else None
+    next_page = pages[page_index + 1] if page_index >= 0 and page_index + 1 < len(pages) else None
 
     regions = list(
         PageRegion.objects.filter(page__document=document)
@@ -295,7 +298,10 @@ def document_detail(request, document_id):
         "tables": tables,
         "pages": pages,
         "selected_page": page,
+        "previous_page": previous_page,
+        "next_page": next_page,
         "page_regions": page_regions,
+        "region_types": PageRegion.REGION_TYPES,
         "selected_region": selected_region,
         "page_text": page_text,
         "processing_job": processing_job,

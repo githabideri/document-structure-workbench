@@ -288,7 +288,7 @@ def chat_view(request):
                 return redirect("chat_thread", thread_id=thread.id)
     return render(request, "workbench/chat.html", {
         "sources": sources, "selected_ids": set(selected_ids), "error": error,
-        "thread": None, "messages": [], "latest_run": None,
+        "thread": None, "chat_messages": [], "latest_run": None,
     })
 
 
@@ -310,7 +310,7 @@ def chat_thread_view(request, thread_id):
     latest_run = thread.runs.prefetch_related("evidence_items").order_by("-created_at").first()
     return render(request, "workbench/chat.html", {
         "sources": sources, "selected_ids": {str(source.id) for source in sources},
-        "thread": thread, "messages": thread.messages.all(), "latest_run": latest_run,
+        "thread": thread, "chat_messages": thread.messages.all(), "latest_run": latest_run,
         "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
     })
 

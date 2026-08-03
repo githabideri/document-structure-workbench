@@ -428,6 +428,7 @@ def document_detail(request, document_id):
         "workspace_document_id": source_document.id if source_document else document.id,
         "workspace_revision_id": document.id,
         "can_edit_document": can_edit_document,
+        "thread_id": request.GET.get("thread", ""),
     })
 
 

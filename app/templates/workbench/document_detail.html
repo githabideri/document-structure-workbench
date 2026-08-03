@@ -13,7 +13,7 @@
                 <span class="workspace-meta">{{ document.page_count }} {% trans "pages" %} · {{ document.collection.name }}</span>
             </p>
         </div>
-        <a href="{% url 'collection_detail' document.collection.id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
+        {% if thread_id %}<a href="{% url 'chat_thread' thread_id %}" class="btn btn-secondary">← {% trans "Return to conversation" %}</a>{% else %}<a href="{% url 'collection_detail' document.collection.id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>{% endif %}
     </header>
 
     <div class="workspace-grid">

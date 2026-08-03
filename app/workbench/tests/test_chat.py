@@ -18,7 +18,7 @@ class ChatTests(TestCase):
         self.source = SourceDocument.objects.create(collection=self.project, filename="notes.pdf", uploaded_by=self.user)
         preset = ProcessingPreset.objects.create(slug="chat", name="Chat")
         job = ProcessingJob.objects.create(source_document=self.source, preset=preset, state="completed")
-        revision = Document.objects.create(collection=self.project, external_id="notes", filename="notes.pdf")
+        revision = self.document = Document.objects.create(collection=self.project, external_id="notes", filename="notes.pdf")
         job.result_document = revision
         job.save(update_fields=["result_document"])
         page = Page.objects.create(document=revision, page_number=2)
@@ -51,3 +51,9 @@ class ChatTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.post(reverse("chat"), {})
         self.assertContains(response, "Choose at least one document")
+
+    def test_workspace_citation_offers_return_to_thread(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("document_detail", args=[self.document.pk]), {"thread": thread.pk})
+        self.assertContains(response, f"/chat/{thread.pk}/")

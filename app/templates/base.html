@@ -17,6 +17,7 @@
                     <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">{% trans "Home" %}</a>
                     <a href="{% url 'collection_list' %}" class="{% if 'collection' in request.resolver_match.url_name %}active{% endif %}">{% trans "Projects" %}</a>
                     <a href="{% url 'document_list' %}" class="{% if 'document' in request.resolver_match.url_name %}active{% endif %}">{% trans "Documents" %}</a>
+                    <a href="{% url 'search' %}" class="{% if request.resolver_match.url_name == 'search' %}active{% endif %}">{% trans "Search" %}</a>
                     {% if has_review_work %}
                     <a href="{% url 'review_list' %}" class="{% if 'review' in request.resolver_match.url_name %}active{% endif %}">{% trans "Review" %}</a>
                     {% endif %}

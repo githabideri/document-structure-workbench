@@ -152,6 +152,10 @@ class ResultImporter:
             counts["extractions"], counts["images_written"],
         )
         counts["document"] = document
+        # Keep revision-scoped lexical search in sync with the effective
+        # representation (including any previously approved corrections).
+        from ..search import rebuild_revision_index
+        counts["search_passages"] = rebuild_revision_index(document)
         return counts
 
     def _prepare_staging(self):

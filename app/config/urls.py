@@ -21,6 +21,7 @@ urlpatterns = [
 
     # Documents
     path("documents/", views.document_list, name="document_list"),
+    path("search/", views.search_view, name="search"),
     path("documents/new/", views.document_new, name="document_new"),
     path("documents/<int:document_id>/", views.document_detail, name="document_detail"),
     path("regions/<int:region_id>/correct-text/", views.correct_region_text, name="correct_region_text"),

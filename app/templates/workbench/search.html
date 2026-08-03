@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "Search" %}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>{% trans "Search documents" %}</h1><p class="page-intro">{% trans "Find text and identifiers in authorized processed revisions." %}</p></div>
+</div>
+<form method="get" class="search-form">
+  <label for="search-query">{% trans "Search the project" %}</label>
+  <div class="search-row"><input id="search-query" name="q" value="{{ query }}" placeholder="{% trans 'e.g. R-184 or restoration' %}" autofocus><button class="btn btn-primary" type="submit">{% trans "Search" %}</button></div>
+</form>
+{% if query %}
+  <h2>{% blocktrans count counter=results|length %}{{ counter }} result{% plural %}{{ counter }} results{% endblocktrans %}</h2>
+  <div class="item-list">
+  {% for result in results %}
+    <a class="item-row search-result" href="{{ result.citation_url }}">
+      <span><strong>{{ result.text|truncatechars:180 }}</strong><small>{{ result.source_document.filename }} · {{ result.project.name }} · {% trans "Page" %} {{ result.page.page_number }} · {{ result.get_passage_type_display }}</small></span>
+      <span class="btn btn-sm">{% trans "Open evidence" %}</span>
+    </a>
+  {% empty %}<div class="empty-state"><h2>{% trans "No matches" %}</h2><p>{% trans "Try an exact identifier, name, or phrase." %}</p></div>{% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

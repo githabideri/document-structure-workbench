@@ -234,6 +234,29 @@ def document_list(request):
 
 
 @login_required
+def search_view(request):
+    """Search only projects visible to the current user and cite revisions."""
+    from .policy import ProjectAccessPolicy
+    from .search import search_project
+    policy = ProjectAccessPolicy(user=request.user)
+    projects = list(policy.visible_projects())
+    query = request.GET.get("q", "").strip()
+    source_ids = request.GET.getlist("source")
+    results = search_project(projects, query, source_ids=source_ids) if query else []
+    for result in results:
+        result.citation_url = (
+            f"{reverse('document_detail', args=[result.source_document_id])}"
+            f"?revision={result.processed_revision_id}&page={result.page.page_number if result.page else 1}"
+            f"&region={result.page_region_id or ''}"
+        )
+    return render(request, "workbench/search.html", {
+        "query": query,
+        "results": results,
+        "projects": projects,
+    })
+
+
+@login_required
 def help_page(request):
     """Plain-language orientation for the primary document workflow."""
     return render(request, "workbench/help.html")

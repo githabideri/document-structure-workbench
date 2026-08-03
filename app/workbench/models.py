@@ -855,6 +855,40 @@ class PageRegion(models.Model):
         return self.corrections.filter(operation="suppress", status="active").exists()
 
 
+class SearchPassage(models.Model):
+    """Revision-scoped searchable text with stable scan provenance."""
+
+    PASSAGE_TYPES = [
+        ("heading", "Heading"),
+        ("paragraph", "Paragraph"),
+        ("region", "Region"),
+        ("table", "Table"),
+        ("table_row", "Table row"),
+        ("metadata", "Metadata"),
+    ]
+
+    project = models.ForeignKey(Collection, on_delete=models.CASCADE, related_name="search_passages")
+    source_document = models.ForeignKey(SourceDocument, on_delete=models.CASCADE, related_name="search_passages")
+    processed_revision = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="search_passages")
+    processing_job = models.ForeignKey(ProcessingJob, on_delete=models.CASCADE, related_name="search_passages")
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, null=True, blank=True, related_name="search_passages")
+    page_region = models.ForeignKey(PageRegion, on_delete=models.CASCADE, null=True, blank=True, related_name="search_passages")
+    passage_type = models.CharField(max_length=30, choices=PASSAGE_TYPES, default="region")
+    archival_identifier = models.CharField(max_length=255, blank=True)
+    heading_context = models.CharField(max_length=500, blank=True)
+    text = models.TextField()
+    normalized_text = models.TextField(db_index=True)
+    ordinal = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["page__page_number", "ordinal", "id"]
+        indexes = [
+            models.Index(fields=["project", "normalized_text"]),
+            models.Index(fields=["source_document", "processed_revision"]),
+        ]
+
+
 class RegionCorrection(models.Model):
     """Auditable human correction layered over immutable machine output."""
 

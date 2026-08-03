@@ -23,7 +23,8 @@ from django.contrib.auth import logout as auth_logout
 
 from .models import (
     AuditEvent, Collection, Decision, Document, ExtractionRun,
-    Page, Review, ReviewTask, TableCandidate, TableExtraction,
+    Page, PageRegion, ProcessingArtifact, Review, ReviewTask, TableCandidate,
+    TableExtraction,
 )
 
 
@@ -240,19 +241,64 @@ def help_page(request):
 @login_required
 def document_detail(request, document_id):
     from .policy import ProjectAccessPolicy
-    document = get_object_or_404(Document, pk=document_id)
+    document = get_object_or_404(
+        Document.objects.select_related("collection", "processing_job__source_document"),
+        pk=document_id,
+    )
     policy = ProjectAccessPolicy(user=request.user)
     if not policy.can_view(document.collection):
         messages.error(request, _("You do not have access to this document."))
         return redirect("document_list")
 
-    tables = document.tables.select_related("page").prefetch_related("extractions")
-    pages = document.pages.all()
+    pages = list(document.pages.all())
+    page_number = request.GET.get("page")
+    try:
+        requested_page = int(page_number) if page_number else 0
+    except (TypeError, ValueError):
+        requested_page = 0
+    page = next((item for item in pages if item.page_number == requested_page), None)
+    if page is None and pages:
+        page = pages[0]
+
+    regions = list(
+        PageRegion.objects.filter(page__document=document)
+        .select_related("page", "job")
+    )
+    for region in regions:
+        region.overlay_width = region.right - region.left
+        region.overlay_height = region.bottom - region.top
+    page_regions = [region for region in regions if page and region.page_id == page.id]
+    selected_region = None
+    region_id = request.GET.get("region")
+    if region_id:
+        try:
+            selected_region = next(
+                (region for region in page_regions if region.id == int(region_id)),
+                None,
+            )
+        except (TypeError, ValueError):
+            selected_region = None
+
+    page_text = ""
+    processing_job = getattr(document, "processing_job", None)
+    if processing_job:
+        artifact = ProcessingArtifact.objects.filter(
+            job=processing_job, artifact_type="page_text", page_number=page.page_number if page else None,
+        ).first()
+        if artifact:
+            page_text = artifact.data.get("text", "") if isinstance(artifact.data, dict) else ""
+
+    tables = document.tables.filter(page=page).select_related("page").prefetch_related("extractions") if page else []
 
     return render(request, "workbench/document_detail.html", {
         "document": document,
         "tables": tables,
         "pages": pages,
+        "selected_page": page,
+        "page_regions": page_regions,
+        "selected_region": selected_region,
+        "page_text": page_text,
+        "processing_job": processing_job,
     })
 
 

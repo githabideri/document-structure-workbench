@@ -1107,6 +1107,75 @@ class ArtifactPathSecurityTest(TestCase):
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
+class DocumentWorkspaceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="workspace-user", password="testpass123")
+        self.viewer = User.objects.create_user(username="workspace-viewer", password="testpass123")
+        self.collection = _create_collection(self.user, "Workspace Project")
+        ProjectMembership.objects.create(project=self.collection, user=self.viewer, role="viewer")
+        self.preset = _create_preset()
+        self.source = SourceDocument.objects.create(
+            collection=self.collection, filename="archive.pdf", uploaded_by=self.user,
+        )
+        self.job = ProcessingJob.objects.create(
+            source_document=self.source, preset=self.preset, state="completed",
+            processor="docling", created_by=self.user,
+        )
+        self.document = Document.objects.create(
+            collection=self.collection, external_id="workspace-revision",
+            filename="archive.pdf", sha256="workspace-sha", page_count=1,
+        )
+        self.job.result_document = self.document
+        self.job.save(update_fields=["result_document"])
+        self.source.active_document = self.document
+        self.source.save(update_fields=["active_document"])
+        self.artifacts_dir = tempfile.mkdtemp()
+        self.settings_override = override_settings(ARTIFACTS_BASE_DIR=self.artifacts_dir)
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(__import__("shutil").rmtree, self.artifacts_dir, True)
+        image = Path(self.artifacts_dir) / "pages" / "page.png"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"fake image")
+        self.page = Page.objects.create(
+            document=self.document, page_number=1, image_path="pages/page.png", width=100, height=100,
+        )
+        self.region = PageRegion.objects.create(
+            source_document=self.source, job=self.job, page=self.page, page_number=1,
+            region_type="title", left=.1, top=.2, right=.8, bottom=.4,
+            text="Archive title", confidence=.91, metadata={"external_ref": "text-1"},
+        )
+        ProcessingArtifact.objects.create(
+            job=self.job, artifact_type="page_text", page_number=1,
+            data={"text": "Full extracted page text."},
+        )
+
+    def test_workspace_renders_scan_overlay_text_and_deep_link(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("document_detail", args=[self.document.pk]), {
+            "page": 1, "region": self.region.pk,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("page_image", args=[self.page.pk]))
+        self.assertContains(response, f'data-region-id="{self.region.pk}"')
+        self.assertContains(response, "Archive title")
+        self.assertContains(response, "Full extracted page text.")
+        self.assertEqual(response.context["selected_page"], self.page)
+        self.assertEqual(response.context["selected_region"], self.region)
+
+    def test_workspace_and_image_are_forbidden_to_unrelated_user(self):
+        unrelated = User.objects.create_user(username="workspace-unrelated", password="testpass123")
+        self.client.force_login(unrelated)
+        response = self.client.get(reverse("document_detail", args=[self.document.pk]))
+        self.assertRedirects(response, reverse("document_list"))
+        image_response = self.client.get(reverse("page_image", args=[self.page.pk]))
+        self.assertRedirects(image_response, reverse("document_list"))
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
 class EntryJourneyTest(TestCase):
     """The primary UI leads directly from entry to a permitted upload."""
 

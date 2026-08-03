@@ -1,46 +1,124 @@
 {% extends "base.html" %}
 {% load static i18n %}
-{% block title %}{{ document.external_id }}{% endblock %}
+{% block title %}{{ document.filename }}{% endblock %}
 
 {% block content %}
-<div class="document-detail">
-    <h1>{{ document.external_id }}</h1>
-    <p><strong>{% trans "Filename" %}:</strong> {{ document.filename }}</p>
-    <p><strong>{% trans "Pages" %}:</strong> {{ document.page_count }}</p>
-    <p><strong>{% trans "Project" %}:</strong> <a href="{% url 'collection_detail' document.collection.id %}">{{ document.collection.name }}</a></p>
-
-    <h2>Tables</h2>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Table ID</th>
-                <th>Page</th>
-                <th>Extractions</th>
-                <th>Review</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for table in tables %}
-            <tr>
-                <td>{{ table.stable_table_id }}</td>
-                <td>{{ table.page.page_number }}</td>
-                <td>{{ table.extractions.count }}</td>
-                <td>
-                    {% if table.review_task %}
-                    <a href="{% url 'review_detail' table.review_task.id %}">{{ table.review_task.get_state_display }}</a>
-                    {% else %}
-                    No task
-                    {% endif %}
-                </td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="4">No tables.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <div class="actions">
+<div class="workspace" data-document-id="{{ document.id }}">
+    <header class="workspace-header">
+        <div>
+            <p class="eyebrow">{% trans "Document workspace" %}</p>
+            <h1>{{ document.filename }}</h1>
+            <p class="page-intro">
+                {% trans "Inspect the original scan and the structure detected by the processor." %}
+                <span class="workspace-meta">{{ document.page_count }} {% trans "pages" %} · {{ document.collection.name }}</span>
+            </p>
+        </div>
         <a href="{% url 'collection_detail' document.collection.id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
+    </header>
+
+    <div class="workspace-grid">
+        <aside class="workspace-pages" aria-label="{% trans 'Document pages' %}">
+            <div class="workspace-panel-heading">
+                <h2>{% trans "Pages" %}</h2>
+                <span>{{ pages|length }}</span>
+            </div>
+            <nav class="page-list">
+                {% for item in pages %}
+                <a class="page-list-item{% if item.id == selected_page.id %} is-selected{% endif %}"
+                   href="?page={{ item.page_number }}"
+                   aria-current="{% if item.id == selected_page.id %}page{% endif %}">
+                    <span class="page-number">{{ item.page_number }}</span>
+                    {% if item.image_path %}<img src="{% url 'page_image' item.id %}" alt="" loading="lazy">{% endif %}
+                    <span>{% trans "Page" %} {{ item.page_number }}</span>
+                </a>
+                {% empty %}<p class="empty-state">{% trans "No pages were imported." %}</p>{% endfor %}
+            </nav>
+        </aside>
+
+        <section class="workspace-scan" aria-label="{% trans 'Original page scan' %}">
+            <div class="workspace-panel-heading">
+                <h2>{% trans "Original scan" %}</h2>
+                {% if selected_page %}<span>{% trans "Page" %} {{ selected_page.page_number }}</span>{% endif %}
+            </div>
+            {% if selected_page and selected_page.image_path %}
+            <div class="scan-viewport" id="scan-viewport">
+                <div class="scan-stage" id="scan-stage">
+                    <img id="page-image" src="{% url 'page_image' selected_page.id %}" alt="{% trans 'Original document page' %}">
+                    <svg class="region-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="{% trans 'Detected regions' %}">
+                        {% for region in page_regions %}
+                        <a href="?page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link" data-region-id="{{ region.id }}">
+                            <rect class="region-box region-{{ region.region_type }}{% if region.id == selected_region.id %} is-selected{% endif %}"
+                                  x="{{ region.left }}" y="{{ region.top }}" width="{{ region.overlay_width|floatformat:'6' }}" height="{{ region.overlay_height|floatformat:'6' }}"
+                                  data-region-id="{{ region.id }}" role="button" tabindex="0">
+                                <title>{{ region.get_region_type_display }}</title>
+                            </rect>
+                        </a>
+                        {% endfor %}
+                    </svg>
+                </div>
+            </div>
+            <div class="scan-legend"><span class="legend-swatch"></span>{% trans "Detected structure" %} · {% trans "click a region to inspect it" %}</div>
+            {% else %}
+            <div class="empty-state scan-empty">{% trans "No page image is available for this page." %}</div>
+            {% endif %}
+        </section>
+
+        <aside class="workspace-content" aria-label="{% trans 'Extracted content' %}">
+            <div class="workspace-panel-heading">
+                <h2>{% trans "Extracted content" %}</h2>
+                <span>{% trans "Read-only" %}</span>
+            </div>
+            {% if selected_region %}
+            <section class="region-detail" id="region-{{ selected_region.id }}" data-selected-region="{{ selected_region.id }}">
+                <div class="region-detail-heading">
+                    <span class="region-type-badge">{{ selected_region.get_region_type_display }}</span>
+                    <span>{% trans "Region" %} {{ selected_region.id }}</span>
+                </div>
+                <p class="region-text">{{ selected_region.text|default:_('No text was extracted for this region.') }}</p>
+                <dl class="technical-summary">
+                    <div><dt>{% trans "Page" %}</dt><dd>{{ selected_region.page_number }}</dd></div>
+                    {% if selected_region.confidence %}<div><dt>{% trans "Confidence" %}</dt><dd>{{ selected_region.confidence|floatformat:2 }}</dd></div>{% endif %}
+                    <div><dt>{% trans "Processor" %}</dt><dd>{{ selected_region.job.processor|default:_('Document processor') }}</dd></div>
+                </dl>
+                <details><summary>{% trans "Technical details" %}</summary>
+                    <dl class="technical-details">
+                        <div><dt>{% trans "Processing job" %}</dt><dd>#{{ selected_region.job_id }}</dd></div>
+                        <div><dt>{% trans "Original reference" %}</dt><dd>{{ selected_region.metadata.external_ref|default:"—" }}</dd></div>
+                        <div><dt>{% trans "Coordinates" %}</dt><dd>{{ selected_region.left|floatformat:3 }}, {{ selected_region.top|floatformat:3 }} → {{ selected_region.right|floatformat:3 }}, {{ selected_region.bottom|floatformat:3 }}</dd></div>
+                    </dl>
+                </details>
+            </section>
+            {% endif %}
+            <section class="page-text" id="page-text">
+                <h3>{% trans "Full page text" %}</h3>
+                {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
+            </section>
+            {% if tables %}<section class="page-tables"><h3>{% trans "Tables" %}</h3><p>{% blocktrans count counter=tables|length %}{{ counter }} table detected{% plural %}{{ counter }} tables detected{% endblocktrans %}</p></section>{% endif %}
+        </aside>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(() => {
+    const stage = document.getElementById('scan-stage');
+    if (!stage) return;
+    const selected = document.querySelector('[data-selected-region]');
+    const selectRegion = (id) => {
+        document.querySelectorAll('.region-box').forEach((box) => box.classList.toggle('is-selected', box.dataset.regionId === id));
+        const url = new URL(window.location.href);
+        url.searchParams.set('page', '{{ selected_page.page_number|default:"1" }}');
+        url.searchParams.set('region', id);
+        window.history.replaceState({}, '', url);
+    };
+    document.querySelectorAll('.region-box').forEach((box) => box.addEventListener('click', (event) => {
+        event.preventDefault();
+        selectRegion(box.dataset.regionId);
+        const detail = document.getElementById(`region-${box.dataset.regionId}`);
+        if (detail) detail.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }));
+    if (selected) document.getElementById(`region-${selected.dataset.selectedRegion}`)?.scrollIntoView({block: 'nearest'});
+})();
+</script>
 {% endblock %}

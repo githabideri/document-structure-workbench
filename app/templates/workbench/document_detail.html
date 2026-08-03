@@ -102,22 +102,7 @@
 {% block extra_scripts %}
 <script>
 (() => {
-    const stage = document.getElementById('scan-stage');
-    if (!stage) return;
     const selected = document.querySelector('[data-selected-region]');
-    const selectRegion = (id) => {
-        document.querySelectorAll('.region-box').forEach((box) => box.classList.toggle('is-selected', box.dataset.regionId === id));
-        const url = new URL(window.location.href);
-        url.searchParams.set('page', '{{ selected_page.page_number|default:"1" }}');
-        url.searchParams.set('region', id);
-        window.history.replaceState({}, '', url);
-    };
-    document.querySelectorAll('.region-box').forEach((box) => box.addEventListener('click', (event) => {
-        event.preventDefault();
-        selectRegion(box.dataset.regionId);
-        const detail = document.getElementById(`region-${box.dataset.regionId}`);
-        if (detail) detail.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-    }));
     if (selected) document.getElementById(`region-${selected.dataset.selectedRegion}`)?.scrollIntoView({block: 'nearest'});
 })();
 </script>

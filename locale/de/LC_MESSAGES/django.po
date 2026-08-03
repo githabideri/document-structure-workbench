@@ -743,6 +743,79 @@ msgstr "Bereit"
 msgid "Processing has not reported a worker heartbeat recently. The worker may have stopped."
 msgstr "Die Verarbeitung hat seit einiger Zeit kein Lebenszeichen gemeldet. Der Verarbeitungsdienst wurde möglicherweise beendet."
 
+# Primary document workflow
+msgid "Home"
+msgstr "Start"
+
+msgid "Help"
+msgstr "Hilfe"
+
+msgid "Evaluation"
+msgstr "Evaluierung"
+
+msgid "Administration"
+msgstr "Administration"
+
+msgid "Project"
+msgstr "Projekt"
+
+msgid "Add document"
+msgstr "Dokument hinzufügen"
+
+msgid "Add a document"
+msgstr "Dokument hinzufügen"
+
+msgid "Recent documents"
+msgstr "Neueste Dokumente"
+
+msgid "Active processing"
+msgstr "Aktive Verarbeitung"
+
+msgid "Items needing attention"
+msgstr "Zu prüfende Elemente"
+
+msgid "Choose a project"
+msgstr "Projekt auswählen"
+
+msgid "Choose a PDF or drop it here"
+msgstr "PDF auswählen oder hier ablegen"
+
+msgid "Standard analysis"
+msgstr "Standardanalyse"
+
+msgid "Advanced evaluation options"
+msgstr "Erweiterte Evaluierungsoptionen"
+
+msgid "What happens next"
+msgstr "Wie es weitergeht"
+
+msgid "Upload and analyze"
+msgstr "Hochladen und analysieren"
+
+msgid "You do not have an editable project"
+msgstr "Sie haben kein bearbeitbares Projekt"
+
+msgid "View projects"
+msgstr "Projekte anzeigen"
+
+msgid "How it works"
+msgstr "So funktioniert es"
+
+msgid "Follow the analysis"
+msgstr "Analyse verfolgen"
+
+msgid "Inspect the result"
+msgstr "Ergebnis prüfen"
+
+msgid "Choose a project you can edit."
+msgstr "Wählen Sie ein Projekt aus, das Sie bearbeiten können."
+
+msgid "Choose a PDF to upload."
+msgstr "Wählen Sie ein PDF zum Hochladen aus."
+
+msgid "Add another document"
+msgstr "Weiteres Dokument hinzufügen"
+
 #: app/templates/workbench/_job_status_block.html
 msgid "The document is ready to inspect."
 msgstr "Das Dokument kann jetzt geprüft werden."

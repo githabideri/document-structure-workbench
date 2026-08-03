@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "Help" %}{% endblock %}
+
+{% block content %}
+<div class="help-page">
+    <p class="eyebrow">{% trans "How it works" %}</p>
+    <h1>{% trans "From scan to inspectable document" %}</h1>
+    <p class="page-intro">{% trans "The workbench keeps the original scan connected to everything extracted from it." %}</p>
+    <ol class="workflow-steps">
+        <li><strong>{% trans "Add a document" %}</strong><span>{% trans "Choose its project and upload a PDF." %}</span></li>
+        <li><strong>{% trans "Follow the analysis" %}</strong><span>{% trans "See whether the document is waiting, being analyzed, ready, or needs attention." %}</span></li>
+        <li><strong>{% trans "Inspect the result" %}</strong><span>{% trans "Open the processed document and compare extracted content with its source." %}</span></li>
+    </ol>
+    <p>{% trans "Comparison reviews and technical evaluation tools are available separately to users who need them." %}</p>
+</div>
+{% endblock %}

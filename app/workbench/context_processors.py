@@ -20,11 +20,19 @@ def user_roles(request):
     Use these instead of comparing user.groups.name in templates.
     """
     if not request.user.is_authenticated:
-        return {"is_reviewer": False, "is_curator": False, "is_admin": False}
+        return {
+            "is_reviewer": False,
+            "is_curator": False,
+            "is_admin": False,
+            "has_review_work": False,
+        }
     groups = request.user.groups.all()
     group_names = [g.name for g in groups]
+    from .models import ReviewTask
+
     return {
         "is_reviewer": any(n in ("Reviewer", "Curator", "Administrator") for n in group_names),
         "is_curator": any(n in ("Curator", "Administrator") for n in group_names),
         "is_admin": "Administrator" in group_names,
+        "has_review_work": ReviewTask.objects.filter(assigned_to=request.user).exists(),
     }

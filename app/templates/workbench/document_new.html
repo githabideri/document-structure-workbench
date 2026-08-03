@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "Add document" %}{% endblock %}
+
+{% block content %}
+<div class="upload-container">
+    <p class="eyebrow">{% trans "New document" %}</p>
+    <h1>{% trans "Add a document" %}</h1>
+    <p class="page-intro">{% trans "Choose where this document belongs, then upload the original PDF for analysis." %}</p>
+
+    {% if editable_projects %}
+    <form method="post" enctype="multipart/form-data" id="upload-form" class="upload-form">
+        {% csrf_token %}
+
+        <section class="form-step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+                <label for="project-select">{% trans "Project" %}</label>
+                <select name="project" id="project-select" required>
+                    {% if not selected_project %}<option value="">{% trans "Choose a project" %}</option>{% endif %}
+                    {% for project in editable_projects %}
+                    <option value="{{ project.id }}" {% if project.is_selected %}selected{% endif %}>{{ project.name }}</option>
+                    {% endfor %}
+                </select>
+                <small>{% trans "The project controls who can see and work with this document." %}</small>
+            </div>
+        </section>
+
+        <section class="form-step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+                <label for="file-input">{% trans "Document" %}</label>
+                <label class="file-drop" id="file-drop" for="file-input">
+                    <input type="file" name="file" id="file-input" accept=".pdf,application/pdf" required>
+                    <strong>{% trans "Choose a PDF or drop it here" %}</strong>
+                    <span id="file-info">{% trans "Maximum file size: 50 MB" %}</span>
+                </label>
+            </div>
+        </section>
+
+        {% if standard_preset %}
+        <section class="form-step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+                <label>{% trans "Analysis" %}</label>
+                <label class="analysis-option selected-option">
+                    <input type="radio" name="preset" value="{{ standard_preset.slug }}" {% if selected_preset_slug == standard_preset.slug %}checked{% endif %}>
+                    <span><strong>{% trans "Standard analysis" %}</strong><small>{% trans "Extract page images, text, regions, and tables for inspection." %}</small></span>
+                </label>
+                {% if advanced_presets %}
+                <details class="advanced-options">
+                    <summary>{% trans "Advanced evaluation options" %}</summary>
+                    <p>{% trans "Use these only when comparing extraction methods or creating benchmark reviews." %}</p>
+                    {% for preset in advanced_presets %}
+                    <label class="analysis-option">
+                        <input type="radio" name="preset" value="{{ preset.slug }}" {% if selected_preset_slug == preset.slug %}checked{% endif %}>
+                        <span><strong>{{ preset.name }}</strong><small>{{ preset.description_short }}</small></span>
+                    </label>
+                    {% endfor %}
+                </details>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        <div class="next-explanation">
+            <strong>{% trans "What happens next" %}</strong>
+            <p>{% trans "The upload enters a processing queue. You will see when a worker starts, when Docling is analyzing it, and when the extracted results are ready." %}</p>
+        </div>
+
+        <div class="actions">
+            <button type="submit" class="btn btn-primary">{% trans "Upload and analyze" %}</button>
+            <a href="{% url 'dashboard' %}" class="btn btn-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+    {% else %}
+    <div class="empty-state no-project-access">
+        <h2>{% trans "You do not have an editable project" %}</h2>
+        <p>{% trans "Ask a project owner for Editor access before uploading a document." %}</p>
+        <a href="{% url 'collection_list' %}" class="btn btn-secondary">{% trans "View projects" %}</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const dropZone = document.getElementById('file-drop');
+    const fileInput = document.getElementById('file-input');
+    const fileInfo = document.getElementById('file-info');
+    if (dropZone && fileInput) {
+        const showFile = () => {
+            if (fileInput.files.length) {
+                const file = fileInput.files[0];
+                fileInfo.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`;
+            }
+        };
+        fileInput.addEventListener('change', showFile);
+        dropZone.addEventListener('dragover', event => {
+            event.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', event => {
+            event.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (event.dataTransfer.files.length) {
+                fileInput.files = event.dataTransfer.files;
+                showFile();
+            }
+        });
+    }
+    document.querySelectorAll('.analysis-option input').forEach(input => {
+        input.addEventListener('change', () => {
+            document.querySelectorAll('.analysis-option').forEach(option => option.classList.remove('selected-option'));
+            input.closest('.analysis-option').classList.add('selected-option');
+        });
+        if (input.checked) input.closest('.analysis-option').classList.add('selected-option');
+    });
+</script>
+{% endblock %}

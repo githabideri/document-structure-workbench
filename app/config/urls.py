@@ -21,7 +21,11 @@ urlpatterns = [
 
     # Documents
     path("documents/", views.document_list, name="document_list"),
+    path("documents/new/", views.document_new, name="document_new"),
     path("documents/<int:document_id>/", views.document_detail, name="document_detail"),
+
+    # Help
+    path("help/", views.help_page, name="help"),
 
     # Upload / Processing
     path("projects/<int:project_id>/process/", views.project_process, name="project_process"),

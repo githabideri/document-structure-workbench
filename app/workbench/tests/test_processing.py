@@ -1103,6 +1103,138 @@ class ArtifactPathSecurityTest(TestCase):
                     _resolve_artifact_path(f"../{outside_file.name}")
 
 
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class EntryJourneyTest(TestCase):
+    """The primary UI leads directly from entry to a permitted upload."""
+
+    def setUp(self):
+        self.editor = User.objects.create_user(username="entry-editor", password="testpass123")
+        self.viewer = User.objects.create_user(username="entry-viewer", password="testpass123")
+        self.project = _create_collection(self.editor, "Archive Project")
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.viewer,
+            role="viewer",
+        )
+        self.preset = _create_preset()
+        self.artifacts_dir = tempfile.mkdtemp()
+        self.settings_override = override_settings(ARTIFACTS_BASE_DIR=self.artifacts_dir)
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(__import__("shutil").rmtree, self.artifacts_dir, True)
+
+    def test_dashboard_add_document_is_one_direct_click(self):
+        self.client.force_login(self.editor)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, f'href="{reverse("document_new")}"')
+        self.assertContains(response, "Add document")
+        self.assertNotContains(response, "Learn with examples")
+
+    def test_single_editable_project_is_preselected(self):
+        self.client.force_login(self.editor)
+        response = self.client.get(reverse("document_new"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_project"], self.project)
+        self.assertContains(
+            response,
+            f'<option value="{self.project.pk}" selected>Archive Project</option>',
+            html=True,
+        )
+
+    def test_editor_can_upload_from_unified_route(self):
+        self.client.force_login(self.editor)
+        response = self.client.post(reverse("document_new"), {
+            "project": self.project.pk,
+            "preset": self.preset.slug,
+            "file": SimpleUploadedFile(
+                "entry.pdf",
+                _make_pdf_content(),
+                content_type="application/pdf",
+            ),
+        })
+        job = ProcessingJob.objects.get()
+        self.assertRedirects(response, reverse("job_status", args=[job.pk]))
+        self.assertEqual(job.source_document.collection, self.project)
+
+    def test_viewer_cannot_upload_or_see_upload_actions(self):
+        self.client.force_login(self.viewer)
+        dashboard = self.client.get(reverse("dashboard"))
+        self.assertNotContains(dashboard, f'href="{reverse("document_new")}"')
+
+        form = self.client.get(reverse("document_new"))
+        self.assertContains(form, "You do not have an editable project")
+        self.assertNotContains(form, 'id="upload-form"')
+
+        response = self.client.post(reverse("document_new"), {
+            "project": self.project.pk,
+            "preset": self.preset.slug,
+            "file": SimpleUploadedFile(
+                "forbidden.pdf",
+                _make_pdf_content(),
+                content_type="application/pdf",
+            ),
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Choose a project you can edit")
+        self.assertFalse(ProcessingJob.objects.exists())
+
+    def test_project_entry_points_use_permission_not_global_role(self):
+        self.client.force_login(self.editor)
+        project_list = self.client.get(reverse("collection_list"))
+        project_detail = self.client.get(reverse("collection_detail", args=[self.project.pk]))
+        expected = f'{reverse("document_new")}?project={self.project.pk}'
+        self.assertContains(project_list, expected)
+        self.assertContains(project_detail, expected)
+
+        self.client.force_login(self.viewer)
+        project_detail = self.client.get(reverse("collection_detail", args=[self.project.pk]))
+        self.assertNotContains(project_detail, expected)
+
+    def test_document_list_represents_source_once_across_revisions(self):
+        first_revision = Document.objects.create(
+            collection=self.project,
+            external_id="revision-1",
+            filename="archive.pdf",
+            sha256="same-source",
+        )
+        Document.objects.create(
+            collection=self.project,
+            external_id="revision-2",
+            filename="archive.pdf",
+            sha256="same-source",
+        )
+        SourceDocument.objects.create(
+            collection=self.project,
+            filename="archive.pdf",
+            sha256="same-source",
+            active_document=first_revision,
+            uploaded_by=self.editor,
+        )
+        self.client.force_login(self.editor)
+        response = self.client.get(reverse("document_list"))
+        self.assertEqual(len(response.context["documents"]), 1)
+        self.assertContains(response, "archive.pdf", count=1)
+
+    def test_german_primary_workflow_labels_render(self):
+        from workbench.models import UserPreferences
+
+        preferences = UserPreferences.get_or_create_for_user(self.editor)
+        preferences.ui_language = "de"
+        preferences.save(update_fields=["ui_language"])
+        self.client.force_login(self.editor)
+
+        dashboard = self.client.get(reverse("dashboard"))
+        upload = self.client.get(reverse("document_new"))
+        self.assertContains(dashboard, "Dokument hinzufügen")
+        self.assertContains(upload, "Projekt")
+        self.assertContains(upload, "PDF auswählen oder hier ablegen")
+        self.assertContains(upload, "Standardanalyse")
+        self.assertContains(upload, "Hochladen und analysieren")
+
+
 class AuthorizationTest(TestCase):
     """Test project access policy."""
 

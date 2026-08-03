@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "Documents" %}{% endblock %}
+
+{% block content %}
+<div class="document-list">
+    <div class="page-header">
+        <div><h1>{% trans "Documents" %}</h1><p class="page-intro">{% trans "Uploaded sources and their latest analysis status." %}</p></div>
+        {% if can_add_document %}<a href="{% url 'document_new' %}" class="btn btn-primary">{% trans "Add document" %}</a>{% endif %}
+    </div>
+    <div class="item-list">
+        {% for document in documents %}
+            {% if document.active_document %}<a href="{% url 'document_detail' document.active_document.id %}" class="item-row">
+            {% elif document.latest_job %}<a href="{% url 'job_status' document.latest_job.id %}" class="item-row">
+            {% else %}<div class="item-row">{% endif %}
+                <span><strong>{{ document.filename }}</strong><small>{{ document.collection.name }} · {{ document.created_at|date:"SHORT_DATE_FORMAT" }}</small></span>
+                <span class="status-badge {% if document.active_document %}status-ready{% endif %}">{% if document.active_document %}{% trans "Ready" %}{% elif document.latest_job %}{{ document.latest_job.get_state_display }}{% else %}{% trans "Uploaded" %}{% endif %}</span>
+            {% if document.active_document or document.latest_job %}</a>{% else %}</div>{% endif %}
+        {% empty %}
+        <div class="empty-state"><h2>{% trans "No documents yet" %}</h2><p>{% trans "Documents you can access will appear here." %}</p></div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

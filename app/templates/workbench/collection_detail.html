@@ -4,12 +4,14 @@
 
 {% block content %}
 <div class="collection-detail">
-    <h1>{{ collection.name }}</h1>
-    <p>{{ collection.description }}</p>
+    <div class="page-header">
+        <div><p class="eyebrow">{% trans "Project" %}</p><h1>{{ collection.name }}</h1><p class="page-intro">{{ collection.description }}</p></div>
+        {% if can_edit_project %}<a href="{% url 'document_new' %}?project={{ collection.id }}" class="btn btn-primary">{% trans "Add document" %}</a>{% endif %}
+    </div>
 
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="stat-value">{{ documents|length }}</div>
+            <div class="stat-value">{{ source_documents|length }}</div>
             <div class="stat-label">{% trans "Documents" %}</div>
         </div>
         <div class="stat-card">
@@ -22,30 +24,29 @@
         </div>
     </div>
 
-    {% if is_curator or is_admin %}
-    <div style="margin: 1rem 0">
-        <a href="{% url 'project_process' collection.id %}" class="btn btn-primary">{% trans "Process a document" %}</a>
-    </div>
-    {% endif %}
-
     <h2>{% trans "Documents" %}</h2>
     <table class="data-table">
         <thead>
             <tr>
-                <th>{% trans "External ID" %}</th>
                 <th>{% trans "Filename" %}</th>
-                <th>{% trans "Pages" %}</th>
+                <th>{% trans "Status" %}</th>
+                <th>{% trans "Uploaded" %}</th>
+                <th>{% trans "Actions" %}</th>
             </tr>
         </thead>
         <tbody>
-            {% for doc in documents %}
+            {% for doc in source_documents %}
             <tr>
-                <td><a href="{% url 'document_detail' doc.id %}">{{ doc.external_id }}</a></td>
                 <td>{{ doc.filename }}</td>
-                <td>{{ doc.page_count }}</td>
+                <td>{% if doc.active_document %}{% trans "Ready" %}{% elif doc.latest_job %}{{ doc.latest_job.get_state_display }}{% else %}{% trans "Uploaded" %}{% endif %}</td>
+                <td>{{ doc.created_at|date:"SHORT_DATE_FORMAT" }}</td>
+                <td>
+                    {% if doc.active_document %}<a href="{% url 'document_detail' doc.active_document.id %}" class="btn btn-sm">{% trans "Open" %}</a>
+                    {% elif doc.latest_job %}<a href="{% url 'job_status' doc.latest_job.id %}" class="btn btn-sm">{% trans "View status" %}</a>{% endif %}
+                </td>
             </tr>
             {% empty %}
-            <tr><td colspan="3">{% trans "No documents." %}</td></tr>
+            <tr><td colspan="4">{% trans "No documents in this project yet." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>

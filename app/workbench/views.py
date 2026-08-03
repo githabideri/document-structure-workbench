@@ -16,6 +16,7 @@ from django.db import transaction
 from django.db.models import Count, Q, Avg, F
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 from django.contrib.auth import logout as auth_logout
@@ -110,6 +111,32 @@ def assign_candidate_order(task, first, second):
 
 @login_required
 def dashboard(request):
+    from .models import ProcessingJob, SourceDocument
+    from .policy import ProjectAccessPolicy
+
+    policy = ProjectAccessPolicy(user=request.user)
+    visible_projects = policy.visible_projects()
+    editable_projects = [project for project in visible_projects if policy.can_edit(project)]
+
+    recent_documents = list(
+        SourceDocument.objects.filter(
+            collection__in=visible_projects,
+            is_archived=False,
+        ).select_related("collection", "active_document")[:6]
+    )
+    for source in recent_documents:
+        source.latest_job = source.processing_jobs.first()
+
+    active_states = ["queued", "submitting", "processing", "importing"]
+    active_jobs = ProcessingJob.objects.filter(
+        source_document__collection__in=visible_projects,
+        state__in=active_states,
+    ).select_related("source_document", "source_document__collection")[:6]
+    attention_jobs = ProcessingJob.objects.filter(
+        source_document__collection__in=visible_projects,
+        state__in=["submission_uncertain", "interrupted", "partial", "failed"],
+    ).select_related("source_document", "source_document__collection")[:6]
+
     tasks = ReviewTask.objects.filter(assigned_to=request.user)
     completed = tasks.filter(state="completed").count()
     in_progress = tasks.filter(state="in_progress").count()
@@ -129,6 +156,10 @@ def dashboard(request):
         "is_reviewer": is_reviewer(request.user),
         "is_curator": is_curator(request.user),
         "is_admin": is_admin(request.user),
+        "can_add_document": bool(editable_projects),
+        "recent_documents": recent_documents,
+        "active_jobs": active_jobs,
+        "attention_jobs": attention_jobs,
     })
 
 
@@ -138,8 +169,13 @@ def dashboard(request):
 def collection_list(request):
     from .policy import ProjectAccessPolicy
     policy = ProjectAccessPolicy(user=request.user)
-    collections = policy.visible_projects()
-    return render(request, "workbench/collection_list.html", {"collections": collections})
+    collections = list(policy.visible_projects())
+    for collection in collections:
+        collection.user_can_edit = policy.can_edit(collection)
+    return render(request, "workbench/collection_list.html", {
+        "collections": collections,
+        "can_add_document": any(project.user_can_edit for project in collections),
+    })
 
 
 @login_required
@@ -151,13 +187,18 @@ def collection_detail(request, collection_id):
         messages.error(request, _("You do not have access to this project."))
         return redirect("collection_list")
 
-    documents = collection.documents.filter(is_archived=False)
+    source_documents = list(
+        collection.source_documents.filter(is_archived=False).select_related("active_document")
+    )
+    for source in source_documents:
+        source.latest_job = source.processing_jobs.first()
     tables = TableCandidate.objects.filter(document__collection=collection)
     reviews = Review.objects.filter(review_task__table_candidate__document__collection=collection)
 
     return render(request, "workbench/collection_detail.html", {
         "collection": collection,
-        "documents": documents,
+        "source_documents": source_documents,
+        "can_edit_project": policy.can_edit(collection),
         "total_tables": tables.count(),
         "total_reviews": reviews.count(),
     })
@@ -167,15 +208,33 @@ def collection_detail(request, collection_id):
 
 @login_required
 def document_list(request):
+    from .models import SourceDocument
     from .policy import ProjectAccessPolicy
     policy = ProjectAccessPolicy(user=request.user)
     visible_collections = policy.visible_projects()
-    documents = Document.objects.filter(is_archived=False, collection__in=visible_collections)
+    documents = SourceDocument.objects.filter(
+        is_archived=False,
+        collection__in=visible_collections,
+    ).select_related("collection", "active_document")
     collection_id = request.GET.get("collection")
     if collection_id:
         documents = documents.filter(collection_id=collection_id)
 
-    return render(request, "workbench/document_list.html", {"documents": documents})
+    documents = list(documents)
+    for document in documents:
+        document.latest_job = document.processing_jobs.first()
+    editable_projects = [project for project in visible_collections if policy.can_edit(project)]
+
+    return render(request, "workbench/document_list.html", {
+        "documents": documents,
+        "can_add_document": bool(editable_projects),
+    })
+
+
+@login_required
+def help_page(request):
+    """Plain-language orientation for the primary document workflow."""
+    return render(request, "workbench/help.html")
 
 
 @login_required
@@ -856,50 +915,84 @@ def serve_htmx(request):
 # --- Upload / Processing ---
 
 @login_required
-def project_process(request, project_id):
-    """Upload a PDF to a project and start processing."""
+def document_new(request, project_id=None):
+    """Choose an editable project, upload a PDF, and start processing."""
     from .policy import ProjectAccessPolicy
     from .services import DocumentIngestionService, IngestionError
-    from .models import ProcessingPreset, Collection
+    from .models import ProcessingPreset
 
-    collection = get_object_or_404(Collection, pk=project_id)
     policy = ProjectAccessPolicy(user=request.user)
-    if not policy.can_edit(collection):
-        messages.error(request, _("You do not have edit access to this project."))
-        return redirect("collection_detail", collection_id=project_id)
+    editable_projects = [
+        project for project in policy.visible_projects()
+        if policy.can_edit(project)
+    ]
+    editable_project_ids = {project.pk for project in editable_projects}
+
+    requested_project_id = project_id or request.POST.get("project") or request.GET.get("project")
+    if not requested_project_id and len(editable_projects) == 1:
+        requested_project_id = editable_projects[0].pk
+
+    collection = None
+    if requested_project_id:
+        try:
+            requested_project_id = int(requested_project_id)
+        except (TypeError, ValueError):
+            requested_project_id = None
+        if requested_project_id in editable_project_ids:
+            collection = next(
+                project for project in editable_projects if project.pk == requested_project_id
+            )
+
+    for project in editable_projects:
+        project.is_selected = collection is not None and project.pk == collection.pk
+
+    presets = ProcessingPreset.objects.filter(is_active=True)
+    standard_preset = presets.filter(slug="quick-extraction").first() or presets.first()
+    advanced_presets = presets.exclude(pk=standard_preset.pk) if standard_preset else presets.none()
+    selected_preset_slug = request.POST.get(
+        "preset",
+        standard_preset.slug if standard_preset else "",
+    )
 
     if request.method == "POST":
-        if "file" not in request.FILES:
-            messages.error(request, _("No file selected."))
-            return redirect("project_process", project_id=project_id)
+        if collection is None:
+            messages.error(request, _("Choose a project you can edit."))
+        elif "file" not in request.FILES:
+            messages.error(request, _("Choose a PDF to upload."))
+        else:
+            uploaded_file = request.FILES["file"]
+            service = DocumentIngestionService(user=request.user, policy=policy)
+            try:
+                job = service.create_upload(
+                    project=collection,
+                    uploaded_file=uploaded_file,
+                    preset_slug=selected_preset_slug,
+                )
+            except IngestionError as error:
+                messages.error(request, str(error))
+            else:
+                log_audit(request, "document_uploaded", "SourceDocument", job.source_document_id)
+                messages.success(
+                    request,
+                    _("Upload received. The document has been queued for analysis."),
+                )
+                return redirect("job_status", job_id=job.pk)
 
-        uploaded_file = request.FILES["file"]
-        preset_slug = request.POST.get("preset", "quick-extraction")
-
-        service = DocumentIngestionService(user=request.user, policy=policy)
-        try:
-            job = service.create_upload(
-                project=collection,
-                uploaded_file=uploaded_file,
-                preset_slug=preset_slug,
-            )
-        except IngestionError as e:
-            messages.error(request, str(e))
-            return redirect("project_process", project_id=project_id)
-
-        log_audit(request, "document_uploaded", "SourceDocument", job.source_document_id)
-        messages.success(
-            request,
-            _("Upload received. The document has been queued for analysis."),
-        )
-        return redirect("job_status", job_id=job.pk)
-
-    # GET: show upload form
-    presets = ProcessingPreset.objects.filter(is_active=True)
-    return render(request, "workbench/project_process.html", {
-        "collection": collection,
-        "presets": presets,
+    return render(request, "workbench/document_new.html", {
+        "editable_projects": editable_projects,
+        "selected_project": collection,
+        "standard_preset": standard_preset,
+        "advanced_presets": advanced_presets,
+        "selected_preset_slug": selected_preset_slug,
     })
+
+
+@login_required
+def project_process(request, project_id):
+    """Compatibility route for old project-specific upload links."""
+    if request.method == "GET":
+        return redirect(f"{reverse('document_new')}?project={project_id}")
+    return document_new(request, project_id=project_id)
 
 
 @login_required

@@ -5,56 +5,87 @@
 {% block content %}
 <div class="dashboard">
 
-    <h1>{% blocktrans %}Welcome, {{ username }}{% endblocktrans %}</h1>
-
-    <!-- Primary actions -->
-    <div class="primary-actions">
-        <a href="{% url 'collection_list' %}" class="action-card" id="action-upload">
-            <div class="action-icon">📄</div>
-            <h2>{% trans "Process a document" %}</h2>
-            <p>{% trans "Upload a PDF and extract its content" %}</p>
-        </a>
-        <a href="{% url 'review_next' %}" class="action-card" id="action-review">
-            <div class="action-icon">🔍</div>
-            <h2>{% trans "Review results" %}</h2>
-            <p>{% trans "Compare and evaluate extraction results" %}</p>
-        </a>
-        <a href="{% url 'collection_list' %}" class="action-card" id="action-learn">
-            <div class="action-icon">📚</div>
-            <h2>{% trans "Learn with examples" %}</h2>
-            <p>{% trans "Explore benchmark documents with ground truth" %}</p>
-        </a>
-    </div>
-
-    <!-- Stats -->
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-value">{{ total_tasks }}</div>
-            <div class="stat-label">{% trans "Total Tasks" %}</div>
+    <div class="page-header">
+        <div>
+            <h1>{% blocktrans %}Welcome, {{ username }}{% endblocktrans %}</h1>
+            <p class="page-intro">{% trans "Turn scans into structured documents you can inspect and improve." %}</p>
         </div>
-        <div class="stat-card">
-            <div class="stat-value">{{ completed }}</div>
-            <div class="stat-label">{% trans "Completed" %}</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value">{{ in_progress }}</div>
-            <div class="stat-label">{% trans "In Progress" %}</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value">{{ unassigned }}</div>
-            <div class="stat-label">{% trans "Available" %}</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value">{{ needs_expert }}</div>
-            <div class="stat-label">{% trans "Needs Expert" %}</div>
-        </div>
-    </div>
-
-    <div class="actions">
-        {% if unassigned > 0 %}
-        <a href="{% url 'review_next' %}" class="btn btn-primary">{% trans "Start Next Review" %}</a>
+        {% if can_add_document %}
+        <a href="{% url 'document_new' %}" class="btn btn-primary" id="action-upload">{% trans "Add document" %}</a>
         {% endif %}
-        <a href="{% url 'review_list' %}" class="btn btn-secondary">{% trans "View All Reviews" %}</a>
     </div>
+
+    {% if active_jobs %}
+    <section class="dashboard-section">
+        <h2>{% trans "Active processing" %}</h2>
+        <div class="item-list">
+            {% for job in active_jobs %}
+            <a href="{% url 'job_status' job.id %}" class="item-row">
+                <span><strong>{{ job.source_document.filename }}</strong><small>{{ job.source_document.collection.name }}</small></span>
+                <span class="status-badge status-active">{{ job.get_state_display }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="dashboard-section">
+        <div class="section-heading">
+            <h2>{% trans "Recent documents" %}</h2>
+            <a href="{% url 'document_list' %}">{% trans "View all" %}</a>
+        </div>
+        <div class="item-list">
+            {% for document in recent_documents %}
+                {% if document.active_document %}
+                <a href="{% url 'document_detail' document.active_document.id %}" class="item-row">
+                {% elif document.latest_job %}
+                <a href="{% url 'job_status' document.latest_job.id %}" class="item-row">
+                {% else %}
+                <div class="item-row">
+                {% endif %}
+                    <span><strong>{{ document.filename }}</strong><small>{{ document.collection.name }} · {{ document.created_at|date:"SHORT_DATE_FORMAT" }}</small></span>
+                    {% if document.active_document %}
+                    <span class="status-badge status-ready">{% trans "Ready" %}</span>
+                    {% elif document.latest_job %}
+                    <span class="status-badge">{{ document.latest_job.get_state_display }}</span>
+                    {% endif %}
+                {% if document.active_document or document.latest_job %}</a>{% else %}</div>{% endif %}
+            {% empty %}
+            <div class="empty-state">
+                <h3>{% trans "No documents yet" %}</h3>
+                {% if can_add_document %}
+                <p>{% trans "Add a PDF to begin building your project." %}</p>
+                <a href="{% url 'document_new' %}" class="btn btn-primary">{% trans "Add document" %}</a>
+                {% else %}
+                <p>{% trans "You can view documents after a project editor adds them." %}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    {% if attention_jobs %}
+    <section class="dashboard-section">
+        <h2>{% trans "Items needing attention" %}</h2>
+        <div class="item-list">
+            {% for job in attention_jobs %}
+            <a href="{% url 'job_status' job.id %}" class="item-row">
+                <span><strong>{{ job.source_document.filename }}</strong><small>{{ job.status_message|default:job.error_message|truncatechars:100 }}</small></span>
+                <span class="status-badge status-warning">{{ job.get_state_display }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if total_tasks %}
+    <section class="dashboard-section evaluation-summary">
+        <div class="section-heading">
+            <div><h2>{% trans "Evaluation" %}</h2><p>{% trans "Assigned comparison and review work." %}</p></div>
+            <a href="{% url 'review_list' %}">{% trans "Open reviews" %}</a>
+        </div>
+        <p>{% blocktrans %}{{ in_progress }} in progress · {{ needs_expert }} need expert attention · {{ completed }} completed{% endblocktrans %}</p>
+    </section>
+    {% endif %}
 </div>
 {% endblock %}

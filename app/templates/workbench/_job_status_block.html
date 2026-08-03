@@ -57,7 +57,7 @@
     </div>
     {% elif not job.is_active %}
     <div class="job-actions">
-        <a href="{% url 'project_process' job.source_document.collection_id %}" class="btn btn-primary">{% trans "Upload Another" %}</a>
+        <a href="{% url 'document_new' %}?project={{ job.source_document.collection_id }}" class="btn btn-primary">{% trans "Add another document" %}</a>
         <a href="{% url 'collection_detail' job.source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
     </div>
     {% endif %}

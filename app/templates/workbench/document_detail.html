@@ -25,7 +25,7 @@
             <nav class="page-list">
                 {% for item in pages %}
                 <a class="page-list-item{% if item.id == selected_page.id %} is-selected{% endif %}"
-                   href="?page={{ item.page_number }}"
+                   href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ item.page_number }}"
                    aria-current="{% if item.id == selected_page.id %}page{% endif %}">
                     <span class="page-number">{{ item.page_number }}</span>
                     {% if item.image_path %}<img src="{% url 'page_image' item.id %}" alt="" loading="lazy">{% endif %}
@@ -40,9 +40,9 @@
                 <h2>{% trans "Original scan" %}</h2>
                 {% if selected_page %}
                 <div class="scan-navigation">
-                    {% if previous_page %}<a href="?page={{ previous_page.page_number }}" aria-label="{% trans 'Previous page' %}">←</a>{% endif %}
+                    {% if previous_page %}<a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ previous_page.page_number }}" aria-label="{% trans 'Previous page' %}">←</a>{% endif %}
                     <span>{% trans "Page" %} {{ selected_page.page_number }}</span>
-                    {% if next_page %}<a href="?page={{ next_page.page_number }}" aria-label="{% trans 'Next page' %}">→</a>{% endif %}
+                    {% if next_page %}<a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ next_page.page_number }}" aria-label="{% trans 'Next page' %}">→</a>{% endif %}
                 </div>
                 {% endif %}
             </div>
@@ -58,7 +58,7 @@
                     <img id="page-image" src="{% url 'page_image' selected_page.id %}" alt="{% trans 'Original document page' %}">
                     <svg class="region-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="{% trans 'Detected regions' %}">
                         {% for region in page_regions %}
-                        <a href="?page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link" data-region-id="{{ region.id }}">
+                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link" data-region-id="{{ region.id }}">
                             <rect class="region-box region-{{ region.region_type }}{% if region.id == selected_region.id %} is-selected{% endif %}"
                                   x="{{ region.left }}" y="{{ region.top }}" width="{{ region.overlay_width|floatformat:'6' }}" height="{{ region.overlay_height|floatformat:'6' }}"
                                   data-region-id="{{ region.id }}" role="button" tabindex="0">
@@ -69,7 +69,7 @@
                     </svg>
                     <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
                         {% for region in page_regions %}
-                        <a href="?page={{ selected_page.page_number }}&region={{ region.id }}" onclick="window.location.assign(this.getAttribute('href')); return false;" class="region-hit region-link" data-region-id="{{ region.id }}" data-region-type="{{ region.region_type }}"
+                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" onclick="window.location.assign(this.getAttribute('href')); return false;" class="region-hit region-link" data-region-id="{{ region.id }}" data-region-type="{{ region.region_type }}"
                            style="left:{{ region.overlay_left_percent|floatformat:'4' }}%;top:{{ region.overlay_top_percent|floatformat:'4' }}%;width:{{ region.overlay_width_percent|floatformat:'4' }}%;height:{{ region.overlay_height_percent|floatformat:'4' }}%;"
                            aria-label="{{ region.get_region_type_display }}">{{ region.get_region_type_display }}</a>
                         {% endfor %}
@@ -207,7 +207,7 @@
     const counts = {};
     links.forEach((link) => {
         const box = link.querySelector('.region-box');
-        const type = link.dataset.regionType || [...box.classList].find((name) => name.startsWith('region-') && name !== 'region-box')?.replace('region-', '') || 'other';
+        const type = link.dataset.regionType || [...(box?.classList || [])].find((name) => name.startsWith('region-') && name !== 'region-box')?.replace('region-', '') || 'other';
         counts[type] = (counts[type] || 0) + 1;
         link.dataset.regionType = type;
         const openRegion = (event) => {

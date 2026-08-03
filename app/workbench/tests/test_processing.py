@@ -1171,6 +1171,31 @@ class DocumentWorkspaceTest(TestCase):
         image_response = self.client.get(reverse("page_image", args=[self.page.pk]))
         self.assertRedirects(image_response, reverse("document_list"))
 
+    def test_workspace_accepts_stable_source_and_revision_deep_link(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("document_detail", args=[self.source.pk]),
+            {"revision": self.document.pk, "page": 1, "region": self.region.pk},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["document"], self.document)
+        self.assertEqual(response.context["source_document"], self.source)
+        self.assertContains(
+            response,
+            f"/documents/{self.source.pk}/?revision={self.document.pk}&page=1&region={self.region.pk}",
+        )
+
+    def test_revision_deep_link_cannot_cross_source_documents(self):
+        other_source = SourceDocument.objects.create(
+            collection=self.collection, filename="other.pdf", uploaded_by=self.user,
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("document_detail", args=[other_source.pk]),
+            {"revision": self.document.pk},
+        )
+        self.assertEqual(response.status_code, 404)
+
 
 @override_settings(STORAGES={
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

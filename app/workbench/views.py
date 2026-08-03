@@ -23,7 +23,7 @@ from django.contrib.auth import logout as auth_logout
 
 from .models import (
     AuditEvent, Collection, Decision, Document, ExtractionRun,
-    Page, PageRegion, ProcessingArtifact, Review, ReviewTask, TableCandidate,
+    Page, PageRegion, ProcessingArtifact, Review, ReviewTask, SourceDocument, TableCandidate,
     TableExtraction,
 )
 
@@ -241,10 +241,27 @@ def help_page(request):
 @login_required
 def document_detail(request, document_id):
     from .policy import ProjectAccessPolicy
-    document = get_object_or_404(
-        Document.objects.select_related("collection", "processing_job__source_document"),
-        pk=document_id,
-    )
+    revision_id = request.GET.get("revision")
+    source_document = None
+    if revision_id:
+        # Citation URLs use the stable source ID plus an immutable revision ID:
+        # /documents/<source-id>/?revision=<revision-id>&page=&region=
+        source_document = get_object_or_404(
+            SourceDocument.objects.select_related("collection"), pk=document_id,
+        )
+        document = get_object_or_404(
+            Document.objects.select_related("collection", "processing_job__source_document"),
+            pk=revision_id,
+            processing_job__source_document=source_document,
+        )
+    else:
+        # Keep legacy revision URLs functional while callers migrate to the
+        # explicit source/revision form.
+        document = get_object_or_404(
+            Document.objects.select_related("collection", "processing_job__source_document"),
+            pk=document_id,
+        )
+        source_document = getattr(getattr(document, "processing_job", None), "source_document", None)
     policy = ProjectAccessPolicy(user=request.user)
     if not policy.can_view(document.collection):
         messages.error(request, _("You do not have access to this document."))
@@ -309,6 +326,9 @@ def document_detail(request, document_id):
         "selected_region": selected_region,
         "page_text": page_text,
         "processing_job": processing_job,
+        "source_document": source_document,
+        "workspace_document_id": source_document.id if source_document else document.id,
+        "workspace_revision_id": document.id,
     })
 
 

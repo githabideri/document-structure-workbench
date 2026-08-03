@@ -1,16 +1,16 @@
 """
-Processing worker — claims queued jobs, runs Docling, imports results.
+Processing worker — claims queued jobs, runs Docling async, imports results.
 
 Usage:
     python manage.py run_processing_worker
 
-This worker:
-    - Polls for queued jobs every 5 seconds
-    - Claims a job atomically (state: queued -> submitting)
-    - Submits to Docling server
-    - Polls Docling for completion
-    - Imports results into database
-    - Handles failures gracefully (one failed job doesn't crash the loop)
+Async sequence:
+    1. Claim job (queued -> submitting)
+    2. POST /v1/convert/file/async  -> task_id
+    3. GET  /v1/status/poll/task_id  -> poll until success/failed
+    4. GET  /v1/result/task_id  -> fetch result
+    5. Import results into database
+    6. Mark job complete/partial/failed
 """
 import logging
 import signal
@@ -42,7 +42,7 @@ class Command(BaseCommand):
             "--docling-url",
             type=str,
             default=None,
-            help="Docling server URL (overrides DSW_DOCLING_SERVER_URL)",
+            help="Docling server URL (overrides DSW_DOCLING_API_URL)",
         )
         parser.add_argument(
             "--once",
@@ -55,11 +55,9 @@ class Command(BaseCommand):
         self.once = options["once"]
         self.running = True
 
-        # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
-        # Initialize processor
         self.processor = DoclingServeProcessor(
             server_url=options["docling_url"],
         )
@@ -104,7 +102,6 @@ class Command(BaseCommand):
                 if not job:
                     return None
 
-                # Atomic state transition
                 job.transition_to("submitting")
                 job.processor = "docling"
                 job.save(update_fields=["state", "processor", "started_at"])
@@ -116,25 +113,25 @@ class Command(BaseCommand):
             return None
 
     def _process_job(self, job: ProcessingJob):
-        """Process a single job end-to-end."""
+        """Process a single job end-to-end via async API."""
         logger.info("Processing job %d: %s", job.pk, job.source_document.filename)
 
         try:
             # 1. Submit to Docling (state already "submitting" from claim)
-            external_job_id = self.processor.submit(
+            task_id = self.processor.submit(
                 job.source_document,
                 job.preset_snapshot or {},
             )
-            job.external_job_id = external_job_id
+            job.external_job_id = task_id
             job.save(update_fields=["external_job_id"])
 
             # 2. Poll for completion
             job.transition_to("processing")
-            self._wait_for_completion(job, external_job_id)
+            self._wait_for_completion(job, task_id)
 
-            # 3. Collect results
+            # 3. Fetch results
             job.transition_to("importing")
-            result = self.processor.collect_results(external_job_id)
+            result = self.processor.collect_results(task_id)
 
             # 4. Import into database
             importer = ResultImporter(job)
@@ -162,40 +159,39 @@ class Command(BaseCommand):
             logger.exception("Job %d failed: %s", job.pk, e)
             self._fail_job(job, str(e))
 
-    def _wait_for_completion(self, job, external_job_id, timeout=3600):
-        """Poll Docling server until job completes or times out."""
+    def _wait_for_completion(self, job, task_id, timeout=None):
+        """Poll Docling async API until job completes or times out."""
+        if timeout is None:
+            timeout = self.processor.job_timeout
+
         start = time.time()
         while time.time() - start < timeout:
-            status = self.processor.get_status(external_job_id)
+            status = self.processor.get_status(task_id)
 
-            if status["state"] in ("completed", "success"):
+            if status["state"] in ("success", "completed"):
                 return
             elif status["state"] in ("failed", "error"):
                 raise RuntimeError(
-                    f"Docling job failed: {status.get('error', 'unknown error')}"
+                    f"Docling task failed: {status.get('error', 'unknown error')}"
                 )
             elif status["state"] == "cancelled":
-                raise RuntimeError("Docling job was cancelled")
+                raise RuntimeError("Docling task was cancelled")
 
-            # Log progress
             progress = status.get("progress", 0)
             if isinstance(progress, (int, float)) and progress > 0:
                 logger.info("Job %d: %.0f%%", job.pk, progress)
 
             time.sleep(5)
 
-        raise TimeoutError(
-            f"Docling job timed out after {timeout}s"
-        )
+        raise TimeoutError(f"Docling task timed out after {timeout}s")
 
     def _fail_job(self, job, error_message):
         """Mark a job as failed."""
         try:
             job.transition_to("failed")
         except Exception:
-            # Already in a terminal state
             pass
-        job.error_message = error_message[:500]  # Truncate
+        job.error_message = error_message[:500]
         job.finished_at = timezone.now()
         job.save(update_fields=["state", "error_message", "finished_at"])
         logger.error("Job %d failed: %s", job.pk, error_message)

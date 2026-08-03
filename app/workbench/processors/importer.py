@@ -1,21 +1,33 @@
 """
-Result importer — takes ProcessorResult and creates database records.
+Result importer — takes ProcessorResult and creates/updates database records.
 
-Creates:
+Idempotent: re-importing the same job updates or replaces records without
+creating duplicates.
+
+Creates/updates:
     Document (processed, linked to SourceDocument)
     Page (with image paths, dimensions, text)
-    PageRegion (with normalized coordinates 0-1)
+    PageRegion (with normalized coordinates 0-1, text retained)
     TableCandidate (with crop paths)
     ExtractionRun (per profile)
     TableExtraction (per table, per profile)
     ProcessingArtifact (for layout JSON, page text, etc.)
 
-Key rules:
-    - Bounding boxes are normalized to 0-1 using real page dimensions
-    - Page text is stored in full (no truncation)
-    - full_clean() is called before saving to enforce model validation
-    - Duplicate processed Documents are not created on re-import
+Image persistence:
+    - Decodes embedded base64 images from Docling response
+    - Writes to job/source-specific artifact directory
+    - Stores relative path in Page.image_path
+    - Saves page width and height
+    - Verifies file exists before committing
+
+Suggested layout:
+    pages/<source-sha>/<job-id>/page-0001.png
+    tables/<source-sha>/<job-id>/table-0001.png
+
+Table crops are generated from page image + normalized bbox when Docling
+does not return table crops directly.
 """
+import base64
 import json
 import logging
 from pathlib import Path
@@ -42,19 +54,27 @@ logger = logging.getLogger(__name__)
 
 
 class ResultImporter:
-    """Import processor results into the database."""
+    """Import processor results into the database (idempotent)."""
 
     def __init__(self, job: ProcessingJob):
         self.job = job
         self.source_doc = job.source_document
         self.collection = self.source_doc.collection
+        self.artifacts_base = Path(
+            getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts")
+        ).resolve()
+        self.source_sha = self.source_doc.sha256[:12] or f"job-{self.job.pk}"
+        self.job_dir = f"job-{self.job.pk}"
 
     def import_results(self, result: ProcessorResult) -> dict:
         """
-        Import processor results into database.
+        Import processor results into database (idempotent).
+
+        On reimport of the same job, updates or replaces pages, regions,
+        and artifacts without duplicating records.
 
         Returns:
-            dict with counts of created records.
+            dict with counts of created/updated records.
         """
         counts = {
             "pages": 0,
@@ -62,14 +82,18 @@ class ResultImporter:
             "tables": 0,
             "extractions": 0,
             "artifacts": 0,
+            "images_written": 0,
         }
 
         with transaction.atomic():
-            # Create or get processed Document linked to SourceDocument
+            # Get or create processed Document
             document = self._get_or_create_document(result)
 
-            # Import pages
-            counts["pages"] = self._import_pages(document, result)
+            # Delete existing records for this job (idempotent reimport)
+            self._cleanup_existing_records(document, result)
+
+            # Import pages with images
+            counts["pages"], counts["images_written"] = self._import_pages(document, result)
 
             # Import regions
             counts["regions"] = self._import_regions(result, document)
@@ -86,27 +110,22 @@ class ResultImporter:
             self.job.save(update_fields=["pages_processed", "tables_found"])
 
         logger.info(
-            "Import complete: %d pages, %d regions, %d tables, %d extractions",
-            counts["pages"], counts["regions"], counts["tables"], counts["extractions"],
+            "Import complete: %d pages, %d regions, %d tables, %d extractions, "
+            "%d images written",
+            counts["pages"], counts["regions"], counts["tables"],
+            counts["extractions"], counts["images_written"],
         )
         return counts
 
     def _get_or_create_document(self, result: ProcessorResult) -> Document:
-        """
-        Get or create the processed Document linked to SourceDocument.
-
-        Uses SourceDocument.processed_document FK to prevent duplicates.
-        """
-        # Check if a processed document already exists via FK
+        """Get or create the processed Document linked to SourceDocument."""
         if hasattr(self.source_doc, "processed_document") and self.source_doc.processed_document:
             doc = self.source_doc.processed_document
-            # Update page_count if we have better data
             if result.pages_processed and doc.page_count != result.pages_processed:
                 doc.page_count = result.pages_processed
                 doc.save(update_fields=["page_count"])
             return doc
 
-        # Create Document in the collection
         document = Document.objects.create(
             collection=self.collection,
             external_id=self.source_doc.filename.replace(".pdf", ""),
@@ -116,21 +135,48 @@ class ResultImporter:
             source_path=self.source_doc.file_path,
         )
 
-        # Link SourceDocument to Document via FK
         self.source_doc.processed_document = document
         self.source_doc.save(update_fields=["processed_document"])
 
         return document
 
-    def _import_pages(self, document: Document, result: ProcessorResult) -> int:
-        """Import page records with image paths, dimensions, and full text."""
+    def _cleanup_existing_records(self, document: Document, result: ProcessorResult):
+        """Clean up existing records for idempotent reimport."""
+        # Delete existing pages for this document (will be recreated)
+        Page.objects.filter(document=document).delete()
+        # Delete existing regions for this job
+        PageRegion.objects.filter(job=self.job).delete()
+        # Delete existing artifacts for this job
+        ProcessingArtifact.objects.filter(job=self.job).delete()
+        # Delete existing table candidates for this document
+        TableCandidate.objects.filter(document=document).delete()
+
+    def _import_pages(self, document: Document, result: ProcessorResult) -> tuple:
+        """Import pages with image persistence."""
         count = 0
+        images_written = 0
+
         for page_num in range(1, result.pages_processed + 1):
-            page, created = Page.objects.get_or_create(
+            # Persist page image
+            image_path = ""
+            page_images = result.page_images.get(page_num, {})
+            if isinstance(page_images, dict) and "data" in page_images:
+                image_path = self._persist_page_image(page_num, page_images)
+                if image_path:
+                    images_written += 1
+
+            # Get page dimensions
+            dims = result.processor_metadata.get("page_dimensions", {}).get(page_num, {})
+            page_width = dims.get("width", 0)
+            page_height = dims.get("height", 0)
+
+            page, created = Page.objects.update_or_create(
                 document=document,
                 page_number=page_num,
                 defaults={
-                    "image_path": result.page_images.get(page_num, ""),
+                    "image_path": image_path,
+                    "width": page_width,
+                    "height": page_height,
                 },
             )
             if created:
@@ -144,14 +190,56 @@ class ResultImporter:
                     artifact_type="page_text",
                     page_number=page_num,
                     defaults={
-                        "data": {"text": text},  # Full text — no truncation
+                        "data": {"text": text},
                     },
                 )
 
-        return count
+        return count, images_written
+
+    def _persist_page_image(self, page_num: int, image_info: dict) -> str:
+        """
+        Decode and persist a page image.
+
+        Returns relative path or empty string on failure.
+        """
+        img_data = image_info.get("data", "")
+        img_format = image_info.get("format", "png")
+
+        if not img_data:
+            return ""
+
+        try:
+            # Decode base64
+            if "," in img_data:
+                img_data = img_data.split(",", 1)[1]
+            raw_bytes = base64.b64decode(img_data)
+        except Exception as e:
+            logger.error("Failed to decode page %d image: %s", page_num, e)
+            return ""
+
+        # Write to job-specific directory
+        rel_dir = f"pages/{self.source_sha}/{self.job_dir}"
+        rel_name = f"page-{page_num:04d}.{img_format}"
+        rel_path = f"{rel_dir}/{rel_name}"
+
+        full_path = (self.artifacts_base / rel_path).resolve()
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            full_path.write_bytes(raw_bytes)
+            # Verify file exists
+            if not full_path.exists():
+                logger.error("Page image write failed: %s", full_path)
+                return ""
+        except OSError as e:
+            logger.error("Failed to write page image %s: %s", full_path, e)
+            return ""
+
+        logger.info("Wrote page image: %s (%d bytes)", rel_path, len(raw_bytes))
+        return rel_path
 
     def _import_regions(self, result: ProcessorResult, document: Document) -> int:
-        """Import page regions with normalized coordinates (0-1 range)."""
+        """Import regions with normalized coordinates. Saves validated instance."""
         count = 0
         page_dimensions = result.processor_metadata.get("page_dimensions", {})
 
@@ -162,28 +250,8 @@ class ResultImporter:
             # Normalize bbox using real page dimensions
             left, top, right, bottom = self._normalize_bbox(bbox, page_num, page_dimensions)
 
-            # Validate before saving
-            try:
-                PageRegion(
-                    source_document=self.source_doc,
-                    job=self.job,
-                    page_number=page_num,
-                    region_type=region.get("region_type", "text")[:50],
-                    left=left,
-                    top=top,
-                    right=right,
-                    bottom=bottom,
-                    confidence=region.get("confidence"),
-                    metadata=region.get("metadata", {}),
-                ).full_clean()
-            except ValidationError as e:
-                logger.warning(
-                    "Skipping invalid region on page %d: %s",
-                    page_num, e.message,
-                )
-                continue
-
-            PageRegion.objects.create(
+            # Build region instance
+            region_obj = PageRegion(
                 source_document=self.source_doc,
                 job=self.job,
                 page_number=page_num,
@@ -193,8 +261,21 @@ class ResultImporter:
                 right=right,
                 bottom=bottom,
                 confidence=region.get("confidence"),
+                text=region.get("text", ""),
                 metadata=region.get("metadata", {}),
             )
+
+            # Validate before saving
+            try:
+                region_obj.full_clean()
+            except ValidationError as e:
+                # Log individual error messages
+                for msg in e.messages:
+                    logger.warning("Skipping invalid region on page %d: %s", page_num, msg)
+                continue
+
+            # Save the validated instance
+            region_obj.save()
             count += 1
 
         return count
@@ -222,7 +303,18 @@ class ResultImporter:
             if created:
                 tables_count += 1
 
-            # Create ExtractionRun for standard profile
+            # Persist table crop if available
+            crop_data = table_data.get("crop_data", "")
+            if crop_data and not table.crop_path:
+                crop_path = self._persist_table_crop(table_id, page_num, crop_data)
+                if crop_path:
+                    table.crop_path = crop_path
+                    table.save(update_fields=["crop_path"])
+            elif not table.crop_path and page and page.image_path:
+                # Generate crop from page image + bbox
+                self._generate_table_crop(table, page)
+
+            # Create ExtractionRun
             profile = "standard-docling"
             run, _ = ExtractionRun.objects.get_or_create(
                 document=document,
@@ -253,6 +345,76 @@ class ResultImporter:
 
         return tables_count, extractions_count
 
+    def _persist_table_crop(self, table_id: str, page_num: int, crop_data: str) -> str:
+        """Decode and persist a table crop image."""
+        try:
+            if "," in crop_data:
+                crop_data = crop_data.split(",", 1)[1]
+            raw_bytes = base64.b64decode(crop_data)
+        except Exception as e:
+            logger.error("Failed to decode table crop %s: %s", table_id, e)
+            return ""
+
+        rel_dir = f"tables/{self.source_sha}/{self.job_dir}"
+        rel_name = f"table-{page_num:04d}.png"
+        rel_path = f"{rel_dir}/{rel_name}"
+
+        full_path = (self.artifacts_base / rel_path).resolve()
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            full_path.write_bytes(raw_bytes)
+            if not full_path.exists():
+                return ""
+        except OSError:
+            return ""
+
+        return rel_path
+
+    def _generate_table_crop(self, table: TableCandidate, page: Page):
+        """Generate table crop from page image + normalized bbox."""
+        if not page.image_path or not table.bbox:
+            return
+
+        page_path = (self.artifacts_base / page.image_path).resolve()
+        if not page_path.exists():
+            return
+
+        try:
+            from PIL import Image
+            img = Image.open(page_path)
+            width, height = img.size
+
+            # Parse bbox [left, top, right, bottom] (normalized 0-1)
+            bbox = table.bbox
+            if isinstance(bbox, str):
+                import json as _json
+                bbox = _json.loads(bbox)
+            if len(bbox) != 4:
+                return
+
+            left, top, right, bottom = bbox
+            x0 = int(left * width)
+            y0 = int(top * height)
+            x1 = int(right * width)
+            y1 = int(bottom * height)
+
+            crop = img.crop((x0, y0, x1, y1))
+
+            rel_dir = f"tables/{self.source_sha}/{self.job_dir}"
+            rel_name = f"table-page{page.page_num:04d}-{table.pk}.png"
+            rel_path = f"{rel_dir}/{rel_name}"
+
+            full_path = (self.artifacts_base / rel_path).resolve()
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            crop.save(full_path)
+
+            if full_path.exists():
+                table.crop_path = rel_path
+                table.save(update_fields=["crop_path"])
+        except Exception as e:
+            logger.warning("Failed to generate table crop for %s: %s", table.pk, e)
+
     def _import_artifacts(self, result: ProcessorResult) -> int:
         """Import layout JSON and other artifacts."""
         count = 0
@@ -269,24 +431,16 @@ class ResultImporter:
 
     @staticmethod
     def _normalize_bbox(bbox: list, page_num: int, page_dimensions: dict) -> tuple:
-        """
-        Normalize bounding box to 0-1 range.
-
-        Input: [x0, y0, x1, y1] — may be pixels or already normalized
-        Output: (left, top, right, bottom) in 0-1 range
-
-        Uses actual page dimensions from Docling when available.
-        """
+        """Normalize bounding box to 0-1 range using real page dimensions."""
         if len(bbox) != 4:
             return (0.0, 0.0, 0.0, 0.0)
 
         x0, y0, x1, y1 = bbox
 
-        # Check if bbox is already normalized (all values in 0-1)
+        # Already normalized?
         if all(0 <= v <= 1 for v in bbox):
             left, top, right, bottom = x0, y0, x1, y1
         else:
-            # Pixel coordinates — normalize using page dimensions
             dims = page_dimensions.get(page_num, {})
             width = dims.get("width", 1)
             height = dims.get("height", 1)
@@ -297,19 +451,18 @@ class ResultImporter:
                 right = max(0.0, min(1.0, x1 / width))
                 bottom = max(0.0, min(1.0, y1 / height))
             else:
-                # No dimensions available — assume already normalized
                 left, top, right, bottom = x0, y0, x1, y1
 
-        # Ensure left < right, top < bottom
+        # Ensure ordering
         if left > right:
             left, right = right, left
         if top > bottom:
             top, bottom = bottom, top
 
-        # Clamp to 0-1
-        left = max(0.0, min(1.0, left))
-        top = max(0.0, min(1.0, top))
-        right = max(0.0, min(1.0, right))
-        bottom = max(0.0, min(1.0, bottom))
-
-        return (left, top, right, bottom)
+        # Clamp
+        return (
+            max(0.0, min(1.0, left)),
+            max(0.0, min(1.0, top)),
+            max(0.0, min(1.0, right)),
+            max(0.0, min(1.0, bottom)),
+        )

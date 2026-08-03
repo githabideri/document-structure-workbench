@@ -23,6 +23,7 @@ dependencies = [
     "gunicorn>=23.0",
     "bleach>=6.2",
     "markdown>=3.5",
+    "requests>=2.31",
     "whitenoise>=6.7",
 ]
 
@@ -36,7 +37,6 @@ dev = [
     "pytest>=7.0",
     "pytest-django>=4.5",
     "pytest-cov>=4.1",
-    "requests>=2.31",
 ]
 
 [tool.uv]

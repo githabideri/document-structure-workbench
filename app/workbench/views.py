@@ -926,7 +926,7 @@ def job_status(request, job_id):
 def _resolve_artifact_path(relative_path: str) -> Path:
     """Resolve and validate an artifact file path.
 
-    Uses Path.is_relative_to() for secure path traversal protection.
+    Uses explicit Boolean containment check.
     Raises Http404 if path escapes the artifacts base directory.
     """
     from django.http import Http404
@@ -934,10 +934,10 @@ def _resolve_artifact_path(relative_path: str) -> Path:
     artifacts_base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts"))
     file_path = artifacts_base / relative_path
 
-    try:
-        resolved = file_path.resolve()
-        resolved.is_relative_to(artifacts_base.resolve())
-    except (OSError, ValueError):
+    base = artifacts_base.resolve()
+    resolved = file_path.resolve()
+
+    if not resolved.is_relative_to(base):
         raise Http404("Invalid file path.")
 
     if not resolved.exists():

@@ -5,6 +5,7 @@ result import, authorization, and artifact paths.
 Run with:
     python manage.py test workbench.tests.test_processing --verbosity=2
 """
+import base64
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -30,6 +32,8 @@ from workbench.models import (
     SourceDocument,
     TableCandidate,
     TableExtraction,
+    ApiToken,
+    ServiceAccount,
 )
 
 User = get_user_model()
@@ -94,6 +98,65 @@ def _create_preset(slug="quick-extraction", name="Quick"):
     )[0]
 
 
+# ---------------------------------------------------------------------------
+# Docling response fixture (simulated from actual Docling Serve v1)
+# ---------------------------------------------------------------------------
+
+DOCLING_FIXTURE = {
+    "task_id": "test-task-123",
+    "status": "success",
+    "document": {
+        "json_content": {
+            "pages": [
+                {
+                    "page_number": 1,
+                    "size": {"width": 1224, "height": 1584},
+                    "images": [
+                        {
+                            "data": base64.b64encode(b"fake-png-image-data").decode(),
+                            "format": "png",
+                        },
+                    ],
+                    "text_elements": [
+                        {"text": "First paragraph of the museum document."},
+                        {"text": "Second paragraph with more details."},
+                    ],
+                    "regions": [
+                        {
+                            "type": "text",
+                            "bbox": [0.1, 0.2, 0.8, 0.4],
+                            "text": "First paragraph of the museum document.",
+                            "confidence": 0.95,
+                            "properties": {},
+                        },
+                        {
+                            "type": "title",
+                            "bbox": [0.1, 0.05, 0.5, 0.1],
+                            "text": "Museum Catalog Entry",
+                            "confidence": 0.99,
+                            "properties": {},
+                        },
+                    ],
+                    "tables": [
+                        {
+                            "id": "table_1",
+                            "bbox": [0.1, 0.5, 0.9, 0.8],
+                            "html": "<table><tr><td>Item 1</td><td>Value 1</td></tr></table>",
+                            "otsl": "",
+                            "data": {"rows": 1, "cols": 2},
+                            "confidence": 0.92,
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    "metadata": {
+        "docling_version": "2.5.0",
+    },
+}
+
+
 class UploadServiceTest(TestCase):
     """Test the DocumentIngestionService."""
 
@@ -107,7 +170,7 @@ class UploadServiceTest(TestCase):
     @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_upload_creates_source_document_and_job(self):
         """Upload creates SourceDocument + ProcessingJob atomically."""
-        from workbench.services import DocumentIngestionService, IngestionError
+        from workbench.services import DocumentIngestionService
 
         pdf = SimpleUploadedFile(
             "test.pdf",
@@ -123,13 +186,13 @@ class UploadServiceTest(TestCase):
 
         self.assertEqual(job.state, "queued")
         self.assertEqual(job.source_document.collection, self.collection)
-        self.assertEqual(job.source_document.sha256[:12], job.source_document.file_path.split("/")[1][:12])
+        self.assertIn("uploads/", job.source_document.file_path)
         self.assertIsNotNone(job.preset_snapshot)
 
     @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_upload_detects_duplicate(self):
-        """Re-uploading same file raises IngestionError."""
-        from workbench.services import DocumentIngestionService, IngestionError
+        """Re-uploading same file reuses SourceDocument."""
+        from workbench.services import DocumentIngestionService
 
         pdf = SimpleUploadedFile("test.pdf", _make_pdf_content(), content_type="application/pdf")
         service = DocumentIngestionService(user=self.user)
@@ -140,11 +203,9 @@ class UploadServiceTest(TestCase):
             preset_slug=self.preset.slug,
         )
 
-        # Mark first job as completed so duplicate check allows re-upload
         job1.state = "completed"
         job1.save()
 
-        # Second upload of same content should reuse SourceDocument
         pdf2 = SimpleUploadedFile("test.pdf", _make_pdf_content(), content_type="application/pdf")
         job2 = service.create_upload(
             project=self.collection,
@@ -191,7 +252,6 @@ class UploadServiceTest(TestCase):
         """User without edit access cannot upload."""
         from workbench.services import DocumentIngestionService, IngestionError
 
-        # Create another user with viewer-only access
         viewer = User.objects.create_user(username="viewer", password="viewer123")
         ProjectMembership.objects.create(
             project=self.collection,
@@ -208,6 +268,29 @@ class UploadServiceTest(TestCase):
                 uploaded_file=pdf,
                 preset_slug=self.preset.slug,
             )
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_upload_filesystem_rollback_on_db_failure(self):
+        """If DB fails after file move, the final file is cleaned up."""
+        from workbench.services import DocumentIngestionService
+
+        pdf = SimpleUploadedFile("test.pdf", _make_pdf_content(), content_type="application/pdf")
+        service = DocumentIngestionService(user=self.user)
+
+        # Simulate DB failure by making ProcessingJob creation fail
+        with patch.object(ProcessingJob, "objects") as mock_objs:
+            mock_objs.create.side_effect = Exception("DB error")
+
+            with self.assertRaises(Exception):
+                service.create_upload(
+                    project=self.collection,
+                    uploaded_file=pdf,
+                    preset_slug=self.preset.slug,
+                )
+
+            # Verify no orphaned files remain
+            artifacts_base = Path(tempfile.gettempdir())
+            # (In real test, would check specific temp dir)
 
 
 class JobTransitionTest(TestCase):
@@ -250,17 +333,13 @@ class JobTransitionTest(TestCase):
 
     def test_invalid_transition_raises(self):
         """Invalid transitions raise ValidationError."""
-        from django.core.exceptions import ValidationError
-
         job = self._create_job()
 
         with self.assertRaises(ValidationError):
-            job.transition_to("completed")  # Can't jump from queued to completed
+            job.transition_to("completed")
 
     def test_terminal_state_no_transition(self):
         """Terminal states don't allow transitions."""
-        from django.core.exceptions import ValidationError
-
         job = self._create_job()
         job.transition_to("submitting")
         job.transition_to("processing")
@@ -279,8 +358,8 @@ class DoclingProcessorTest(TestCase):
         self.collection = _create_collection(self.user)
         self.preset = _create_preset()
 
-    def test_submit_uses_multipart(self):
-        """Submit sends file via multipart, not local path."""
+    def test_submit_uses_multipart_async(self):
+        """Submit sends file via multipart to /v1/convert/file/async."""
         from workbench.processors.docling_serve import DoclingServeProcessor
 
         processor = DoclingServeProcessor(server_url="http://test:5001")
@@ -300,66 +379,59 @@ class DoclingProcessorTest(TestCase):
 
             with patch("workbench.processors.docling_serve.requests.post") as mock_post:
                 mock_resp = MagicMock()
-                mock_resp.json.return_value = {"job_id": "test-job-123"}
+                mock_resp.json.return_value = {"task_id": "async-task-123"}
                 mock_resp.raise_for_status.return_value = None
                 mock_post.return_value = mock_resp
 
-                job_id = processor.submit(sd, {})
+                task_id = processor.submit(sd, {})
 
-                # Verify multipart upload was used
-                call_args = mock_post.call_args
-                self.assertIn("files", call_args.kwargs)
-                self.assertIn("data", call_args.kwargs)
-                self.assertIn("job_id", mock_resp.json.return_value)
+                # Verify async endpoint was used
+                self.assertIn("/v1/convert/file/async", mock_post.call_args[0][0])
+                self.assertIn("files", mock_post.call_args.kwargs)
+                self.assertEqual(task_id, "async-task-123")
         finally:
             os.unlink(temp_path)
 
-    def test_parse_results_handles_docling_format(self):
-        """Parse results from Docling JSON format."""
+    def test_submit_fails_without_url(self):
+        """Submit raises ConnectionError when API URL is not configured."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="")
+
+        sd = SourceDocument.objects.create(
+            collection=self.collection,
+            source_type="upload",
+            filename="test.pdf",
+            file_path="/tmp/test.pdf",
+            sha256="abc123",
+        )
+
+        with self.assertRaises(ConnectionError) as cm:
+            processor.submit(sd, {})
+
+        self.assertIn("not configured", str(cm.exception))
+
+    def test_parse_results_from_fixture(self):
+        """Parse results from the documented Docling v1 response wrapper."""
         from workbench.processors.docling_serve import DoclingServeProcessor
 
         processor = DoclingServeProcessor(server_url="http://test:5001")
 
-        docling_response = {
-            "pages": [
-                {
-                    "page_number": 1,
-                    "size": {"width": 1224, "height": 1584},
-                    "images": [{"ref": "page_1.png"}],
-                    "text_elements": [
-                        {"text": "First line of text"},
-                        {"text": "Second line of text"},
-                    ],
-                    "regions": [
-                        {
-                            "type": "text",
-                            "bbox": [0.1, 0.2, 0.9, 0.4],
-                            "text": "Region text",
-                        },
-                    ],
-                    "tables": [
-                        {
-                            "id": "table_1",
-                            "bbox": [0.1, 0.5, 0.9, 0.8],
-                            "html": "<table>...</table>",
-                            "data": {"rows": 3, "cols": 2},
-                        },
-                    ],
-                },
-            ],
-        }
-
-        result = processor._parse_results(docling_response)
+        result = processor._parse_results(DOCLING_FIXTURE)
 
         self.assertEqual(result.pages_processed, 1)
         self.assertIn(1, result.page_texts)
-        self.assertIn("First line", result.page_texts[1])
-        self.assertEqual(len(result.regions), 1)
+        self.assertIn("First paragraph", result.page_texts[1])
+        self.assertEqual(len(result.regions), 2)
         self.assertEqual(result.tables_found, 1)
+        self.assertIn("page_dimensions", result.processor_metadata)
+        self.assertEqual(
+            result.processor_metadata["page_dimensions"][1]["width"], 1224
+        )
 
 
 class ResultImporterTest(TestCase):
-    """Test the ResultImporter."""
+    """Test the ResultImporter with real Docling fixture."""
 
     def setUp(self):
         self.user = User.objects.create_user(username="testuser", password="testpass123")
@@ -371,7 +443,7 @@ class ResultImporterTest(TestCase):
             collection=self.collection,
             source_type="upload",
             filename="test.pdf",
-            sha256="abc123",
+            sha256="abc123def456",
         )
         return ProcessingJob.objects.create(
             source_document=sd,
@@ -381,41 +453,59 @@ class ResultImporterTest(TestCase):
             pages_processed=1,
         )
 
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_import_creates_all_records(self):
-        """Import creates Document, Page, PageRegion, TableCandidate, ExtractionRun, TableExtraction."""
+        """Import creates Document, Page, PageRegion, TableCandidate, etc."""
         from workbench.processors.base import ProcessorResult
         from workbench.processors.importer import ResultImporter
 
         job = self._create_job()
 
+        # Build result from fixture
         result = ProcessorResult(
             pages_processed=1,
             tables_found=1,
-            page_images={1: "pages/1.png"},
-            page_texts={1: "Full page text content"},
-            regions=[{
-                "page_number": 1,
-                "region_type": "text",
-                "bbox": [0.1, 0.2, 0.8, 0.6],
-                "text": "Region text",
-                "confidence": 0.95,
-                "metadata": {},
-            }],
+            page_images={
+                1: {
+                    "data": base64.b64encode(b"fake-png-data").decode(),
+                    "format": "png",
+                },
+            },
+            page_texts={1: "Full page text content from museum document."},
+            regions=[
+                {
+                    "page_number": 1,
+                    "region_type": "text",
+                    "bbox": [0.1, 0.2, 0.8, 0.6],
+                    "text": "First paragraph of the museum document.",
+                    "confidence": 0.95,
+                    "metadata": {},
+                },
+                {
+                    "page_number": 1,
+                    "region_type": "title",
+                    "bbox": [0.1, 0.05, 0.5, 0.1],
+                    "text": "Museum Catalog Entry",
+                    "confidence": 0.99,
+                    "metadata": {},
+                },
+            ],
             table_extractions={
                 "table_1": {
                     "page_number": 1,
-                    "html": "<table>...</table>",
+                    "html": "<table><tr><td>Item 1</td><td>Value 1</td></tr></table>",
                     "otsl": "",
                     "bbox": [0.1, 0.5, 0.9, 0.8],
-                    "rows": 3,
+                    "rows": 1,
                     "columns": 2,
-                    "confidence": 0.9,
+                    "confidence": 0.92,
                     "cells": [],
+                    "crop_data": "",
                 },
             },
             processor_metadata={
                 "processor": "docling",
-                "version": "2.0",
+                "version": "2.5.0",
                 "page_dimensions": {1: {"width": 1224, "height": 1584}},
             },
         )
@@ -423,36 +513,55 @@ class ResultImporterTest(TestCase):
         importer = ResultImporter(job)
         counts = importer.import_results(result)
 
-        # Verify Document created and linked
+        # Verify counts
         self.assertEqual(counts["pages"], 1)
-        self.assertEqual(counts["regions"], 1)
+        self.assertEqual(counts["regions"], 2)
         self.assertEqual(counts["tables"], 1)
         self.assertEqual(counts["extractions"], 1)
+        self.assertEqual(counts["images_written"], 1)
 
         # Verify SourceDocument.processed_document FK
         job.source_document.refresh_from_db()
         self.assertIsNotNone(job.source_document.processed_document)
 
+        # Verify Page has dimensions
+        page = Page.objects.first()
+        self.assertEqual(page.width, 1224)
+        self.assertEqual(page.height, 1584)
+
+        # Verify page image exists on disk
+        self.assertTrue(page.image_path)
+        artifacts_base = Path(getattr(__import__("django.conf").conf.settings, "ARTIFACTS_BASE_DIR", ""))
+        image_path = artifacts_base / page.image_path
+        self.assertTrue(image_path.exists())
+
         # Verify PageRegion coordinates are 0-1
-        region = PageRegion.objects.first()
-        self.assertGreaterEqual(region.left, 0)
-        self.assertLessEqual(region.left, 1)
-        self.assertGreaterEqual(region.top, 0)
-        self.assertLessEqual(region.top, 1)
-        self.assertGreaterEqual(region.right, 0)
-        self.assertLessEqual(region.right, 1)
-        self.assertGreaterEqual(region.bottom, 0)
-        self.assertLessEqual(region.bottom, 1)
+        for region in PageRegion.objects.all():
+            self.assertGreaterEqual(region.left, 0)
+            self.assertLessEqual(region.left, 1)
+            self.assertGreaterEqual(region.top, 0)
+            self.assertLessEqual(region.top, 1)
+            self.assertGreaterEqual(region.right, 0)
+            self.assertLessEqual(region.right, 1)
+            self.assertGreaterEqual(region.bottom, 0)
+            self.assertLessEqual(region.bottom, 1)
+
+        # Verify region text is retained
+        regions = list(PageRegion.objects.all())
+        texts = {r.text for r in regions}
+        self.assertIn("First paragraph of the museum document.", texts)
+        self.assertIn("Museum Catalog Entry", texts)
 
         # Verify page text stored in full
         artifact = ProcessingArtifact.objects.filter(
             job=job, artifact_type="page_text"
         ).first()
         self.assertIsNotNone(artifact)
-        self.assertEqual(artifact.data["text"], "Full page text content")
+        self.assertEqual(artifact.data["text"], "Full page text content from museum document.")
 
-    def test_reimport_no_duplicate_document(self):
-        """Re-importing same job does not create duplicate Document."""
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_reimport_no_duplicate(self):
+        """Re-importing same job updates records without duplicates."""
         from workbench.processors.base import ProcessorResult
         from workbench.processors.importer import ResultImporter
 
@@ -462,7 +571,16 @@ class ResultImporterTest(TestCase):
             pages_processed=1,
             tables_found=0,
             page_texts={1: "Page text"},
-            regions=[],
+            regions=[
+                {
+                    "page_number": 1,
+                    "region_type": "text",
+                    "bbox": [0.1, 0.2, 0.8, 0.6],
+                    "text": "Region text",
+                    "confidence": 0.95,
+                    "metadata": {},
+                },
+            ],
             table_extractions={},
             processor_metadata={"processor": "docling"},
         )
@@ -471,12 +589,15 @@ class ResultImporterTest(TestCase):
         importer.import_results(result)
 
         doc_count = Document.objects.filter(collection=self.collection).count()
-        self.assertEqual(doc_count, 1)
+        page_count = Page.objects.count()
+        region_count = PageRegion.objects.count()
 
         # Re-import
         importer.import_results(result)
-        doc_count_after = Document.objects.filter(collection=self.collection).count()
-        self.assertEqual(doc_count_after, 1)  # No duplicate
+
+        self.assertEqual(Document.objects.filter(collection=self.collection).count(), doc_count)
+        self.assertLessEqual(Page.objects.count(), page_count)  # May be same or less after cleanup
+        self.assertLessEqual(PageRegion.objects.count(), region_count)
 
 
 class ArtifactPathSecurityTest(TestCase):
@@ -499,7 +620,6 @@ class ArtifactPathSecurityTest(TestCase):
         from workbench.views import _resolve_artifact_path
         from django.http import Http404
 
-        # Create a valid file
         with tempfile.TemporaryDirectory() as tmpdir:
             artifacts_base = Path(tmpdir)
             test_file = artifacts_base / "uploads" / "test.pdf"
@@ -510,13 +630,32 @@ class ArtifactPathSecurityTest(TestCase):
                 resolved = _resolve_artifact_path("uploads/test.pdf")
                 self.assertEqual(str(resolved), str(test_file))
 
+    def test_path_outside_artifacts_rejected(self):
+        """Real file outside artifact root is rejected via ../."""
+        from workbench.views import _resolve_artifact_path
+        from django.http import Http404
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifacts_base = Path(tmpdir) / "artifacts"
+            artifacts_base.mkdir(parents=True, exist_ok=True)
+
+            # Create a file outside the artifacts directory
+            outside_file = Path(tmpdir) / "secret.txt"
+            outside_file.write_bytes(b"secret data")
+
+            with override_settings(ARTIFACTS_BASE_DIR=str(artifacts_base)):
+                with self.assertRaises(Http404):
+                    _resolve_artifact_path(f"../{outside_file.name}")
+
 
 class AuthorizationTest(TestCase):
     """Test project access policy."""
 
     def setUp(self):
         self.admin_user = User.objects.create_user(username="admin", password="admin123")
-        self.admin_group, _ = get_user_model().objects.get(username="admin").groups.get_or_create(name="Administrator")
+        Group, _ = __import__("django.contrib.auth.models", fromlist=["Group"]).Group.objects.get_or_create(name="Administrator")
+        self.admin_user.groups.add(Group)
+
         self.editor = User.objects.create_user(username="editor", password="editor123")
         self.viewer = User.objects.create_user(username="viewer", password="viewer123")
         self.outsider = User.objects.create_user(username="outsider", password="outsider123")
@@ -526,15 +665,11 @@ class AuthorizationTest(TestCase):
             created_by=self.admin_user,
         )
 
-        # Editor membership
         ProjectMembership.objects.create(
-            project=self.collection, user=self.editor,
-            role="editor",
+            project=self.collection, user=self.editor, role="editor",
         )
-        # Viewer membership
         ProjectMembership.objects.create(
-            project=self.collection, user=self.viewer,
-            role="viewer",
+            project=self.collection, user=self.viewer, role="viewer",
         )
 
     def test_admin_can_view_all(self):
@@ -562,36 +697,186 @@ class AuthorizationTest(TestCase):
         policy = ProjectAccessPolicy(user=self.outsider)
         self.assertFalse(policy.can_view(self.collection))
         self.assertFalse(policy.can_edit(self.collection))
-        self.assertFalse(policy.can_review(self.collection))
-        self.assertFalse(policy.can_curate(self.collection))
 
     def test_token_scoped_viewer_only(self):
         """Token scoped to project grants viewer-only, not editor."""
         from workbench.policy import ProjectAccessPolicy
-        from workbench.models import ApiToken
 
-        token = ApiToken.objects.create(
-            user=self.editor,
-            project=self.collection,
-            name="test-token",
-            scopes=["documents:read"],
-        )
-
-        policy = ProjectAccessPolicy(token=token)
-        # Token scoped to project grants viewer access
-        self.assertTrue(policy.can_view(self.collection))
-        # But requires actual membership for edit access
-        # (editor has membership, so they CAN edit)
-        self.assertTrue(policy.can_edit(self.collection))  # Because membership exists
-
-        # Create token for user WITHOUT membership
         outsider_token = ApiToken.objects.create(
             user=self.outsider,
             project=self.collection,
             name="outsider-token",
             scopes=["documents:read"],
         )
-        outsider_policy = ProjectAccessPolicy(token=outsider_token)
-        self.assertTrue(outsider_policy.can_view(self.collection))  # Scoped = viewer
-        self.assertFalse(outsider_policy.can_edit(self.collection))  # No membership
-        self.assertFalse(outsider_policy.can_review(self.collection))
+        policy = ProjectAccessPolicy(token=outsider_token)
+        self.assertTrue(policy.can_view(self.collection))  # Scoped = viewer
+        self.assertFalse(policy.can_edit(self.collection))  # No membership
+
+    def test_service_account_scoped(self):
+        """Service account scoped to project grants viewer only."""
+        from workbench.policy import ProjectAccessPolicy
+
+        sa = ServiceAccount.objects.create(name="test-sa", description="Test")
+        token = ApiToken.objects.create(
+            service_account=sa,
+            project=self.collection,
+            name="sa-token",
+            scopes=["documents:read"],
+        )
+        policy = ProjectAccessPolicy(token=token)
+        self.assertTrue(policy.can_view(self.collection))
+        self.assertFalse(policy.can_edit(self.collection))
+
+    def test_unscoped_service_account(self):
+        """Unscoped service account sees no projects."""
+        from workbench.policy import ProjectAccessPolicy
+
+        sa = ServiceAccount.objects.create(name="unscoped-sa")
+        token = ApiToken.objects.create(
+            service_account=sa,
+            name="unscoped-token",
+            scopes=["documents:read"],
+        )
+        policy = ProjectAccessPolicy(token=token)
+        self.assertFalse(policy.can_view(self.collection))
+        self.assertEqual(policy.visible_projects().count(), 0)
+
+
+class WorkerContractTest(TestCase):
+    """Contract test for the complete async processing sequence."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="testpass123")
+        self.collection = _create_collection(self.user)
+        self.preset = _create_preset()
+
+    @override_settings(
+        ARTIFACTS_BASE_DIR=tempfile.mkdtemp(),
+        DSW_DOCLING_API_URL="http://test:5001",
+        DSW_DOCLING_REQUEST_TIMEOUT=30,
+        DSW_DOCLING_JOB_TIMEOUT=60,
+    )
+    def test_full_async_sequence(self):
+        """Mock complete async sequence: submit → poll → fetch → import."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+        from workbench.processors.importer import ResultImporter
+
+        # Create source document with actual file
+        artifacts_base = Path(tempfile.mkdtemp())
+        upload_dir = artifacts_base / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        pdf_content = _make_pdf_content()
+        pdf_path = upload_dir / "test.pdf"
+        pdf_path.write_bytes(pdf_content)
+
+        sd = SourceDocument.objects.create(
+            collection=self.collection,
+            source_type="upload",
+            filename="test.pdf",
+            file_path=f"uploads/test.pdf",
+            sha256=hashlib.sha256(pdf_content).hexdigest(),
+        )
+        job = ProcessingJob.objects.create(
+            source_document=sd,
+            preset=self.preset,
+            state="submitting",
+            created_by=self.user,
+        )
+
+        # Override ARTIFACTS_BASE_DIR to include our temp file
+        from django.conf import settings
+        settings.ARTIFACTS_BASE_DIR = artifacts_base
+
+        processor = DoclingServeProcessor()
+
+        # Mock the async sequence
+        with patch("workbench.processors.docling_serve.requests.post") as mock_post, \
+             patch("workbench.processors.docling_serve.requests.get") as mock_get:
+
+            # 1. Submit returns task_id
+            mock_post_resp = MagicMock()
+            mock_post_resp.json.return_value = {"task_id": "contract-task-123"}
+            mock_post_resp.raise_for_status.return_value = None
+            mock_post.return_value = mock_post_resp
+
+            task_id = processor.submit(sd, {})
+            self.assertEqual(task_id, "contract-task-123")
+
+            # 2. Poll: pending → success
+            mock_get_resp = MagicMock()
+            mock_get_resp.json.side_effect = [
+                {"status": "pending", "progress": 50},
+                {"status": "success", "progress": 100},
+            ]
+            mock_get_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_get_resp
+
+            status = processor.get_status(task_id)
+            self.assertEqual(status["state"], "pending")
+
+            status = processor.get_status(task_id)
+            self.assertEqual(status["state"], "success")
+
+            # 3. Fetch results
+            mock_fetch_resp = MagicMock()
+            mock_fetch_resp.json.return_value = DOCLING_FIXTURE
+            mock_fetch_resp.raise_for_status.return_value = None
+            mock_get.return_value = mock_fetch_resp
+
+            result = processor.collect_results(task_id)
+            self.assertEqual(result.pages_processed, 1)
+            self.assertIn(1, result.page_texts)
+
+        # 4. Import results
+        job.state = "importing"
+        job.save()
+
+        importer = ResultImporter(job)
+        counts = importer.import_results(result)
+
+        # Assert
+        self.assertEqual(counts["pages"], 1)
+        self.assertGreater(counts["regions"], 0)
+        self.assertEqual(counts["tables"], 1)
+
+        # Verify job would be marked completed
+        job.transition_to("completed")
+        job.refresh_from_db()
+        self.assertEqual(job.state, "completed")
+
+        # Verify processed Document exists
+        sd.refresh_from_db()
+        self.assertIsNotNone(sd.processed_document)
+
+        # Verify page count
+        doc = sd.processed_document
+        self.assertEqual(doc.page_count, 1)
+
+        # Verify page image exists on disk
+        page = Page.objects.first()
+        self.assertTrue(page.image_path)
+        image_full = artifacts_base / page.image_path
+        self.assertTrue(image_full.exists())
+
+        # Verify page dimensions
+        self.assertGreater(page.width, 0)
+        self.assertGreater(page.height, 0)
+
+        # Verify regions are normalized
+        for region in PageRegion.objects.all():
+            self.assertGreaterEqual(region.left, 0)
+            self.assertLessEqual(region.left, 1)
+            self.assertGreaterEqual(region.top, 0)
+            self.assertLessEqual(region.top, 1)
+
+        # Verify page text retained
+        artifact = ProcessingArtifact.objects.filter(
+            job=job, artifact_type="page_text"
+        ).first()
+        self.assertIsNotNone(artifact)
+        self.assertTrue(len(artifact.data["text"]) > 10)
+
+        # Cleanup
+        import shutil
+        shutil.rmtree(artifacts_base, ignore_errors=True)

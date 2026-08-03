@@ -150,6 +150,10 @@ class ProjectAccessPolicy:
         It does NOT automatically grant editor, reviewer, or owner authority.
         For elevated access, the token's underlying user must have a
         ProjectMembership row with the required role.
+
+        Service accounts: ProjectMembership.user is a FK to User, not
+        ServiceAccount. Service accounts have no membership model — they
+        are authorized solely by token scope (viewer-only).
         """
         from .models import ProjectMembership
 
@@ -166,18 +170,12 @@ class ProjectAccessPolicy:
             role_order = {"viewer": 0, "reviewer": 1, "editor": 2, "owner": 3}
             return role_order.get(membership.role, 0) >= role_order.get(min_role, 0)
 
-        # Service account token: check membership or token scope
+        # Service account token: token scope grants viewer-only access
+        # (no ProjectMembership for service accounts — user FK is to User)
         if self.token.service_account_id:
-            membership = ProjectMembership.objects.filter(
-                project=project, user=self.token.service_account
-            ).first()
-            if membership is None:
-                # Token scoped to project grants viewer-only access
-                if self.token.project_id == project.pk:
-                    return min_role == "viewer"
-                return False
-            role_order = {"viewer": 0, "reviewer": 1, "editor": 2, "owner": 3}
-            return role_order.get(membership.role, 0) >= role_order.get(min_role, 0)
+            if self.token.project_id == project.pk:
+                return min_role == "viewer"
+            return False
 
         return False
 

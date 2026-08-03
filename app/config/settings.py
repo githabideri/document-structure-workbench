@@ -124,6 +124,21 @@ SESSION_COOKIE_SECURE = os.environ.get("DSW_SECURE_COOKIES", "false").lower() ==
 
 # Paths (overridable for deployment)
 ARTIFACTS_BASE_DIR = Path(os.environ.get("DSW_ARTIFACTS_DIR", os.environ.get("DSW_ARTIFACTS_ROOT", "/var/lib/dsw/artifacts")))
+
+# --- Docling Serve integration ---
+DSW_DOCLING_API_URL = os.environ.get("DSW_DOCLING_API_URL", "")
+DSW_DOCLING_API_KEY = os.environ.get("DSW_DOCLING_API_KEY", "")
+DSW_DOCLING_REQUEST_TIMEOUT = int(os.environ.get("DSW_DOCLING_REQUEST_TIMEOUT", "60"))
+DSW_DOCLING_JOB_TIMEOUT = int(os.environ.get("DSW_DOCLING_JOB_TIMEOUT", "3600"))
+
+# Fail clearly when API URL is absent in production
+if not DEBUG and not DSW_DOCLING_API_URL:
+    import warnings
+    warnings.warn(
+        "DSW_DOCLING_API_URL is not set. Document processing will fail. "
+        "Set DSW_DOCLING_API_URL to your Docling Serve instance.",
+        RuntimeWarning,
+    )
 IMPORTS_BASE_DIR = Path(os.environ.get("DSW_IMPORTS_DIR", "/var/lib/dsw/imports"))
 
 # Logging

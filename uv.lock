@@ -143,6 +143,7 @@ dependencies = [
     { name = "django" },
     { name = "gunicorn" },
     { name = "markdown" },
+    { name = "requests" },
     { name = "whitenoise" },
 ]
 
@@ -156,7 +157,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-django" },
-    { name = "requests" },
 ]
 
 [package.metadata]
@@ -166,6 +166,7 @@ requires-dist = [
     { name = "gunicorn", specifier = ">=23.0" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9" },
+    { name = "requests", specifier = ">=2.31" },
     { name = "whitenoise", specifier = ">=6.7" },
 ]
 provides-extras = ["postgres"]
@@ -175,7 +176,6 @@ dev = [
     { name = "pytest", specifier = ">=7.0" },
     { name = "pytest-cov", specifier = ">=4.1" },
     { name = "pytest-django", specifier = ">=4.5" },
-    { name = "requests", specifier = ">=2.31" },
 ]
 
 [[package]]

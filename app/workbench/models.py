@@ -762,6 +762,7 @@ class PageRegion(models.Model):
     page_width = models.FloatField(null=True, blank=True)
     page_height = models.FloatField(null=True, blank=True)
     confidence = models.FloatField(null=True, blank=True)
+    text = models.TextField(blank=True, default="", help_text="Region text content.")
     metadata = JSONField(default=dict, blank=True)
 
     class Meta:

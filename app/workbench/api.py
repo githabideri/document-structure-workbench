@@ -278,18 +278,8 @@ def api_me(request):
 def api_projects(request):
     """List projects the token owner can access."""
     token = request._api_token  # noqa: SLF001
-
-    if token.user_id:
-        # User sees only projects they are a member of
-        memberships = ProjectMembership.objects.filter(user_id=token.user_id)
-        project_ids = memberships.values_list("project_id", flat=True)
-        projects_qs = Collection.objects.filter(pk__in=project_ids)
-    else:
-        # Service account sees projects it's scoped to, or all if no project
-        if token.project_id:
-            projects_qs = Collection.objects.filter(pk=token.project_id)
-        else:
-            projects_qs = Collection.objects.all()
+    policy = ProjectAccessPolicy(token=token)
+    projects_qs = policy.visible_projects()
 
     projects = []
     for p in projects_qs:
@@ -326,7 +316,9 @@ def api_project_detail(request, project_id):
 
     # Include membership info for users
     if token.user_id:
-        membership = _get_user_membership(token, project_id)
+        membership = ProjectMembership.objects.filter(
+            project=project, user_id=token.user_id
+        ).first()
         if membership:
             result["membership"] = {
                 "role": membership.role,

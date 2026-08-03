@@ -8,7 +8,7 @@ from .models import SearchPassage
 logger = logging.getLogger(__name__)
 
 
-def build_direct_context(source_ids, projects, limit=80):
+def build_direct_context(source_ids, projects, limit=32):
     passages = SearchPassage.objects.filter(
         source_document_id__in=source_ids, project__in=projects,
     ).select_related("source_document", "processed_revision", "page", "page_region")[:limit]
@@ -18,9 +18,10 @@ def build_direct_context(source_ids, projects, limit=80):
         marker = f"S{index}"
         citations[marker] = passage
         page = passage.page.page_number if passage.page else "?"
+        excerpt = (passage.text or "")[:1600]
         lines.append(
             f"[{marker}] {passage.source_document.filename}; revision {passage.processed_revision_id}; "
-            f"page {page}; region {passage.page_region_id or '-'}\n{passage.text}"
+            f"page {page}; region {passage.page_region_id or '-'}\n{excerpt}"
         )
     return "\n\n".join(lines), citations
 

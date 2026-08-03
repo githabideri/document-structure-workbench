@@ -195,7 +195,7 @@
     const counts = {};
     links.forEach((link) => {
         const box = link.querySelector('.region-box');
-        const type = [...box.classList].find((name) => name.startsWith('region-'))?.replace('region-', '') || 'other';
+        const type = [...box.classList].find((name) => name.startsWith('region-') && name !== 'region-box')?.replace('region-', '') || 'other';
         counts[type] = (counts[type] || 0) + 1;
         link.dataset.regionType = type;
     });

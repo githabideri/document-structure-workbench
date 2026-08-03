@@ -50,6 +50,13 @@ def search_project(projects, query, *, source_ids=None, limit=20):
     normalized = normalize_text(query)
     if not normalized:
         return []
+    # Existing installations may predate the passage index migration. Build
+    # missing authorized revisions lazily on the first search so the feature
+    # is immediately useful without requiring an operator-only command.
+    if not SearchPassage.objects.filter(project__in=projects).exists():
+        from .models import Document
+        for document in Document.objects.filter(collection__in=projects).select_related("processing_job__source_document"):
+            rebuild_revision_index(document)
     qs = SearchPassage.objects.filter(project__in=projects, normalized_text__contains=normalized)
     if source_ids:
         qs = qs.filter(source_document_id__in=source_ids)

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://agent-browser.dev/schema.json",
+  "socketDir": "/tmp/dsw-agent-browser",
+  "namespace": "dsw-workbench",
+  "restore": "dsw-workbench",
+  "restoreSave": "auto",
+  "autosaveIntervalMs": 30000
+}

@@ -705,3 +705,92 @@ msgstr "Neues Passwort muss mindestens 8 Zeichen lang sein."
 #: app/workbench/views.py
 msgid "Password changed."
 msgstr "Passwort geändert."
+
+#: app/templates/workbench/_job_status_block.html
+#, python-format
+msgid "Processing: %(filename)s"
+msgstr "Verarbeitung: %(filename)s"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Processing progress"
+msgstr "Verarbeitungsfortschritt"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Upload received"
+msgstr "Upload empfangen"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Waiting for worker"
+msgstr "Warten auf einen Verarbeitungsdienst"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Submitting to Docling"
+msgstr "Übergabe an Docling"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Docling is analyzing the document"
+msgstr "Docling analysiert das Dokument"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Saving extracted results"
+msgstr "Extrahierte Ergebnisse werden gespeichert"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Ready"
+msgstr "Bereit"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Processing has not reported a worker heartbeat recently. The worker may have stopped."
+msgstr "Die Verarbeitung hat seit einiger Zeit kein Lebenszeichen gemeldet. Der Verarbeitungsdienst wurde möglicherweise beendet."
+
+#: app/templates/workbench/_job_status_block.html
+msgid "The document is ready to inspect."
+msgstr "Das Dokument kann jetzt geprüft werden."
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Processing produced partial results. This revision was not made active."
+msgstr "Die Verarbeitung lieferte unvollständige Ergebnisse. Diese Version wurde nicht aktiviert."
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Elapsed:"
+msgstr "Vergangene Zeit:"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Worker heartbeat:"
+msgstr "Letztes Lebenszeichen:"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "ago"
+msgstr "zuvor"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Last processor response:"
+msgstr "Letzte Prozessorantwort:"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "pages saved"
+msgstr "Seiten gespeichert"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "tables found"
+msgstr "Tabellen gefunden"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Finished:"
+msgstr "Abgeschlossen:"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "View Document"
+msgstr "Dokument anzeigen"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Back to Project"
+msgstr "Zurück zum Projekt"
+
+#: app/templates/workbench/_job_status_block.html
+msgid "Upload Another"
+msgstr "Weiteres Dokument hochladen"
+
+#: app/workbench/views.py
+msgid "Upload received. The document has been queued for analysis."
+msgstr "Upload empfangen. Das Dokument wurde zur Analyse eingereiht."

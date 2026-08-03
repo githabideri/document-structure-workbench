@@ -173,7 +173,9 @@ class DoclingServeProcessor(DocumentProcessor):
             }
         except requests.RequestException as e:
             logger.error("Status poll failed for %s: %s", external_job_id, e)
-            return {"state": "error", "progress": 0, "error": str(e)}
+            raise ConnectionError(
+                f"Docling status request failed for {external_job_id}: {e}"
+            ) from e
 
     def collect_results(self, external_job_id: str) -> ProcessorResult:
         """Fetch via GET /v1/result/<task_id>."""

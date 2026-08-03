@@ -10,14 +10,18 @@ import hashlib
 import json
 import os
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase, override_settings
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from workbench.models import (
     Collection,
@@ -669,6 +673,19 @@ class DoclingProcessorTest(TestCase):
             status = processor.get_status("task-1")
             self.assertEqual(status["state"], "unknown")
 
+    def test_status_network_error_is_retryable_exception(self):
+        """Transport failure is not misrepresented as a remote task failure."""
+        import requests
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+        with patch(
+            "workbench.processors.docling_serve.requests.get",
+            side_effect=requests.ConnectionError("offline"),
+        ):
+            with self.assertRaisesRegex(ConnectionError, "status request failed"):
+                processor.get_status("task-1")
+
     # ------------------------------------------------------------------
     # Coordinate normalization tests (item 4)
     # ------------------------------------------------------------------
@@ -955,9 +972,11 @@ class ResultImporterTest(TestCase):
         self.assertEqual(counts["extractions"], 1)
         self.assertEqual(counts["images_written"], 1)
 
-        # Verify SourceDocument.processed_document FK
+        # Import owns a revision but does not activate it before finalization.
+        job.refresh_from_db()
         job.source_document.refresh_from_db()
-        self.assertIsNotNone(job.source_document.processed_document)
+        self.assertIsNotNone(job.result_document)
+        self.assertIsNone(job.source_document.active_document)
 
         # Verify Page has dimensions
         page = Page.objects.first()
@@ -972,6 +991,7 @@ class ResultImporterTest(TestCase):
 
         # Verify PageRegion coordinates are 0-1
         for region in PageRegion.objects.all():
+            self.assertEqual(region.page_id, page.id)
             self.assertGreaterEqual(region.left, 0)
             self.assertLessEqual(region.left, 1)
             self.assertGreaterEqual(region.top, 0)
@@ -1031,8 +1051,8 @@ class ResultImporterTest(TestCase):
         importer.import_results(result)
 
         self.assertEqual(Document.objects.filter(collection=self.collection).count(), doc_count)
-        self.assertLessEqual(Page.objects.count(), page_count)  # May be same or less after cleanup
-        self.assertLessEqual(PageRegion.objects.count(), region_count)
+        self.assertEqual(Page.objects.count(), page_count)
+        self.assertEqual(PageRegion.objects.count(), region_count)
 
 
 class ArtifactPathSecurityTest(TestCase):
@@ -1280,12 +1300,15 @@ class WorkerContractTest(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.state, "completed")
 
-        # Verify processed Document exists
+        # Verify this job owns the processed revision. Direct importer use does
+        # not activate it; activation belongs to worker finalization.
+        job.refresh_from_db()
         sd.refresh_from_db()
-        self.assertIsNotNone(sd.processed_document)
+        self.assertIsNotNone(job.result_document)
+        self.assertIsNone(sd.active_document)
 
         # Verify page count
-        doc = sd.processed_document
+        doc = job.result_document
         self.assertEqual(doc.page_count, 1)
 
         # Verify page image exists on disk
@@ -1315,3 +1338,481 @@ class WorkerContractTest(TestCase):
         # Cleanup
         import shutil
         shutil.rmtree(artifacts_base, ignore_errors=True)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class ProcessingStatusViewTest(TestCase):
+    """Regression coverage for truthful, non-nesting HTMX status updates."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="status-user", password="testpass123")
+        self.collection = _create_collection(self.user)
+        self.preset = _create_preset()
+        self.source = SourceDocument.objects.create(
+            collection=self.collection,
+            filename="status.pdf",
+            sha256="status-sha",
+            uploaded_by=self.user,
+        )
+        self.job = ProcessingJob.objects.create(
+            source_document=self.source,
+            preset=self.preset,
+            state="processing",
+            external_job_id="remote-status-1",
+            created_by=self.user,
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def test_repeated_htmx_responses_have_one_replacement_root(self):
+        initial = self.client.get(reverse("job_status", args=[self.job.pk]))
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.content.count(b'class="job-status-block"'), 1)
+
+        for _ in range(3):
+            response = self.client.get(
+                reverse("job_status", args=[self.job.pk]),
+                HTTP_HX_REQUEST="true",
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content.count(b'class="job-status-block"'), 1)
+            self.assertEqual(response.content.count(b'id="job-status"'), 1)
+            self.assertContains(response, 'hx-target="this"')
+
+    def test_terminal_job_stops_polling_and_links_to_its_revision(self):
+        document = Document.objects.create(
+            collection=self.collection,
+            external_id="status-revision",
+            filename="status.pdf",
+            sha256=self.source.sha256,
+        )
+        self.job.state = "completed"
+        self.job.result_document = document
+        self.job.save(update_fields=["state", "result_document"])
+
+        response = self.client.get(
+            reverse("job_status", args=[self.job.pk]),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertNotContains(response, "hx-trigger")
+        self.assertContains(response, reverse("document_detail", args=[document.pk]))
+
+    def test_status_uses_only_observable_stage_labels(self):
+        response = self.client.get(reverse("job_status", args=[self.job.pk]))
+        self.assertContains(response, "Upload received")
+        self.assertContains(response, "Waiting for worker")
+        self.assertContains(response, "Submitting to Docling")
+        self.assertContains(response, "Docling is analyzing the document")
+        self.assertContains(response, "Saving extracted results")
+        self.assertNotContains(response, "Preparing pages")
+        self.assertNotContains(response, "Identifying page contents")
+        self.assertNotContains(response, "Locating tables and regions")
+
+    @override_settings(DSW_PROCESSING_STALE_AFTER_SECONDS=90)
+    def test_stale_heartbeat_is_explained(self):
+        self.job.worker_heartbeat_at = timezone.now() - timedelta(minutes=2)
+        self.job.save(update_fields=["worker_heartbeat_at"])
+        response = self.client.get(
+            reverse("job_status", args=[self.job.pk]),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertContains(response, "has not reported a worker heartbeat")
+
+    def test_htmx_asset_fallback_is_not_under_static_url(self):
+        self.assertEqual(reverse("serve_htmx"), "/assets/htmx.min.js")
+        response = self.client.get(reverse("serve_htmx"))
+        self.assertRedirects(
+            response,
+            "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js",
+            fetch_redirect_response=False,
+        )
+
+
+class ProcessingRevisionTest(TestCase):
+    """A processing job owns one revision; only completed revisions activate."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="revision-user", password="testpass123")
+        self.collection = _create_collection(self.user)
+        self.preset = _create_preset()
+        self.source = SourceDocument.objects.create(
+            collection=self.collection,
+            filename="revision.pdf",
+            sha256="same-source-sha",
+            uploaded_by=self.user,
+        )
+        self.artifacts_dir = tempfile.mkdtemp()
+        self.settings_override = override_settings(ARTIFACTS_BASE_DIR=self.artifacts_dir)
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(__import__("shutil").rmtree, self.artifacts_dir, True)
+
+    @staticmethod
+    def _result(text="Revision text", partial=False):
+        from workbench.processors.base import ProcessorResult
+        return ProcessorResult(
+            pages_processed=1,
+            page_texts={1: text},
+            regions=[{
+                "page_number": 1,
+                "region_type": "text",
+                "bbox": [0.1, 0.2, 0.8, 0.6],
+                "text": text,
+                "confidence": 0.9,
+                "metadata": {},
+            }],
+            processor_metadata={"page_dimensions": {1: {"width": 100, "height": 100}}},
+            error_summary="incomplete extraction" if partial else None,
+        )
+
+    def _job(self, worker_id="revision-worker"):
+        return ProcessingJob.objects.create(
+            source_document=self.source,
+            preset=self.preset,
+            state="importing",
+            external_job_id=uuid_for_test(),
+            worker_id=worker_id,
+            worker_heartbeat_at=timezone.now(),
+            created_by=self.user,
+        )
+
+    @staticmethod
+    def _command(worker_id="revision-worker"):
+        from workbench.management.commands.run_processing_worker import Command
+        command = Command()
+        command.worker_id = worker_id
+        command.lease_seconds = 30
+        return command
+
+    def test_successful_reprocessing_creates_and_activates_new_revision(self):
+        from workbench.processors.importer import ResultImporter
+
+        first_job = self._job()
+        first_result = self._result("First revision")
+        first_counts = ResultImporter(first_job).import_results(first_result)
+        self._command()._finalize(first_job, first_result, first_counts["document"])
+        self.source.refresh_from_db()
+        first_document = self.source.active_document
+
+        second_job = self._job()
+        second_result = self._result("Second revision")
+        second_counts = ResultImporter(second_job).import_results(second_result)
+        self._command()._finalize(second_job, second_result, second_counts["document"])
+        self.source.refresh_from_db()
+
+        self.assertNotEqual(first_document.pk, self.source.active_document_id)
+        self.assertEqual(second_job.result_document_id, self.source.active_document_id)
+        self.assertEqual(Document.objects.filter(collection=self.collection).count(), 2)
+        self.assertEqual(
+            list(Document.objects.filter(collection=self.collection).values_list("sha256", flat=True)),
+            [self.source.sha256, self.source.sha256],
+        )
+        self.assertEqual(Page.objects.filter(document=first_document).count(), 1)
+        self.assertEqual(Page.objects.filter(document=self.source.active_document).count(), 1)
+
+    def test_partial_revision_is_retained_but_not_activated(self):
+        from workbench.processors.importer import ResultImporter
+
+        completed_job = self._job()
+        completed_result = self._result("Complete")
+        completed_counts = ResultImporter(completed_job).import_results(completed_result)
+        self._command()._finalize(completed_job, completed_result, completed_counts["document"])
+        self.source.refresh_from_db()
+        active_id = self.source.active_document_id
+
+        partial_job = self._job()
+        partial_result = self._result("Partial", partial=True)
+        partial_counts = ResultImporter(partial_job).import_results(partial_result)
+        self._command()._finalize(partial_job, partial_result, partial_counts["document"])
+        partial_job.refresh_from_db()
+        self.source.refresh_from_db()
+
+        self.assertEqual(partial_job.state, "partial")
+        self.assertIsNotNone(partial_job.result_document_id)
+        self.assertEqual(self.source.active_document_id, active_id)
+
+    def test_same_job_reimport_has_exact_counts_and_same_revision(self):
+        from workbench.processors.importer import ResultImporter
+
+        job = self._job()
+        result = self._result()
+        importer = ResultImporter(job)
+        importer.import_results(result)
+        job.refresh_from_db()
+        revision_id = job.result_document_id
+        importer.import_results(result)
+
+        self.assertEqual(Document.objects.filter(collection=self.collection).count(), 1)
+        self.assertEqual(job.result_document_id, revision_id)
+        self.assertEqual(Page.objects.filter(document_id=revision_id).count(), 1)
+        self.assertEqual(PageRegion.objects.filter(job=job).count(), 1)
+        self.assertEqual(ProcessingArtifact.objects.filter(job=job, artifact_type="page_text").count(), 1)
+
+    def test_failed_reimport_preserves_committed_files_and_database_rows(self):
+        from workbench.processors.importer import ResultImporter
+        from io import BytesIO
+        from PIL import Image
+
+        job = self._job()
+        result = self._result("Original")
+        image_buffer = BytesIO()
+        Image.new("RGB", (2, 2), color="white").save(image_buffer, format="PNG")
+        result.page_images = {1: {
+            "data": base64.b64encode(image_buffer.getvalue()).decode(),
+            "format": "png",
+        }}
+        importer = ResultImporter(job)
+        importer.import_results(result)
+        page = Page.objects.get(document=job.result_document)
+        committed_path = Path(self.artifacts_dir) / page.image_path
+        committed_bytes = committed_path.read_bytes()
+
+        result.page_texts = {1: "Replacement that must roll back"}
+        with patch.object(importer, "_import_artifacts", side_effect=RuntimeError("database failure")):
+            with self.assertRaisesRegex(RuntimeError, "database failure"):
+                importer.import_results(result)
+
+        page.refresh_from_db()
+        self.assertEqual(committed_path.read_bytes(), committed_bytes)
+        self.assertEqual(Page.objects.filter(document=job.result_document).count(), 1)
+        self.assertEqual(PageRegion.objects.filter(job=job).count(), 1)
+        self.assertEqual(
+            ProcessingArtifact.objects.get(job=job, artifact_type="page_text").data["text"],
+            "Original",
+        )
+
+
+class WorkerRecoveryTest(TestCase):
+    """Worker leases, heartbeat semantics, and bounded polling recovery."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="worker-user", password="testpass123")
+        self.collection = _create_collection(self.user)
+        self.preset = _create_preset()
+        self.source = SourceDocument.objects.create(
+            collection=self.collection,
+            filename="worker.pdf",
+            sha256="worker-sha",
+            uploaded_by=self.user,
+        )
+
+    def _job(self, state="processing", external_job_id="remote-1", **extra):
+        defaults = {
+            "source_document": self.source,
+            "preset": self.preset,
+            "state": state,
+            "external_job_id": external_job_id,
+            "created_by": self.user,
+        }
+        defaults.update(extra)
+        return ProcessingJob.objects.create(**defaults)
+
+    @staticmethod
+    def _command():
+        from workbench.management.commands.run_processing_worker import Command
+        command = Command()
+        command.worker_id = "test-worker"
+        command.lease_seconds = 30
+        command.max_status_errors = 3
+        command.poll_interval = 0
+        command.processor = MagicMock(job_timeout=10)
+        return command
+
+    @override_settings(DSW_PROCESSING_STALE_AFTER_SECONDS=90)
+    def test_stale_uses_heartbeat_not_total_runtime(self):
+        old = timezone.now() - timedelta(hours=2)
+        stale = self._job(started_at=old, worker_heartbeat_at=old)
+        fresh = self._job(
+            external_job_id="remote-2",
+            started_at=old,
+            worker_heartbeat_at=timezone.now(),
+        )
+        self.assertTrue(stale.is_stale())
+        self.assertFalse(fresh.is_stale())
+
+    def test_heartbeat_renews_only_owned_lease(self):
+        job = self._job(worker_id="test-worker")
+        command = self._command()
+        before = timezone.now()
+        command._heartbeat(job, "Still working.")
+        job.refresh_from_db()
+        self.assertGreaterEqual(job.worker_heartbeat_at, before)
+        self.assertGreater(job.lease_expires_at, job.worker_heartbeat_at)
+        self.assertEqual(job.status_message, "Still working.")
+
+    def test_stale_processing_job_with_task_id_is_adopted(self):
+        job = self._job(
+            worker_id="dead-worker",
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        command = self._command()
+        claimed, action = command._claim_next_job()
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.pk, job.pk)
+        self.assertEqual(action, "poll")
+        self.assertEqual(claimed.worker_id, command.worker_id)
+
+    def test_submitting_without_task_id_is_never_resubmitted(self):
+        job = self._job(
+            state="submitting",
+            external_job_id="",
+            worker_id="dead-worker",
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        command = self._command()
+        self.assertIsNone(command._claim_next_job())
+        job.refresh_from_db()
+        self.assertEqual(job.state, "submission_uncertain")
+        command.processor.submit.assert_not_called()
+
+    def test_temporary_status_errors_are_retried_and_reset(self):
+        job = self._job(worker_id="test-worker")
+        command = self._command()
+        command.processor.get_status.side_effect = [
+            ConnectionError("temporary one"),
+            ConnectionError("temporary two"),
+            {"state": "success"},
+        ]
+        command._wait_for_completion(job, job.external_job_id)
+        job.refresh_from_db()
+        self.assertEqual(command.processor.get_status.call_count, 3)
+        self.assertEqual(job.consecutive_poll_errors, 0)
+        self.assertEqual(job.remote_status, "success")
+        self.assertIsNotNone(job.remote_response_at)
+
+    def test_retry_limit_marks_processing_job_interrupted(self):
+        job = self._job(worker_id="test-worker")
+        command = self._command()
+        command.processor.get_status.side_effect = ConnectionError("offline")
+        command._process_job(job, "poll")
+        job.refresh_from_db()
+        self.assertEqual(job.state, "interrupted")
+        self.assertIn("3 consecutive attempts", job.error_message)
+        self.assertEqual(command.processor.get_status.call_count, 3)
+
+    def test_stale_importing_job_is_reimported_idempotently_and_completed(self):
+        from workbench.processors.base import ProcessorResult
+        from workbench.processors.importer import ResultImporter
+
+        artifacts_dir = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, artifacts_dir, True)
+        result = ProcessorResult(
+            pages_processed=1,
+            page_texts={1: "Recovered import"},
+            regions=[{
+                "page_number": 1,
+                "region_type": "text",
+                "bbox": [0.1, 0.1, 0.9, 0.9],
+                "text": "Recovered import",
+                "metadata": {},
+            }],
+            processor_metadata={"page_dimensions": {1: {"width": 100, "height": 100}}},
+        )
+        with self.settings(ARTIFACTS_BASE_DIR=artifacts_dir):
+            job = self._job(
+                state="importing",
+                worker_id="dead-worker",
+                lease_expires_at=timezone.now() - timedelta(seconds=1),
+            )
+            ResultImporter(job).import_results(result)
+            job.refresh_from_db()
+            revision_id = job.result_document_id
+
+            command = self._command()
+            command.processor.collect_results.return_value = result
+            claimed, action = command._claim_next_job()
+            self.assertEqual(action, "import")
+            command._process_job(claimed, action)
+
+        job.refresh_from_db()
+        self.source.refresh_from_db()
+        self.assertEqual(job.state, "completed")
+        self.assertEqual(job.result_document_id, revision_id)
+        self.assertEqual(self.source.active_document_id, revision_id)
+        self.assertEqual(Document.objects.filter(collection=self.collection).count(), 1)
+        self.assertEqual(Page.objects.filter(document_id=revision_id).count(), 1)
+        self.assertEqual(PageRegion.objects.filter(job=job).count(), 1)
+
+
+def uuid_for_test():
+    """Return a deterministic-enough unique external identifier for test rows."""
+    import uuid
+    return f"remote-{uuid.uuid4().hex}"
+
+
+class ProcessingRevisionMigrationTest(TransactionTestCase):
+    """Existing deployed jobs retain their result and region links on migration."""
+
+    migrate_from = [("workbench", "0006_pageregion_text")]
+    migrate_to = [("workbench", "0007_processing_revisions_and_recovery")]
+
+    def test_existing_completed_job_is_backfilled(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+
+        OldUser = old_apps.get_model("auth", "User")
+        OldCollection = old_apps.get_model("workbench", "Collection")
+        OldDocument = old_apps.get_model("workbench", "Document")
+        OldPage = old_apps.get_model("workbench", "Page")
+        OldPreset = old_apps.get_model("workbench", "ProcessingPreset")
+        OldSource = old_apps.get_model("workbench", "SourceDocument")
+        OldJob = old_apps.get_model("workbench", "ProcessingJob")
+        OldRegion = old_apps.get_model("workbench", "PageRegion")
+
+        user = OldUser.objects.create(username="migration-user")
+        project = OldCollection.objects.create(name="Migration Project", created_by_id=user.pk)
+        document = OldDocument.objects.create(
+            collection_id=project.pk,
+            external_id="legacy-revision",
+            filename="legacy.pdf",
+            sha256="legacy-sha",
+            page_count=1,
+        )
+        page = OldPage.objects.create(document_id=document.pk, page_number=1)
+        preset = OldPreset.objects.create(slug="migration-preset", name="Migration")
+        source = OldSource.objects.create(
+            collection_id=project.pk,
+            filename="legacy.pdf",
+            sha256="legacy-sha",
+            processed_document_id=document.pk,
+        )
+        job = OldJob.objects.create(
+            source_document_id=source.pk,
+            preset_id=preset.pk,
+            state="completed",
+            finished_at=timezone.now(),
+        )
+        region = OldRegion.objects.create(
+            source_document_id=source.pk,
+            job_id=job.pk,
+            page_number=1,
+            region_type="text",
+            left=0.1,
+            top=0.1,
+            right=0.9,
+            bottom=0.9,
+            text="Legacy region",
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_to)
+        new_apps = executor.loader.project_state(self.migrate_to).apps
+        NewSource = new_apps.get_model("workbench", "SourceDocument")
+        NewJob = new_apps.get_model("workbench", "ProcessingJob")
+        NewRegion = new_apps.get_model("workbench", "PageRegion")
+        NewDocument = new_apps.get_model("workbench", "Document")
+
+        self.assertEqual(NewSource.objects.get(pk=source.pk).active_document_id, document.pk)
+        self.assertEqual(NewJob.objects.get(pk=job.pk).result_document_id, document.pk)
+        self.assertEqual(NewRegion.objects.get(pk=region.pk).page_id, page.pk)
+        NewDocument.objects.create(
+            collection_id=project.pk,
+            external_id="second-revision",
+            filename="legacy.pdf",
+            sha256="legacy-sha",
+        )
+        self.assertEqual(NewDocument.objects.filter(sha256="legacy-sha").count(), 2)

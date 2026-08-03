@@ -1,97 +1,64 @@
 {% load i18n %}
-<div class="job-status-block">
+<div
+    id="job-status"
+    class="job-status-block"
+    {% if job.is_active %}
+    hx-get="{% url 'job_status' job.id %}"
+    hx-trigger="every 5s"
+    hx-target="this"
+    hx-swap="outerHTML"
+    {% endif %}
+>
     <div class="job-header">
-        <h3>{{ source_document.filename }}</h3>
+        <h2>{% blocktrans with filename=job.source_document.filename %}Processing: {{ filename }}{% endblocktrans %}</h2>
         <span class="job-state job-state-{{ job.state }}">{{ job.get_state_display }}</span>
     </div>
 
-    <div class="job-progress">
-        {% if job.state == "queued" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step active">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step">{% trans "Preparing pages" %}</div>
-        <div class="progress-step">{% trans "Identifying page contents" %}</div>
-        <div class="progress-step">{% trans "Locating tables and regions" %}</div>
-        <div class="progress-step">{% trans "Importing results" %}</div>
-        {% elif job.state == "submitting" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step active">{% trans "Preparing pages" %}</div>
-        <div class="progress-step">{% trans "Identifying page contents" %}</div>
-        <div class="progress-step">{% trans "Locating tables and regions" %}</div>
-        <div class="progress-step">{% trans "Importing results" %}</div>
-        {% elif job.state == "processing" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step done">{% trans "Preparing pages" %}</div>
-        <div class="progress-step active">{% trans "Identifying page contents" %}</div>
-        <div class="progress-step">{% trans "Locating tables and regions" %}</div>
-        <div class="progress-step">{% trans "Importing results" %}</div>
-        {% elif job.state == "importing" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step done">{% trans "Preparing pages" %}</div>
-        <div class="progress-step done">{% trans "Identifying page contents" %}</div>
-        <div class="progress-step done">{% trans "Locating tables and regions" %}</div>
-        <div class="progress-step active">{% trans "Importing results" %}</div>
-        {% elif job.state == "completed" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step done">{% trans "Preparing pages" %}</div>
-        <div class="progress-step done">{% trans "Identifying page contents" %}</div>
-        <div class="progress-step done">{% trans "Locating tables and regions" %}</div>
-        <div class="progress-step done">{% trans "Importing results" %}</div>
-        <div class="progress-message success">{% trans "Processing completed successfully." %}</div>
-        {% elif job.state == "partial" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step done">{% trans "Preparing pages" %}</div>
-        <div class="progress-step done">{% trans "Identifying page contents" %}</div>
-        <div class="progress-step done">{% trans "Locating tables and regions" %}</div>
-        <div class="progress-step done">{% trans "Importing results" %}</div>
-        <div class="progress-message warning">{% trans "Processing completed with some errors." %}</div>
-        {% elif job.state == "failed" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step done">{% trans "Preparing pages" %}</div>
-        <div class="progress-step active error">{% trans "Processing failed" %}</div>
-        <div class="progress-message error">{{ job.error_message }}</div>
-        {% elif job.state == "cancelled" %}
-        <div class="progress-step done">{% trans "Document received" %}</div>
-        <div class="progress-step done">{% trans "Waiting for processing" %}</div>
-        <div class="progress-step done">{% trans "Preparing pages" %}</div>
-        <div class="progress-step active cancelled">{% trans "Processing cancelled" %}</div>
-        {% endif %}
+    <div class="job-progress" aria-label="{% trans 'Processing progress' %}">
+        <div class="progress-step done">{% trans "Upload received" %}</div>
+        <div class="progress-step {% if job.state == 'queued' %}active{% elif job.state != 'submission_uncertain' %}done{% endif %}">{% trans "Waiting for worker" %}</div>
+        <div class="progress-step {% if job.state == 'submitting' %}active{% elif job.state == 'processing' or job.state == 'importing' or job.state == 'completed' or job.state == 'partial' %}done{% endif %}">{% trans "Submitting to Docling" %}</div>
+        <div class="progress-step {% if job.state == 'processing' %}active{% elif job.state == 'importing' or job.state == 'completed' or job.state == 'partial' %}done{% endif %}">{% trans "Docling is analyzing the document" %}</div>
+        <div class="progress-step {% if job.state == 'importing' %}active{% elif job.state == 'completed' or job.state == 'partial' %}done{% endif %}">{% trans "Saving extracted results" %}</div>
+        <div class="progress-step {% if job.state == 'completed' %}done{% endif %}">{% trans "Ready" %}</div>
     </div>
+
+    {% if job.is_stale %}
+    <div class="progress-message warning">
+        {% trans "Processing has not reported a worker heartbeat recently. The worker may have stopped." %}
+    </div>
+    {% endif %}
+
+    {% if job.state == "completed" %}
+    <div class="progress-message success">{% trans "The document is ready to inspect." %}</div>
+    {% elif job.state == "partial" %}
+    <div class="progress-message warning">{% trans "Processing produced partial results. This revision was not made active." %}</div>
+    {% elif job.state == "submission_uncertain" %}
+    <div class="progress-message warning">{{ job.status_message }}</div>
+    {% elif job.state == "interrupted" or job.state == "failed" %}
+    <div class="progress-message error">{{ job.status_message|default:job.error_message }}</div>
+    {% elif job.status_message %}
+    <div class="progress-message">{{ job.status_message }}</div>
+    {% endif %}
 
     <div class="job-stats">
-        {% if job.pages_processed %}
-        <div><strong>{{ job.pages_processed }}</strong> {% trans "pages processed" %}</div>
-        {% endif %}
-        {% if job.tables_found %}
-        <div><strong>{{ job.tables_found }}</strong> {% trans "tables found" %}</div>
-        {% endif %}
-        {% if job.started_at %}
-        <div>{% trans "Started:" %} {{ job.started_at }}</div>
-        {% endif %}
-        {% if job.finished_at %}
-        <div>{% trans "Finished:" %} {{ job.finished_at }}</div>
-        {% endif %}
+        {% if job.started_at %}<div>{% trans "Elapsed:" %} {{ job.started_at|timesince }}</div>{% endif %}
+        {% if job.worker_heartbeat_at %}<div>{% trans "Worker heartbeat:" %} {{ job.worker_heartbeat_at|timesince }} {% trans "ago" %}</div>{% endif %}
+        {% if job.remote_response_at %}<div>{% trans "Last processor response:" %} {{ job.remote_response_at|timesince }} {% trans "ago" %}</div>{% endif %}
+        {% if job.pages_processed %}<div><strong>{{ job.pages_processed }}</strong> {% trans "pages saved" %}</div>{% endif %}
+        {% if job.tables_found %}<div><strong>{{ job.tables_found }}</strong> {% trans "tables found" %}</div>{% endif %}
+        {% if job.finished_at %}<div>{% trans "Finished:" %} {{ job.finished_at }}</div>{% endif %}
     </div>
 
-    {% if job.state in "completed,partial" %}
-    <div class="job-actions" style="margin-top:1rem">
-        <a href="{% url 'document_detail' source_document.processed_document_id %}" class="btn btn-primary">{% trans "View Document" %}</a>
-        <a href="{% url 'collection_detail' source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
+    {% if job.state == "completed" and job.result_document_id %}
+    <div class="job-actions">
+        <a href="{% url 'document_detail' job.result_document_id %}" class="btn btn-primary">{% trans "View Document" %}</a>
+        <a href="{% url 'collection_detail' job.source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
     </div>
-    {% elif job.state in "queued,submitting,processing,importing" %}
-    <div hx-get="{% url 'job_status' job.id %}" hx-trigger="every 5s" hx-swap="outerHTML">
-        <p style="color:#666; font-style:italic;">{% trans "Auto-refreshing..." %}</p>
-    </div>
-    {% else %}
-    <div class="job-actions" style="margin-top:1rem">
-        <a href="{% url 'project_process' source_document.collection_id %}" class="btn btn-primary">{% trans "Upload Another" %}</a>
-        <a href="{% url 'collection_detail' source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
+    {% elif not job.is_active %}
+    <div class="job-actions">
+        <a href="{% url 'project_process' job.source_document.collection_id %}" class="btn btn-primary">{% trans "Upload Another" %}</a>
+        <a href="{% url 'collection_detail' job.source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
     </div>
     {% endif %}
 </div>

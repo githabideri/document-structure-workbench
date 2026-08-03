@@ -3,12 +3,10 @@ Document Structure Workbench - Core Data Models.
 """
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import JSONField
 from django.urls import reverse
-from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
 
@@ -90,7 +88,6 @@ class Document(models.Model):
     is_archived = models.BooleanField(default=False)
 
     class Meta:
-        unique_together = ["collection", "sha256"]
         ordering = ["external_id"]
 
     def __str__(self):
@@ -557,13 +554,13 @@ class SourceDocument(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     is_archived = models.BooleanField(default=False)
-    processed_document = models.ForeignKey(
+    active_document = models.ForeignKey(
         "Document",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="source_documents",
-        help_text="Canonical processed Document for this source.",
+        related_name="active_for_sources",
+        help_text="Currently selected completed processing revision.",
     )
 
     class Meta:
@@ -603,6 +600,8 @@ class ProcessingJob(models.Model):
         ("submitting", "Submitting to processor"),
         ("processing", "Processing"),
         ("importing", "Importing results"),
+        ("submission_uncertain", "Submission uncertain"),
+        ("interrupted", "Interrupted"),
         ("completed", "Completed"),
         ("partial", "Partially completed"),
         ("failed", "Failed"),
@@ -623,8 +622,24 @@ class ProcessingJob(models.Model):
     state = models.CharField(max_length=20, choices=JOB_STATES, default="queued")
     external_job_id = models.CharField(max_length=200, blank=True)
     processor = models.CharField(max_length=50, blank=True)
+    result_document = models.OneToOneField(
+        Document,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="processing_job",
+        help_text="Immutable processed revision produced by this job.",
+    )
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    worker_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    remote_poll_attempted_at = models.DateTimeField(null=True, blank=True)
+    remote_response_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    worker_id = models.CharField(max_length=200, blank=True)
+    status_message = models.CharField(max_length=500, blank=True)
+    remote_status = models.CharField(max_length=100, blank=True)
+    consecutive_poll_errors = models.PositiveIntegerField(default=0)
     error_message = models.TextField(blank=True)
     pages_processed = models.PositiveIntegerField(default=0)
     tables_found = models.PositiveIntegerField(default=0)
@@ -640,9 +655,11 @@ class ProcessingJob(models.Model):
     # Allowed state transitions
     _TRANSITIONS = {
         "queued": ["submitting", "cancelled"],
-        "submitting": ["processing", "failed", "cancelled"],
-        "processing": ["importing", "failed", "cancelled"],
-        "importing": ["completed", "partial", "failed"],
+        "submitting": ["processing", "submission_uncertain", "interrupted", "failed", "cancelled"],
+        "processing": ["importing", "interrupted", "failed", "cancelled"],
+        "importing": ["completed", "partial", "interrupted", "failed"],
+        "submission_uncertain": [],
+        "interrupted": ["processing", "importing", "failed", "cancelled"],
         "completed": [],
         "partial": [],
         "failed": [],
@@ -663,12 +680,31 @@ class ProcessingJob(models.Model):
         old_state = self.state
         self.state = new_state
         from django.utils import timezone
-        if new_state in ("completed", "partial", "failed", "cancelled"):
+        if new_state in (
+            "submission_uncertain", "interrupted", "completed", "partial",
+            "failed", "cancelled",
+        ):
             self.finished_at = timezone.now()
         if new_state == "submitting":
             self.started_at = timezone.now()
         self.save(update_fields=["state", "started_at", "finished_at"])
         return old_state
+
+    @property
+    def is_active(self):
+        return self.state in {"submitting", "processing", "importing"}
+
+    def is_stale(self, now=None):
+        """Return whether an active job has stopped receiving worker heartbeats."""
+        if not self.is_active:
+            return False
+        from datetime import timedelta
+
+        from django.utils import timezone
+        now = now or timezone.now()
+        threshold = getattr(settings, "DSW_PROCESSING_STALE_AFTER_SECONDS", 90)
+        last_signal = self.worker_heartbeat_at or self.started_at or self.created_at
+        return last_signal < now - timedelta(seconds=threshold)
 
     def capture_preset_snapshot(self):
         """Capture a snapshot of the current preset configuration."""
@@ -752,6 +788,10 @@ class PageRegion(models.Model):
         ProcessingJob, on_delete=models.CASCADE,
         related_name="regions",
     )
+    page = models.ForeignKey(
+        Page, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="regions",
+    )
     page_number = models.PositiveIntegerField()
     region_type = models.CharField(max_length=20, choices=REGION_TYPES)
     # Normalized coordinates: top-left origin, page-relative
@@ -770,6 +810,11 @@ class PageRegion(models.Model):
 
     def clean(self):
         super().clean()
+        if self.page_id:
+            if self.page.page_number != self.page_number:
+                raise ValidationError({"page": "Region page number does not match its page."})
+            if self.job.result_document_id and self.page.document_id != self.job.result_document_id:
+                raise ValidationError({"page": "Region page must belong to the job result revision."})
         # Validate normalized coordinates: 0 <= left < right <= 1, 0 <= top < bottom <= 1
         if self.left is not None and self.right is not None:
             if not (0 <= self.left < self.right <= 1):

@@ -28,19 +28,17 @@ Suggested layout:
 Table crops are generated from page image + normalized bbox when Docling
 does not return table crops directly.
 
-Historical data protection:
-    - Rejects reprocessing when the existing document has review tasks,
-      reviews, or decisions
-    - Only records from the same unfinished job may be replaced idempotently
-
-Rollback:
-    - Tracks files written during import
-    - Cleans up on DB failure
-    - Leaves artifacts from earlier jobs untouched
+Revision safety:
+    - Every processing job owns one immutable Document revision
+    - Same-job re-import replaces only that revision's records
+    - Other jobs, revisions, reviews, and decisions are never touched
+    - Files are staged and atomically promoted with rollback backups
 """
 import base64
-import json
 import logging
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 from django.conf import settings
@@ -48,15 +46,12 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from ..models import (
-    Collection,
     Document,
     ExtractionRun,
     Page,
     PageRegion,
     ProcessingArtifact,
     ProcessingJob,
-    ReviewTask,
-    SourceDocument,
     TableCandidate,
     TableExtraction,
 )
@@ -82,7 +77,10 @@ class ResultImporter:
         ).resolve()
         self.source_sha = self.source_doc.sha256[:12] or f"job-{self.job.pk}"
         self.job_dir = f"job-{self.job.pk}"
-        self._written_files = []  # Track files for rollback
+        self._staging_root = None
+        self._staged_files = {}
+        self._promoted_files = []
+        self._backup_files = {}
 
     def import_results(self, result: ProcessorResult) -> dict:
         """
@@ -94,12 +92,10 @@ class ResultImporter:
         Returns:
             dict with counts of created/updated records.
 
-        Raises:
-            ImportError if historical data protection blocks reprocessing.
+        The returned ``document`` is this job's processed revision. Activation
+        is deliberately left to the worker's completed-job finalization.
         """
-        # Check historical data protection
-        self._check_historical_safety()
-
+        self._prepare_staging()
         counts = {
             "pages": 0,
             "regions": 0,
@@ -132,11 +128,22 @@ class ResultImporter:
                 # Update job stats
                 self.job.pages_processed = result.pages_processed
                 self.job.tables_found = result.tables_found
-                self.job.save(update_fields=["pages_processed", "tables_found"])
+                self.job.save(update_fields=[
+                    "pages_processed", "tables_found", "result_document",
+                ])
+
+                # Promote only after all database work has succeeded. If the
+                # database commit then fails, the outer exception restores any
+                # previous same-job files from backups.
+                self._promote_staged_files()
         except Exception:
-            # Rollback: clean up files written during this import
-            self._rollback_files()
+            self._restore_promoted_files()
+            self._discard_staging()
+            self.job.refresh_from_db()
             raise
+
+        self._discard_backups()
+        self._discard_staging()
 
         logger.info(
             "Import complete: %d pages, %d regions, %d tables, %d extractions, "
@@ -144,73 +151,24 @@ class ResultImporter:
             counts["pages"], counts["regions"], counts["tables"],
             counts["extractions"], counts["images_written"],
         )
+        counts["document"] = document
         return counts
 
-    def _rollback_files(self):
-        """Remove files written during this import (on DB failure)."""
-        for rel_path in self._written_files:
-            try:
-                full = (self.artifacts_base / rel_path).resolve()
-                if full.exists():
-                    full.unlink()
-                    logger.debug("Rollback removed: %s", rel_path)
-            except OSError as e:
-                logger.warning("Rollback failed for %s: %s", rel_path, e)
-        self._written_files.clear()
-
-    def _check_historical_safety(self):
-        """
-        Block reprocessing when the existing document has historical review data.
-
-        Only records from the same unfinished job may be replaced idempotently.
-        """
-        existing_doc = None
-        if hasattr(self.source_doc, "processed_document") and self.source_doc.processed_document:
-            existing_doc = self.source_doc.processed_document
-
-        if not existing_doc:
-            return  # No existing document, safe to create new
-
-        # Check for review tasks
-        review_tasks = TableCandidate.objects.filter(
-            document=existing_doc
-        ).filter(review_task__isnull=False).exists()
-        if review_tasks:
-            raise ImportError(
-                "Cannot reprocess: this document has active review tasks. "
-                "Create a new SourceDocument for reprocessing."
-            )
-
-        # Check for reviews (via ReviewTask which links to TableExtraction)
-        reviews = ReviewTask.objects.filter(
-            table_candidate__document=existing_doc
-        ).filter(review__isnull=False).exists()
-        if reviews:
-            raise ImportError(
-                "Cannot reprocess: this document has submitted reviews. "
-                "Create a new SourceDocument for reprocessing."
-            )
-
-        # Check for decisions
-        decisions = TableCandidate.objects.filter(
-            document=existing_doc
-        ).filter(decision__isnull=False).exists()
-        if decisions:
-            raise ImportError(
-                "Cannot reprocess: this document has curator decisions. "
-                "Create a new SourceDocument for reprocessing."
-            )
-
-        # Check for chat citations (future-proofing)
-        # If chat citations exist, block reprocessing
+    def _prepare_staging(self):
+        self.artifacts_base.mkdir(parents=True, exist_ok=True)
+        staging_base = self.artifacts_base / ".staging"
+        staging_base.mkdir(parents=True, exist_ok=True)
+        self._staging_root = Path(tempfile.mkdtemp(
+            prefix=f"job-{self.job.pk}-", dir=staging_base,
+        ))
+        self._staged_files = {}
+        self._promoted_files = []
+        self._backup_files = {}
 
     def _get_or_create_document(self, result: ProcessorResult) -> Document:
-        """Get or create the processed Document linked to SourceDocument."""
-        if (
-            hasattr(self.source_doc, "processed_document")
-            and self.source_doc.processed_document
-        ):
-            doc = self.source_doc.processed_document
+        """Get or create the immutable processed revision owned by this job."""
+        if self.job.result_document_id:
+            doc = self.job.result_document
             if result.pages_processed and doc.page_count != result.pages_processed:
                 doc.page_count = result.pages_processed
                 doc.save(update_fields=["page_count"])
@@ -225,8 +183,7 @@ class ResultImporter:
             source_path=self.source_doc.file_path,
         )
 
-        self.source_doc.processed_document = document
-        self.source_doc.save(update_fields=["processed_document"])
+        self.job.result_document = document
 
         return document
 
@@ -236,10 +193,58 @@ class ResultImporter:
         PageRegion.objects.filter(job=self.job).delete()
         ProcessingArtifact.objects.filter(job=self.job).delete()
 
-        # Clean pages only if they belong to this job's document
-        # and no historical data exists (checked in _check_historical_safety)
-        Page.objects.filter(document=document).delete()
+        # The document is owned one-to-one by this job. Other revisions cannot
+        # be reached through these filters.
         TableCandidate.objects.filter(document=document).delete()
+        Page.objects.filter(document=document).delete()
+
+    def _stage_bytes(self, rel_path: str, content: bytes) -> Path:
+        """Write an artifact to this import's private staging directory."""
+        staged_path = self._staging_root / "new" / rel_path
+        staged_path.parent.mkdir(parents=True, exist_ok=True)
+        staged_path.write_bytes(content)
+        self._staged_files[rel_path] = staged_path
+        return staged_path
+
+    def _artifact_read_path(self, rel_path: str) -> Path:
+        """Resolve a staged artifact first, then its currently committed path."""
+        return self._staged_files.get(rel_path, self.artifacts_base / rel_path)
+
+    def _promote_staged_files(self):
+        """Atomically replace final files while retaining rollback backups."""
+        for rel_path, staged_path in self._staged_files.items():
+            final_path = (self.artifacts_base / rel_path).resolve()
+            if not final_path.is_relative_to(self.artifacts_base):
+                raise ImportError(f"Artifact path escapes storage root: {rel_path}")
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            if final_path.exists():
+                backup_path = self._staging_root / "backup" / rel_path
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(final_path, backup_path)
+                self._backup_files[rel_path] = backup_path
+            self._promoted_files.append(rel_path)
+            os.replace(staged_path, final_path)
+
+    def _restore_promoted_files(self):
+        """Restore the exact pre-import filesystem state after a failure."""
+        for rel_path in reversed(self._promoted_files):
+            final_path = self.artifacts_base / rel_path
+            try:
+                if final_path.exists():
+                    final_path.unlink()
+                backup_path = self._backup_files.get(rel_path)
+                if backup_path and backup_path.exists():
+                    final_path.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(backup_path, final_path)
+            except OSError as exc:
+                logger.error("Could not restore artifact %s: %s", rel_path, exc)
+        self._promoted_files.clear()
+
+    def _discard_backups(self):
+        self._backup_files.clear()
+
+    def _discard_staging(self):
+        shutil.rmtree(self._staging_root, ignore_errors=True)
 
     def _import_pages(self, document: Document, result: ProcessorResult) -> tuple:
         """Import pages with image persistence."""
@@ -309,8 +314,9 @@ class ResultImporter:
 
         # Validate image data with Pillow (if available)
         try:
-            from PIL import Image
             from io import BytesIO
+
+            from PIL import Image
 
             img = Image.open(BytesIO(raw_bytes))
             img.verify()  # Validates the image data
@@ -328,20 +334,16 @@ class ResultImporter:
         rel_name = f"page-{page_num:04d}.{img_format}"
         rel_path = f"{rel_dir}/{rel_name}"
 
-        full_path = (self.artifacts_base / rel_path).resolve()
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
-            full_path.write_bytes(raw_bytes)
-            if not full_path.exists():
-                logger.error("Page image write failed: %s", full_path)
+            staged_path = self._stage_bytes(rel_path, raw_bytes)
+            if not staged_path.exists():
+                logger.error("Page image staging failed: %s", staged_path)
                 return ""
         except OSError as e:
-            logger.error("Failed to write page image %s: %s", full_path, e)
+            logger.error("Failed to stage page image %s: %s", rel_path, e)
             return ""
 
-        self._written_files.append(rel_path)
-        logger.info("Wrote page image: %s (%d bytes)", rel_path, len(raw_bytes))
+        logger.info("Staged page image: %s (%d bytes)", rel_path, len(raw_bytes))
         return rel_path
 
     def _import_regions(self, result: ProcessorResult, document: Document) -> int:
@@ -351,6 +353,12 @@ class ResultImporter:
 
         for region in result.regions:
             page_num = region["page_number"]
+            page = Page.objects.filter(
+                document=document, page_number=page_num,
+            ).first()
+            if page is None:
+                logger.warning("Skipping region for missing page %d", page_num)
+                continue
             bbox = region.get("bbox", [0, 0, 0, 0])
 
             # Normalize bbox using real page dimensions and coord_origin
@@ -362,6 +370,7 @@ class ResultImporter:
             region_obj = PageRegion(
                 source_document=self.source_doc,
                 job=self.job,
+                page=page,
                 page_number=page_num,
                 region_type=region.get("region_type", "text")[:50],
                 left=left,
@@ -476,8 +485,9 @@ class ResultImporter:
 
         # Validate with Pillow (if available)
         try:
-            from PIL import Image
             from io import BytesIO
+
+            from PIL import Image
             img = Image.open(BytesIO(raw_bytes))
             img.verify()
         except ImportError:
@@ -490,17 +500,13 @@ class ResultImporter:
         rel_name = f"table-{page_num:04d}-{table_id}.png"
         rel_path = f"{rel_dir}/{rel_name}"
 
-        full_path = (self.artifacts_base / rel_path).resolve()
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
-            full_path.write_bytes(raw_bytes)
-            if not full_path.exists():
+            staged_path = self._stage_bytes(rel_path, raw_bytes)
+            if not staged_path.exists():
                 return ""
         except OSError:
             return ""
 
-        self._written_files.append(rel_path)
         return rel_path
 
     def _generate_table_crop(self, table: TableCandidate, page: Page, normalized_bbox: tuple):
@@ -512,7 +518,7 @@ class ResultImporter:
         if not page.image_path or not normalized_bbox:
             return
 
-        page_path = (self.artifacts_base / page.image_path).resolve()
+        page_path = self._artifact_read_path(page.image_path).resolve()
         if not page_path.exists():
             return
 
@@ -551,18 +557,16 @@ class ResultImporter:
             rel_name = f"table-page{page.page_number:04d}-{table.stable_table_id}.png"
             rel_path = f"{rel_dir}/{rel_name}"
 
-            full_path = (self.artifacts_base / rel_path).resolve()
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            crop.save(full_path)
+            from io import BytesIO
+            buffer = BytesIO()
+            crop.save(buffer, format="PNG")
+            staged_path = self._stage_bytes(rel_path, buffer.getvalue())
 
-            if full_path.exists():
-                # Verify generated crop with Pillow
-                verify_img = Image.open(full_path)
-                verify_img.verify()
-
-                table.crop_path = rel_path
-                table.save(update_fields=["crop_path"])
-                self._written_files.append(rel_path)
+            # Verify generated crop with Pillow before exposing its final path.
+            verify_img = Image.open(staged_path)
+            verify_img.verify()
+            table.crop_path = rel_path
+            table.save(update_fields=["crop_path"])
         except Exception as e:
             logger.warning("Failed to generate table crop for %s: %s", table.pk, e)
 

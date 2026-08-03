@@ -888,7 +888,10 @@ def project_process(request, project_id):
             return redirect("project_process", project_id=project_id)
 
         log_audit(request, "document_uploaded", "SourceDocument", job.source_document_id)
-        messages.success(request, _("Document uploaded. Processing started."))
+        messages.success(
+            request,
+            _("Upload received. The document has been queued for analysis."),
+        )
         return redirect("job_status", job_id=job.pk)
 
     # GET: show upload form
@@ -911,14 +914,16 @@ def job_status(request, job_id):
         messages.error(request, _("You do not have access to this job."))
         return redirect("dashboard")
 
-    # HTMX partial refresh (just the status block)
-    if request.headers.get("HX-Request"):
-        return render(request, "workbench/_job_status_block.html", {"job": job})
-
-    return render(request, "workbench/job_status.html", {
+    context = {
         "job": job,
         "source_document": job.source_document,
-    })
+    }
+
+    # HTMX partial refresh (exactly one replaceable root block)
+    if request.headers.get("HX-Request"):
+        return render(request, "workbench/_job_status_block.html", context)
+
+    return render(request, "workbench/job_status.html", context)
 
 
 # --- Secure artifact serving ---

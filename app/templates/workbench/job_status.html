@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static i18n %}
-{% block title %}{% blocktrans with filename=source_document.filename %}Job Status — {{ filename }}{% endblocktrans %}{% endblock %}
+{% block title %}{% blocktrans with filename=job.source_document.filename %}Job Status — {{ filename }}{% endblocktrans %}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -16,6 +16,7 @@
     .job-state-partial { background: #fff8e1; color: #f57f17; }
     .job-state-failed { background: #ffebee; color: #c62828; }
     .job-state-cancelled { background: #f5f5f5; color: #616161; }
+    .job-state-interrupted, .job-state-submission_uncertain { background: #fff8e1; color: #8a5a00; }
     .job-progress { margin: 1rem 0; }
     .progress-step {
         padding: 0.5rem 0.75rem;
@@ -43,8 +44,6 @@
 
 {% block content %}
 <div class="job-container">
-    <h2>{% blocktrans with filename=source_document.filename %}Processing: {{ filename }}{% endblocktrans %}</h2>
-
-    {% include "workbench/_job_status_block.html" with source_document=source_document %}
+    {% include "workbench/_job_status_block.html" %}
 </div>
 {% endblock %}

@@ -75,5 +75,7 @@ urlpatterns = [
     path("api/v1/statistics/", api.api_statistics, name="api_statistics"),
 
     # Static assets
-    path("static/htmx.min.js", views.serve_htmx, name="serve_htmx"),
+    # Keep this outside STATIC_URL so Django's development static handler does
+    # not intercept the self-hosted/CDN fallback view.
+    path("assets/htmx.min.js", views.serve_htmx, name="serve_htmx"),
 ]

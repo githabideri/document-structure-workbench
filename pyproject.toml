@@ -44,8 +44,9 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "app.config.settings"
-testpaths = ["tests"]
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["app"]
+testpaths = ["app/workbench/tests"]
 python_files = ["test_*.py", "*_test.py"]
 
 [tool.ruff]

@@ -132,6 +132,7 @@
     let pinchDistance = null;
     let dragStart = null;
     let dragged = false;
+    let suppressClick = false;
     const updateZoom = () => {
         if (!stage) return;
         stage.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`;
@@ -186,10 +187,14 @@
             updateZoom();
         }
     });
-    const endPointer = (event) => { pointers.delete(event.pointerId); if (pointers.size < 2) pinchDistance = null; if (!pointers.size) dragStart = null; };
+    const endPointer = (event) => {
+        pointers.delete(event.pointerId);
+        if (dragged) suppressClick = true;
+        if (pointers.size < 2) pinchDistance = null;
+        if (!pointers.size) dragStart = null;
+    };
     viewport?.addEventListener('pointerup', endPointer);
     viewport?.addEventListener('pointercancel', endPointer);
-    viewport?.addEventListener('click', (event) => { if (dragged) { event.preventDefault(); event.stopPropagation(); dragged = false; } }, true);
 
     const links = [...document.querySelectorAll('.region-link')];
     const counts = {};
@@ -198,6 +203,17 @@
         const type = [...box.classList].find((name) => name.startsWith('region-') && name !== 'region-box')?.replace('region-', '') || 'other';
         counts[type] = (counts[type] || 0) + 1;
         link.dataset.regionType = type;
+        link.addEventListener('click', (event) => {
+            if (suppressClick) {
+                event.preventDefault();
+                suppressClick = false;
+                return;
+            }
+            // SVG anchors can lose their native navigation when pointer capture
+            // was used; make the deep-link behavior explicit for clean clicks.
+            event.preventDefault();
+            window.location.assign(link.getAttribute('href'));
+        });
     });
     document.querySelector('[data-filter-count="all"]')?.append(`(${links.length})`);
     Object.entries(counts).forEach(([type, count]) => document.querySelector(`[data-filter-count="${type}"]`)?.append(`(${count})`));

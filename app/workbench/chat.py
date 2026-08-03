@@ -1,8 +1,11 @@
 """Small, read-only orchestration layer for the configured llama.cpp server."""
 import requests
+import logging
 from django.conf import settings
 
 from .models import SearchPassage
+
+logger = logging.getLogger(__name__)
 
 
 def build_direct_context(source_ids, projects, limit=80):
@@ -31,13 +34,17 @@ def ask_read_only(question, source_ids, projects):
         "Answer only from supplied evidence, state uncertainty, and cite claims using supplied markers "
         "such as [S1]. Never invent citations or URLs.\n\nEVIDENCE:\n" + context
     )
-    response = requests.post(
-        f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
-        headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
-        json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": 1200,
-              "messages": [{"role": "system", "content": system}, {"role": "user", "content": question}]},
-        timeout=settings.DSW_CHAT_TIMEOUT,
-    )
+    try:
+        response = requests.post(
+            f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
+            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": 1200,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": question}]},
+            timeout=settings.DSW_CHAT_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        logger.warning("Chat provider request failed: %s", exc)
+        raise RuntimeError("The configured chat provider is unreachable. Check the DSW host network route.") from exc
     response.raise_for_status()
     payload = response.json()
     answer = payload["choices"][0]["message"]["content"]

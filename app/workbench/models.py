@@ -838,22 +838,21 @@ class PageRegion(models.Model):
 
     @property
     def effective_text(self):
-        correction = self.active_correction
-        if correction and correction.operation == "text":
+        correction = self.corrections.filter(operation="text", status="active").order_by("-created_at", "-id").first()
+        if correction:
             return correction.after.get("text", self.text)
         return self.text
 
     @property
     def effective_region_type(self):
-        correction = self.active_correction
-        if correction and correction.operation == "type":
+        correction = self.corrections.filter(operation="type", status="active").order_by("-created_at", "-id").first()
+        if correction:
             return correction.after.get("region_type", self.region_type)
         return self.region_type
 
     @property
     def is_suppressed(self):
-        correction = self.active_correction
-        return bool(correction and correction.operation == "suppress")
+        return self.corrections.filter(operation="suppress", status="active").exists()
 
 
 class RegionCorrection(models.Model):

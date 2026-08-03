@@ -18,6 +18,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.contrib.auth import logout as auth_logout
 
@@ -284,6 +285,7 @@ def document_detail(request, document_id):
     regions = list(
         PageRegion.objects.filter(page__document=document)
         .select_related("page", "job")
+        .prefetch_related("corrections")
     )
     for region in regions:
         region.overlay_width = region.right - region.left
@@ -368,6 +370,58 @@ def correct_region_text(request, region_id):
     target = source.id if source else document.id
     query = f"?revision={document.id}&page={region.page_number}&region={region.id}" if source else f"?page={region.page_number}&region={region.id}"
     return redirect(f"{reverse('document_detail', args=[target])}{query}")
+
+
+@login_required
+@require_POST
+def correct_region(request, region_id):
+    """Apply a typed correction operation to one immutable-revision region."""
+    from .policy import ProjectAccessPolicy
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "source_document"), pk=region_id)
+    document = region.page.document
+    if not ProjectAccessPolicy(user=request.user).can_edit(document.collection):
+        return JsonResponse({"error": "permission_denied"}, status=403)
+    operation = request.POST.get("operation", "")
+    expected = request.POST.get("expected_current_value", "")
+    if operation == "type":
+        value = request.POST.get("region_type", "")
+        if value not in dict(PageRegion.REGION_TYPES):
+            return JsonResponse({"error": "invalid_region_type"}, status=400)
+        current = region.effective_region_type
+        after, before = {"region_type": value}, {"region_type": current}
+    elif operation == "suppress":
+        after, before = {"suppressed": True}, {"suppressed": region.is_suppressed}
+        current = "true" if region.is_suppressed else "false"
+    elif operation == "note":
+        note = request.POST.get("note", "").strip()
+        if not note:
+            return JsonResponse({"error": "empty_note"}, status=400)
+        after, before = {"note": note}, {}
+        current = ""
+    else:
+        return JsonResponse({"error": "unsupported_operation"}, status=400)
+    if operation in {"type", "suppress"} and expected != current:
+        return JsonResponse({"error": "stale_region"}, status=409)
+    correction = RegionCorrection.objects.create(
+        region=region, document=document, created_by=request.user,
+        operation=operation, before=before, after=after,
+        reason=request.POST.get("reason", "").strip(),
+    )
+    return JsonResponse({"id": correction.id, "status": correction.status})
+
+
+@login_required
+@require_POST
+def revert_region_correction(request, correction_id):
+    from .policy import ProjectAccessPolicy
+    correction = get_object_or_404(RegionCorrection.objects.select_related("document__collection"), pk=correction_id)
+    if not ProjectAccessPolicy(user=request.user).can_edit(correction.document.collection):
+        return JsonResponse({"error": "permission_denied"}, status=403)
+    if correction.status == "active":
+        correction.status = "reverted"
+        correction.reverted_at = timezone.now()
+        correction.save(update_fields=["status", "reverted_at"])
+    return redirect(request.POST.get("next") or reverse("document_detail", args=[correction.document_id]))
 
 
 # --- Reviews ---

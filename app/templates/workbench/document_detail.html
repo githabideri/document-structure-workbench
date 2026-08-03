@@ -108,8 +108,20 @@
                         <label>{% trans "Reason (optional)" %}<input name="reason"></label>
                         <button class="btn btn-primary" type="submit">{% trans "Save correction" %}</button>
                     </form>
+                    <form method="post" action="{% url 'correct_region' selected_region.id %}">
+                        {% csrf_token %}<input type="hidden" name="operation" value="type"><input type="hidden" name="expected_current_value" value="{{ selected_region.effective_region_type }}">
+                        <label>{% trans "Region type" %}<select name="region_type">{% for value, label in region_types %}<option value="{{ value }}"{% if value == selected_region.effective_region_type %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+                        <button class="btn btn-secondary" type="submit">{% trans "Change type" %}</button>
+                    </form>
+                    <form method="post" action="{% url 'correct_region' selected_region.id %}">
+                        {% csrf_token %}<input type="hidden" name="operation" value="suppress"><input type="hidden" name="expected_current_value" value="{% if selected_region.is_suppressed %}true{% else %}false{% endif %}">
+                        <button class="btn btn-secondary" type="submit">{% if selected_region.is_suppressed %}{% trans "Keep suppressed" %}{% else %}{% trans "Suppress region" %}{% endif %}</button>
+                    </form>
                 </details>
                 {% endif %}
+                {% if selected_region.corrections.all %}<details class="correction-history"><summary>{% trans "Correction history" %}</summary>
+                    {% for correction in selected_region.corrections.all %}<div class="history-item"><span>{{ correction.get_operation_display }} · {{ correction.created_at|date:"SHORT_DATETIME_FORMAT" }} · {{ correction.get_status_display }}</span>{% if can_edit_document and correction.status == "active" %}<form method="post" action="{% url 'revert_region_correction' correction.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-secondary" type="submit">{% trans "Undo" %}</button></form>{% endif %}</div>{% empty %}<p class="empty-state">{% trans "No corrections yet." %}</p>{% endfor %}
+                </details>{% endif %}
                 <dl class="technical-summary">
                     <div><dt>{% trans "Page" %}</dt><dd>{{ selected_region.page_number }}</dd></div>
                     {% if selected_region.confidence %}<div><dt>{% trans "Confidence" %}</dt><dd>{{ selected_region.confidence|floatformat:2 }}</dd></div>{% endif %}

@@ -1223,6 +1223,21 @@ class DocumentWorkspaceTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(self.region.corrections.exists())
 
+    def test_editor_can_change_type_and_revert_correction(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("correct_region", args=[self.region.pk]),
+            {"operation": "type", "expected_current_value": "title", "region_type": "text"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.region.refresh_from_db()
+        correction = self.region.corrections.get(operation="type")
+        self.assertEqual(self.region.effective_region_type, "text")
+        response = self.client.post(reverse("revert_region_correction", args=[correction.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.region.refresh_from_db()
+        self.assertEqual(self.region.effective_region_type, "title")
+
 
 @override_settings(STORAGES={
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

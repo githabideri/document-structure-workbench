@@ -308,9 +308,11 @@ def chat_thread_view(request, thread_id):
         return redirect("chat_thread", thread_id=thread.id)
     sources = list(thread.selected_sources.select_related("collection"))
     latest_run = thread.runs.prefetch_related("evidence_items").order_by("-created_at").first()
+    evidence_items = list(latest_run.evidence_items.select_related("source_document", "page") if latest_run else [])
     return render(request, "workbench/chat.html", {
         "sources": sources, "selected_ids": {str(source.id) for source in sources},
         "thread": thread, "chat_messages": thread.messages.all(), "latest_run": latest_run,
+        "evidence_items": evidence_items,
         "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
     })
 

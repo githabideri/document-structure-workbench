@@ -1,10 +1,18 @@
 # Document Structure Workbench
 
-A web application for reviewing, comparing, and validating document structure extraction results. Supports blinded side-by-side comparison of table extractions from different processing pipelines.
+A transparent workspace for turning archival and museum scans into inspectable, searchable, and correctable structured documents. Users can upload a source, follow honest processing status, inspect the original scan with detected regions, search immutable processing revisions, and ask a citation-grounded research assistant about selected documents.
+
+The original blinded extraction benchmark remains available as an evaluation capability, but it is no longer the primary product journey.
 
 ## Features
 
-- **Blinded review** — Compare two extraction results (labeled X/Y) without knowing which model produced which
+- **Document ingestion** — Upload PDFs, queue Docling analysis, and recover safely from worker restarts
+- **Immutable revisions** — Each processing attempt owns a separate revision; the active revision is explicit
+- **Document workspace** — Full-page scan viewer, zoom/pan, normalized region overlays, extracted text, tables, and deep links
+- **Human corrections** — Correct text, region types, and suppression state without overwriting raw machine output; corrections are reversible
+- **Revision-aware search** — Lexical passage indexing with page/region provenance and stable evidence links
+- **Research chat** — Persistent, read-only conversations with selected-document evidence, Qwen/llama.cpp support, validated citations, and inspectable evidence runs
+- **Blinded evaluation** — Compare two extraction results (labeled X/Y) without knowing which model produced which
 - **Quality scoring** — Rate each extraction on a 0-3 scale with error classification
 - **Post-reveal analysis** — After submission, see model identities, ground truth, and automated metrics
 - **REST API** — Full programmatic access for automated review workflows
@@ -19,6 +27,7 @@ A web application for reviewing, comparing, and validating document structure ex
 - **SQLite/PostgreSQL** — Database (SQLite for development, PostgreSQL for production)
 - **Gunicorn** — WSGI server
 - **Bleach** — HTML sanitization
+- **llama.cpp-compatible API** — Optional local Qwen research assistant
 
 ## Quick Start
 
@@ -41,7 +50,22 @@ python manage.py createsuperuser
 
 # Run development server
 python manage.py runserver
+
+# Run the document/ chat worker in another terminal
+python manage.py run_processing_worker
 ```
+
+### Optional chat configuration
+
+The chat integration uses an OpenAI-compatible llama.cpp endpoint. Keep these values in the deployment environment, never in source control:
+
+```text
+DSW_CHAT_BASE_URL=http://127.0.0.1:8081/v1
+DSW_CHAT_API_KEY=...
+DSW_CHAT_MODEL=Qwen3.6-35B-A3B-UD-IQ4_XS.gguf
+```
+
+The chat workflow is deliberately evidence-first. A conversation freezes its document/revision scope, the worker records retrieved passages and selection reasons, and the final answer can cite only those persisted evidence markers.
 
 ## Project Structure
 
@@ -50,7 +74,7 @@ document-structure-workbench/
 ├── app/                    # Django project
 │   ├── config/             # Settings, URLs, WSGI/ASGI
 │   ├── workbench/          # Main application
-│   │   ├── models.py       # Data models
+│   │   ├── models.py       # Projects, revisions, regions, search, chat runs
 │   │   ├── views.py        # Web views
 │   │   ├── api.py          # REST API endpoints
 │   │   ├── admin.py        # Django admin configuration
@@ -58,8 +82,6 @@ document-structure-workbench/
 │   │   └── management/     # Management commands
 │   ├── static/             # Static files (CSS, JS)
 │   └── templates/          # Global templates
-├── processors/             # Document processing pipelines
-├── schemas/                # Data schemas and validation
 ├── content/                # Localized help content
 │   └── help/
 │       ├── en/
@@ -75,6 +97,19 @@ document-structure-workbench/
 ├── LICENSE
 └── .gitignore
 ```
+
+## Current product state
+
+Completed foundations:
+
+- reliable Docling processing with restart recovery and truthful status states;
+- immutable processing revisions and revision-safe imports;
+- read-only scan workspace with overlays and stable page/region URLs;
+- reversible correction layer preserving raw machine output;
+- revision-aware lexical search;
+- persistent evidence-grounded chat runs using the configured Qwen endpoint.
+
+The next work is to harden the evidence planner and asynchronous chat UX: full-document coverage, explicit retrieval/context diagnostics, streaming or polling status, conversation continuity when opening citations, and browser-level regression scenarios. Agent-assisted edits, Git-backed change sets, embeddings, and GraphRAG remain intentionally deferred until the read-only evidence workflow is dependable.
 
 ## API
 

@@ -889,6 +889,92 @@ class SearchPassage(models.Model):
         ]
 
 
+class ChatThread(models.Model):
+    """A persistent, revision-scoped research conversation."""
+
+    project = models.ForeignKey(Collection, on_delete=models.CASCADE, related_name="chat_threads")
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="chat_threads")
+    title = models.CharField(max_length=255, blank=True)
+    search_enabled = models.BooleanField(default=False)
+    search_project = models.ForeignKey(Collection, on_delete=models.SET_NULL, null=True, blank=True, related_name="search_chat_threads")
+    selected_revisions = JSONField(default=list, blank=True)
+    scope_snapshot = JSONField(default=dict, blank=True)
+    model = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    selected_sources = models.ManyToManyField(SourceDocument, related_name="chat_threads", blank=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-id"]
+
+
+class ChatMessage(models.Model):
+    """One user or assistant message in a persistent thread."""
+
+    ROLES = [("user", "User"), ("assistant", "Assistant"), ("system", "System")]
+    thread = models.ForeignKey(ChatThread, on_delete=models.CASCADE, related_name="messages")
+    role = models.CharField(max_length=20, choices=ROLES)
+    text = models.TextField(blank=True)
+    ordinal = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["ordinal", "id"]
+        unique_together = [("thread", "ordinal")]
+
+
+class ChatRun(models.Model):
+    """Durable asynchronous evidence retrieval and model-generation run."""
+
+    STATES = [
+        ("queued", "Queued"), ("retrieving", "Retrieving evidence"),
+        ("assembling", "Assembling context"), ("generating", "Asking the model"),
+        ("validating", "Validating citations"), ("completed", "Completed"),
+        ("failed", "Failed"), ("cancelled", "Cancelled"),
+    ]
+    thread = models.ForeignKey(ChatThread, on_delete=models.CASCADE, related_name="runs")
+    user_message = models.ForeignKey(ChatMessage, on_delete=models.CASCADE, related_name="chat_runs")
+    assistant_message = models.OneToOneField(ChatMessage, on_delete=models.SET_NULL, null=True, blank=True, related_name="assistant_run")
+    state = models.CharField(max_length=20, choices=STATES, default="queued")
+    status_message = models.CharField(max_length=500, blank=True)
+    error_message = models.TextField(blank=True)
+    worker_id = models.CharField(max_length=200, blank=True)
+    worker_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    retrieval_query = models.TextField(blank=True)
+    token_budget = models.PositiveIntegerField(default=12000)
+    source_tokens = models.PositiveIntegerField(default=0)
+    model_metadata = JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class EvidenceItem(models.Model):
+    """Exact evidence selected for a run, retaining retrieval explanation."""
+
+    run = models.ForeignKey(ChatRun, on_delete=models.CASCADE, related_name="evidence_items")
+    marker = models.CharField(max_length=20)
+    source_document = models.ForeignKey(SourceDocument, on_delete=models.CASCADE)
+    processed_revision = models.ForeignKey(Document, on_delete=models.CASCADE)
+    processing_job = models.ForeignKey(ProcessingJob, on_delete=models.CASCADE)
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, null=True, blank=True)
+    page_region = models.ForeignKey(PageRegion, on_delete=models.CASCADE, null=True, blank=True)
+    passage = models.ForeignKey(SearchPassage, on_delete=models.SET_NULL, null=True, blank=True)
+    text = models.TextField()
+    retrieval_method = models.CharField(max_length=50, blank=True)
+    selection_reason = models.CharField(max_length=255, blank=True)
+    score = models.FloatField(null=True, blank=True)
+    ordinal = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["ordinal", "id"]
+        unique_together = [("run", "marker")]
+
+
 class RegionCorrection(models.Model):
     """Auditable human correction layered over immutable machine output."""
 

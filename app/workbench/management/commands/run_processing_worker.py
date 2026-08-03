@@ -13,7 +13,8 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from workbench.models import ProcessingJob, SourceDocument
+from workbench.models import ChatRun, ProcessingJob, SourceDocument
+from workbench.chat import process_chat_run
 from workbench.processors.docling_serve import DoclingServeProcessor
 from workbench.processors.importer import ImportError as ImporterError
 from workbench.processors.importer import ResultImporter
@@ -64,10 +65,22 @@ class Command(BaseCommand):
                         self._process_job(job, action)
                         if self.once:
                             break
-                    elif self.once:
-                        break
                     else:
-                        time.sleep(self.poll_interval)
+                        chat_run = self._claim_next_chat_run()
+                        if chat_run:
+                            try:
+                                process_chat_run(chat_run, self.worker_id)
+                            except Exception as exc:
+                                logger.exception("Chat run %d failed: %s", chat_run.pk, exc)
+                                ChatRun.objects.filter(pk=chat_run.pk).update(
+                                    state="failed", error_message=str(exc)[:1000],
+                                    status_message="The chat run failed. Retry it from the conversation.",
+                                    finished_at=timezone.now(), worker_id="",
+                                )
+                        elif self.once:
+                            break
+                        else:
+                            time.sleep(self.poll_interval)
                 except Exception as exc:
                     logger.exception("Worker loop error: %s", exc)
                     if self.once:
@@ -132,6 +145,18 @@ class Command(BaseCommand):
             job.save(update_fields=["processor"])
             logger.info("Claimed job %d: %s", job.pk, job.source_document.filename)
             return job, "submit"
+
+    def _claim_next_chat_run(self):
+        """Claim one queued chat run using the same worker process."""
+        with transaction.atomic():
+            run = self._locked_first(ChatRun.objects.filter(state="queued").order_by("created_at"))
+            if not run:
+                return None
+            run.status_message = "Evidence worker claimed this run."
+            run.worker_id = self.worker_id
+            run.worker_heartbeat_at = timezone.now()
+            run.save(update_fields=["status_message", "worker_id", "worker_heartbeat_at"])
+            return run
 
     def _adopt(self, job, now=None, message=""):
         now = now or timezone.now()

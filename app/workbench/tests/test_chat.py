@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from workbench.models import Collection, Document, Page, ProcessingJob, ProcessingPreset, ProjectMembership, SearchPassage, SourceDocument
+from workbench.models import ChatRun, ChatThread, Collection, Document, Page, ProcessingJob, ProcessingPreset, ProjectMembership, SearchPassage, SourceDocument
 
 User = get_user_model()
 
@@ -24,15 +24,28 @@ class ChatTests(TestCase):
         page = Page.objects.create(document=revision, page_number=2)
         SearchPassage.objects.create(project=self.project, source_document=self.source, processed_revision=revision, processing_job=job, page=page, passage_type="region", text="The restoration happened in 1957.", normalized_text="the restoration happened in 1957.")
 
-    @patch("workbench.chat.requests.post")
-    def test_chat_returns_validated_citation(self, post):
-        post.return_value = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "It happened in 1957. [S1]"}}]})
+    def test_chat_queues_persistent_run(self):
         self.client.force_login(self.user)
         response = self.client.post(reverse("chat"), {"source": [str(self.source.pk)], "question": "When?"})
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "It happened in 1957.")
-        self.assertContains(response, "revision=")
-        post.assert_called_once()
+        self.assertEqual(response.status_code, 302)
+        thread = ChatThread.objects.get()
+        self.assertRedirects(response, reverse("chat_thread", args=[thread.pk]))
+        self.assertEqual(thread.messages.filter(role="user").count(), 1)
+        self.assertEqual(ChatRun.objects.filter(thread=thread, state="queued").count(), 1)
+
+    @patch("workbench.chat.requests.post")
+    def test_worker_run_persists_validated_citation(self, post):
+        post.return_value = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "It happened in 1957. [S1]"}}]})
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        thread.selected_sources.set([self.source])
+        from workbench.chat import create_chat_run, process_chat_run
+        run = create_chat_run(thread, "restoration 1957")
+        process_chat_run(run)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertEqual(run.evidence_items.count(), 1)
+        self.client.force_login(self.user)
+        self.assertContains(self.client.get(reverse("chat_thread", args=[thread.pk])), "It happened in 1957.")
 
     def test_chat_requires_document_and_question(self):
         self.client.force_login(self.user)

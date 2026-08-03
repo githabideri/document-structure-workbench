@@ -259,12 +259,11 @@ def search_view(request):
 @login_required
 def chat_view(request):
     from .policy import ProjectAccessPolicy
-    from .chat import ask_read_only
+    from .chat import create_chat_run
+    from .models import ChatThread
     policy = ProjectAccessPolicy(user=request.user)
     projects = list(policy.visible_projects())
     sources = list(SourceDocument.objects.filter(collection__in=projects, is_archived=False).select_related("collection", "active_document")[:100])
-    answer = None
-    citations = []
     error = None
     selected_ids = request.POST.getlist("source") if request.method == "POST" else request.GET.getlist("source")
     if request.method == "POST":
@@ -274,13 +273,56 @@ def chat_view(request):
         else:
             allowed = {str(source.id) for source in sources}
             selected_ids = [sid for sid in selected_ids if sid in allowed]
-            try:
-                answer, citations = ask_read_only(question, selected_ids, projects)
-            except Exception as exc:
-                error = str(exc)
+            selected_sources = [source for source in sources if str(source.id) in selected_ids]
+            if not selected_sources:
+                error = _("The selected documents are not accessible.")
+            else:
+                project = selected_sources[0].collection
+                thread = ChatThread.objects.create(
+                    project=project, created_by=request.user, title=question[:120],
+                    model=getattr(settings, "DSW_CHAT_MODEL", ""),
+                    scope_snapshot={"source_ids": [source.id for source in selected_sources]},
+                )
+                thread.selected_sources.set(selected_sources)
+                create_chat_run(thread, question)
+                return redirect("chat_thread", thread_id=thread.id)
     return render(request, "workbench/chat.html", {
-        "sources": sources, "selected_ids": set(selected_ids),
-        "answer": answer, "citations": citations, "error": error,
+        "sources": sources, "selected_ids": set(selected_ids), "error": error,
+        "thread": None, "messages": [], "latest_run": None,
+    })
+
+
+@login_required
+def chat_thread_view(request, thread_id):
+    from .policy import ProjectAccessPolicy
+    from .models import ChatThread, SourceDocument
+    thread = get_object_or_404(ChatThread.objects.prefetch_related("selected_sources", "messages"), pk=thread_id, created_by=request.user)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(thread.project):
+        return redirect("chat")
+    if request.method == "POST":
+        question = request.POST.get("question", "").strip()
+        if question:
+            from .chat import create_chat_run
+            create_chat_run(thread, question)
+        return redirect("chat_thread", thread_id=thread.id)
+    sources = list(thread.selected_sources.select_related("collection"))
+    latest_run = thread.runs.prefetch_related("evidence_items").order_by("-created_at").first()
+    return render(request, "workbench/chat.html", {
+        "sources": sources, "selected_ids": {str(source.id) for source in sources},
+        "thread": thread, "messages": thread.messages.all(), "latest_run": latest_run,
+        "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
+    })
+
+
+@login_required
+def chat_run_status(request, run_id):
+    from .models import ChatRun
+    run = get_object_or_404(ChatRun.objects.select_related("thread", "assistant_message"), pk=run_id, thread__created_by=request.user)
+    return JsonResponse({
+        "state": run.state, "status_message": run.status_message,
+        "error": run.error_message, "assistant": run.assistant_message.text if run.assistant_message else "",
+        "thread_url": reverse("chat_thread", args=[run.thread_id]),
     })
 
 

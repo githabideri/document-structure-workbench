@@ -232,7 +232,7 @@ class DoclingServeProcessor(DocumentProcessor):
 
         if has_global_lists:
             # Real DoclingDocument structure
-            return self._parse_docling_document(json_content, result)
+            return self._parse_docling_document(json_content, result, response)
         elif has_page_list:
             # Legacy page-local structure (backward compat)
             return self._parse_legacy_pages(json_content, result)
@@ -241,7 +241,7 @@ class DoclingServeProcessor(DocumentProcessor):
             result.error_summary = "Unrecognized Docling response format"
             return result
 
-    def _parse_docling_document(self, doc: dict, result: ProcessorResult) -> ProcessorResult:
+    def _parse_docling_document(self, doc: dict, result: ProcessorResult, response: dict = None) -> ProcessorResult:
         """
         Parse the actual DoclingDocument structure.
 
@@ -276,8 +276,17 @@ class DoclingServeProcessor(DocumentProcessor):
                         "height": height,
                     }
 
-                # Page image (embedded data URI)
-                image_data = page_data.get("image", "")
+                # Page image: can be data URI string or ImageRef dict
+                image_val = page_data.get("image", "")
+                if isinstance(image_val, dict):
+                    # ImageRef: {"mimetype": "image/png", "dpi": 144, "size": {...}, "uri": "data:..."}
+                    uri = image_val.get("uri", "")
+                    if uri:
+                        image_data = uri
+                    else:
+                        image_data = ""
+                else:
+                    image_data = image_val
                 if image_data:
                     result.page_images[page_num] = self._extract_image_data(image_data)
 
@@ -365,10 +374,11 @@ class DoclingServeProcessor(DocumentProcessor):
 
         # Processor metadata
         result.processor_metadata.setdefault("processor", "docling")
-        result.processor_metadata.setdefault(
-            "version",
-            response.get("metadata", {}).get("docling_version", "unknown"),
-        )
+        if response:
+            result.processor_metadata.setdefault(
+                "version",
+                response.get("metadata", {}).get("docling_version", "unknown"),
+            )
 
         return result
 
@@ -521,50 +531,96 @@ class DoclingServeProcessor(DocumentProcessor):
         """
         Generate HTML table from Docling table_cells.
 
-        Each cell has:
-            row_index, col_index, row_span, col_span, text, start, end
+        Docling cell fields (actual schema):
+            start_row_offset_idx, end_row_offset_idx
+            start_col_offset_idx, end_col_offset_idx
+            column_header, row_header
+            text
+
+        Legacy fields (backward compat):
+            row_index, col_index, row_span, col_span, type
         """
         if not table_cells:
             return ""
+
+        # Detect schema: Docling offset-based vs legacy index-based
+        first_cell = table_cells[0]
+        is_offset = "start_row_offset_idx" in first_cell
 
         # Build grid
         num_rows = table_data.get("num_rows", 0)
         num_cols = table_data.get("num_cols", 0)
 
-        if not num_rows or not num_cols:
-            # Infer from cells
-            max_row = max((c.get("row_index", 0) for c in table_cells), default=0)
-            max_col = max((c.get("col_index", 0) for c in table_cells), default=0)
-            num_rows = max_row + 1
-            num_cols = max_col + 1
-
-        # Create cell map
-        grid = {}
-        for cell in table_cells:
-            ri = cell.get("row_index", 0)
-            ci = cell.get("col_index", 0)
-            grid[(ri, ci)] = cell
+        if is_offset:
+            # Docling offset-based schema
+            cell_map = {}
+            for cell in table_cells:
+                sr = cell.get("start_row_offset_idx", 0)
+                er = cell.get("end_row_offset_idx", 1)
+                sc = cell.get("start_col_offset_idx", 0)
+                ec = cell.get("end_col_offset_idx", 1)
+                rowspan = er - sr
+                colspan = ec - sc
+                # Fill all grid positions covered by this cell
+                for ri in range(sr, er):
+                    for ci in range(sc, ec):
+                        cell_map[(ri, ci)] = cell
+                # Infer dimensions
+                num_rows = max(num_rows, er)
+                num_cols = max(num_cols, ec)
+        else:
+            # Legacy index-based schema
+            cell_map = {}
+            for cell in table_cells:
+                ri = cell.get("row_index", 0)
+                ci = cell.get("col_index", 0)
+                rowspan = cell.get("row_span", 1)
+                colspan = cell.get("col_span", 1)
+                for dr in range(rowspan):
+                    for dc in range(colspan):
+                        cell_map[(ri + dr, ci + dc)] = cell
+                num_rows = max(num_rows, ri + rowspan)
+                num_cols = max(num_cols, ci + colspan)
 
         # Generate HTML
+        seen = set()
         html_parts = ["<table>"]
         for ri in range(num_rows):
             html_parts.append("<tr>")
             for ci in range(num_cols):
-                cell = grid.get((ri, ci))
-                if cell:
+                cell = cell_map.get((ri, ci))
+                if cell and (ri, ci) not in seen:
+                    seen.add((ri, ci))
                     text = cell.get("text", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    is_header = cell.get("type", "") in ("header_cell", "header")
+                    if is_offset:
+                        is_header = cell.get("column_header", False) or cell.get("row_header", False)
+                        sr = cell.get("start_row_offset_idx", ri)
+                        er = cell.get("end_row_offset_idx", ri + 1)
+                        sc = cell.get("start_col_offset_idx", ci)
+                        ec = cell.get("end_col_offset_idx", ci + 1)
+                        rowspan = er - sr
+                        colspan = ec - sc
+                        # Mark all covered cells as seen
+                        for dr in range(sr, er):
+                            for dc in range(sc, ec):
+                                seen.add((dr, dc))
+                    else:
+                        is_header = cell.get("type", "") in ("header_cell", "header")
+                        rowspan = cell.get("row_span", 1)
+                        colspan = cell.get("col_span", 1)
                     tag = "th" if is_header else "td"
-                    rowspan = cell.get("row_span", 1)
-                    colspan = cell.get("col_span", 1)
                     attrs = ""
                     if rowspan > 1:
                         attrs += f' rowspan="{rowspan}"'
                     if colspan > 1:
                         attrs += f' colspan="{colspan}"'
                     html_parts.append(f"<{tag}{attrs}>{text}</{tag}>")
-                else:
-                    html_parts.append("<td></td>")
+                elif (ri, ci) not in seen:
+                    seen.add((ri, ci))
+                    if cell:
+                        html_parts.append("<td></td>")
+                    else:
+                        html_parts.append("<td></td>")
             html_parts.append("</tr>")
         html_parts.append("</table>")
 

@@ -160,6 +160,123 @@ DOCLING_FIXTURE = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Real DoclingDocument fixture (global lists — actual Docling v2 schema)
+# ---------------------------------------------------------------------------
+
+REAL_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFkl"
+    "EQVR4nGP8z8DAwMDAwMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
+)
+
+DOCLING_DOCUMENT_FIXTURE = {
+    "task_id": "test-task-doc-123",
+    "status": "success",
+    "document": {
+        "json_content": {
+            "pages": {
+                "1": {
+                    "number": 1,
+                    "size": {"width": 1224, "height": 1584},
+                    "image": {
+                        "mimetype": "image/png",
+                        "dpi": 144,
+                        "size": {"width": 2448, "height": 3168},
+                        "uri": f"data:image/png;base64,{REAL_PNG_B64}",
+                    },
+                },
+            },
+            "texts": [
+                {
+                    "self_ref": "#/texts/0",
+                    "text": "Annual Museum Catalog 2024",
+                    "label": "title",
+                    "content_layer": "body",
+                    "prov": [
+                        {
+                            "page_no": 1,
+                            "bbox": {"l": 50, "t": 100, "r": 500, "b": 150, "coord_origin": "TOPLEFT"},
+                            "charspan": [0, 30],
+                        },
+                    ],
+                },
+                {
+                    "self_ref": "#/texts/1",
+                    "text": "This document contains the annual catalog entries for the museum collection.",
+                    "label": "text",
+                    "content_layer": "body",
+                    "prov": [
+                        {
+                            "page_no": 1,
+                            "bbox": {"l": 50, "t": 200, "r": 800, "b": 250, "coord_origin": "TOPLEFT"},
+                            "charspan": [0, 80],
+                        },
+                    ],
+                },
+            ],
+            "tables": [
+                {
+                    "self_ref": "#/tables/0",
+                    "prov": [
+                        {
+                            "page_no": 1,
+                            "bbox": {"l": 50, "t": 400, "r": 600, "b": 600, "coord_origin": "TOPLEFT"},
+                            "charspan": [0, 0],
+                        },
+                    ],
+                    "data": {
+                        "table_cells": [
+                            {
+                                "start_row_offset_idx": 0,
+                                "end_row_offset_idx": 1,
+                                "start_col_offset_idx": 0,
+                                "end_col_offset_idx": 1,
+                                "text": "Item",
+                                "column_header": True,
+                                "row_header": False,
+                            },
+                            {
+                                "start_row_offset_idx": 0,
+                                "end_row_offset_idx": 1,
+                                "start_col_offset_idx": 1,
+                                "end_col_offset_idx": 2,
+                                "text": "Value",
+                                "column_header": True,
+                                "row_header": False,
+                            },
+                            {
+                                "start_row_offset_idx": 1,
+                                "end_row_offset_idx": 2,
+                                "start_col_offset_idx": 0,
+                                "end_col_offset_idx": 1,
+                                "text": "Amphora",
+                                "column_header": False,
+                                "row_header": False,
+                            },
+                            {
+                                "start_row_offset_idx": 1,
+                                "end_row_offset_idx": 2,
+                                "start_col_offset_idx": 1,
+                                "end_col_offset_idx": 2,
+                                "text": "1200 BCE",
+                                "column_header": False,
+                                "row_header": False,
+                            },
+                        ],
+                        "num_rows": 2,
+                        "num_cols": 2,
+                    },
+                },
+            ],
+            "pictures": [],
+            "body": {"elements": ["#/texts/0", "#/texts/1", "#/tables/0"]},
+        },
+    },
+    "metadata": {
+        "docling_version": "2.117.0",
+    },
+}
+
 
 class UploadServiceTest(TestCase):
     """Test the DocumentIngestionService."""
@@ -609,6 +726,137 @@ class DoclingProcessorTest(TestCase):
             [1, 2], 1, {}, {}
         )
         self.assertEqual(result, (0.0, 0.0, 0.0, 0.0))
+
+    # ------------------------------------------------------------------
+    # Real DoclingDocument parser tests (global lists)
+    # ------------------------------------------------------------------
+
+    def test_parse_docling_document_global_lists(self):
+        """Parse real DoclingDocument with global texts/tables lists."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+        result = processor._parse_results(DOCLING_DOCUMENT_FIXTURE)
+
+        # Pages
+        self.assertEqual(result.pages_processed, 1)
+        self.assertIn("page_dimensions", result.processor_metadata)
+        dims = result.processor_metadata["page_dimensions"][1]
+        self.assertEqual(dims["width"], 1224)
+        self.assertEqual(dims["height"], 1584)
+
+        # Page image (ImageRef dict with uri)
+        self.assertIn(1, result.page_images)
+        img_info = result.page_images[1]
+        self.assertIn("data", img_info)
+        self.assertEqual(img_info["format"], "png")
+
+        # Regions from global texts
+        self.assertEqual(len(result.regions), 2)
+        titles = [r for r in result.regions if r["region_type"] == "title"]
+        self.assertEqual(len(titles), 1)
+        self.assertEqual(titles[0]["text"], "Annual Museum Catalog 2024")
+        texts = [r for r in result.regions if r["region_type"] == "text"]
+        self.assertEqual(len(texts), 1)
+
+        # Page text accumulated
+        self.assertIn(1, result.page_texts)
+        self.assertIn("Annual Museum Catalog 2024", result.page_texts[1])
+
+        # Tables
+        self.assertEqual(result.tables_found, 1)
+        self.assertIn("table_0", result.table_extractions)
+        table = result.table_extractions["table_0"]
+        self.assertEqual(table["rows"], 2)
+        self.assertEqual(table["columns"], 2)
+        self.assertIn("<table>", table["html"])
+        self.assertIn("<th>", table["html"])  # header cells become <th>
+        self.assertIn("Item", table["html"])
+        self.assertIn("Amphora", table["html"])
+
+        # Processor metadata
+        self.assertEqual(result.processor_metadata["processor"], "docling")
+        self.assertEqual(result.processor_metadata["version"], "2.117.0")
+
+    def test_parse_docling_document_bottomleft_coords(self):
+        """DoclingDocument with BOTTOMLEFT coord_origin normalizes correctly."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+        fixture = dict(DOCLING_DOCUMENT_FIXTURE)
+        fixture["document"] = dict(DOCLING_DOCUMENT_FIXTURE["document"])
+        fixture["document"]["json_content"] = {
+            "pages": {"1": {"number": 1, "size": {"width": 1000, "height": 800}}},
+            "texts": [{
+                "self_ref": "#/texts/0",
+                "text": "Test text",
+                "label": "text",
+                "content_layer": "body",
+                "prov": [{
+                    "page_no": 1,
+                    "bbox": {"l": 100, "t": 200, "r": 400, "b": 500, "coord_origin": "BOTTOMLEFT"},
+                    "charspan": [0, 0],
+                }],
+            }],
+            "tables": [],
+            "pictures": [],
+        }
+        result = processor._parse_results(fixture)
+
+        # Region should have BOTTOMLEFT coord_origin in metadata
+        self.assertEqual(len(result.regions), 1)
+        self.assertEqual(result.regions[0]["metadata"]["coord_origin"], "BOTTOMLEFT")
+        # Raw bbox from Docling
+        self.assertEqual(result.regions[0]["bbox"], [100, 200, 400, 500])
+
+    def test_parse_docling_document_no_response_metadata(self):
+        """Parser does not crash when response metadata is missing."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+        from workbench.processors.base import ProcessorResult
+
+        processor = DoclingServeProcessor(server_url="http://test:5001")
+        doc = {
+            "pages": {"1": {"number": 1, "size": {"width": 1000, "height": 800}}},
+            "texts": [],
+            "tables": [],
+        }
+        # Pass fresh empty result, not one from _parse_results
+        result = processor._parse_docling_document(doc, ProcessorResult(), response=None)
+        self.assertEqual(result.pages_processed, 1)
+        self.assertNotIn("version", result.processor_metadata)
+
+    def test_generate_table_html_offset_cells(self):
+        """Table HTML uses Docling offset fields correctly."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        cells = [
+            {"start_row_offset_idx": 0, "end_row_offset_idx": 1, "start_col_offset_idx": 0, "end_col_offset_idx": 1, "text": "H1", "column_header": True, "row_header": False},
+            {"start_row_offset_idx": 0, "end_row_offset_idx": 1, "start_col_offset_idx": 1, "end_col_offset_idx": 2, "text": "H2", "column_header": True, "row_header": False},
+            {"start_row_offset_idx": 1, "end_row_offset_idx": 2, "start_col_offset_idx": 0, "end_col_offset_idx": 1, "text": "V1", "column_header": False, "row_header": False},
+            {"start_row_offset_idx": 1, "end_row_offset_idx": 2, "start_col_offset_idx": 1, "end_col_offset_idx": 2, "text": "V2", "column_header": False, "row_header": False},
+        ]
+        table_data = {"num_rows": 2, "num_cols": 2}
+
+        html = DoclingServeProcessor._generate_table_html(cells, table_data)
+        self.assertIn("<table>", html)
+        self.assertIn("<th>H1</th>", html)
+        self.assertIn("<th>H2</th>", html)
+        self.assertIn("<td>V1</td>", html)
+        self.assertIn("<td>V2</td>", html)
+
+    def test_generate_table_html_legacy_cells(self):
+        """Table HTML still works with legacy index-based cells."""
+        from workbench.processors.docling_serve import DoclingServeProcessor
+
+        cells = [
+            {"row_index": 0, "col_index": 0, "text": "A", "type": "header_cell", "row_span": 1, "col_span": 1},
+            {"row_index": 0, "col_index": 1, "text": "B", "type": "body", "row_span": 1, "col_span": 1},
+        ]
+        table_data = {"num_rows": 1, "num_cols": 2}
+
+        html = DoclingServeProcessor._generate_table_html(cells, table_data)
+        self.assertIn("<th>A</th>", html)
+        self.assertIn("<td>B</td>", html)
 
 
 class ResultImporterTest(TestCase):

@@ -23,7 +23,7 @@ from django.contrib.auth import logout as auth_logout
 
 from .models import (
     AuditEvent, Collection, Decision, Document, ExtractionRun,
-    Page, PageRegion, ProcessingArtifact, Review, ReviewTask, SourceDocument, TableCandidate,
+    Page, PageRegion, ProcessingArtifact, RegionCorrection, Review, ReviewTask, SourceDocument, TableCandidate,
     TableExtraction,
 )
 
@@ -266,6 +266,7 @@ def document_detail(request, document_id):
     if not policy.can_view(document.collection):
         messages.error(request, _("You do not have access to this document."))
         return redirect("document_list")
+    can_edit_document = policy.can_edit(document.collection)
 
     pages = list(document.pages.all())
     page_number = request.GET.get("page")
@@ -329,7 +330,44 @@ def document_detail(request, document_id):
         "source_document": source_document,
         "workspace_document_id": source_document.id if source_document else document.id,
         "workspace_revision_id": document.id,
+        "can_edit_document": can_edit_document,
     })
+
+
+@login_required
+@require_POST
+def correct_region_text(request, region_id):
+    """Apply one explicit, reversible text correction to a region."""
+    from .policy import ProjectAccessPolicy
+    region = get_object_or_404(
+        PageRegion.objects.select_related("page__document__collection", "source_document"),
+        pk=region_id,
+    )
+    document = region.page.document
+    if not ProjectAccessPolicy(user=request.user).can_edit(document.collection):
+        messages.error(request, _("You do not have permission to edit this project."))
+        return redirect("document_detail", document.id)
+    expected = request.POST.get("expected_current_text", "")
+    replacement = request.POST.get("replacement_text", "")
+    if region.effective_text != expected:
+        messages.error(request, _("This region changed since it was inspected. Reload it before editing."))
+    elif not replacement.strip():
+        messages.error(request, _("Replacement text cannot be empty."))
+    else:
+        RegionCorrection.objects.create(
+            region=region,
+            document=document,
+            created_by=request.user,
+            operation="text",
+            before={"text": region.effective_text},
+            after={"text": replacement},
+            reason=request.POST.get("reason", "").strip(),
+        )
+        messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
+    source = getattr(getattr(document, "processing_job", None), "source_document", None)
+    target = source.id if source else document.id
+    query = f"?revision={document.id}&page={region.page_number}&region={region.id}" if source else f"?page={region.page_number}&region={region.id}"
+    return redirect(f"{reverse('document_detail', args=[target])}{query}")
 
 
 # --- Reviews ---

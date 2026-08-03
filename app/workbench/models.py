@@ -831,3 +831,64 @@ class PageRegion(models.Model):
 
     def __str__(self):
         return f"{self.get_region_type_display()} - Page {self.page_number}"
+
+    @property
+    def active_correction(self):
+        return self.corrections.filter(status="active").order_by("-created_at", "-id").first()
+
+    @property
+    def effective_text(self):
+        correction = self.active_correction
+        if correction and correction.operation == "text":
+            return correction.after.get("text", self.text)
+        return self.text
+
+    @property
+    def effective_region_type(self):
+        correction = self.active_correction
+        if correction and correction.operation == "type":
+            return correction.after.get("region_type", self.region_type)
+        return self.region_type
+
+    @property
+    def is_suppressed(self):
+        correction = self.active_correction
+        return bool(correction and correction.operation == "suppress")
+
+
+class RegionCorrection(models.Model):
+    """Auditable human correction layered over immutable machine output."""
+
+    OPERATIONS = [
+        ("text", "Correct text"),
+        ("type", "Change region type"),
+        ("suppress", "Suppress region"),
+        ("note", "Add curator note"),
+    ]
+    STATUSES = [("active", "Active"), ("reverted", "Reverted")]
+
+    region = models.ForeignKey(PageRegion, on_delete=models.CASCADE, related_name="corrections")
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="region_corrections")
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="region_corrections")
+    operation = models.CharField(max_length=20, choices=OPERATIONS)
+    before = JSONField(default=dict)
+    after = JSONField(default=dict)
+    reason = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default="active")
+    created_at = models.DateTimeField(auto_now_add=True)
+    reverted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def clean(self):
+        super().clean()
+        if self.region_id and self.document_id and self.region.page.document_id != self.document_id:
+            raise ValidationError({"document": "Correction revision must match the region page revision."})
+        if self.operation == "text" and "text" not in self.after:
+            raise ValidationError({"after": "Text corrections must provide after.text."})
+        if self.operation == "type" and self.after.get("region_type") not in dict(PageRegion.REGION_TYPES):
+            raise ValidationError({"after": "Type corrections must provide a valid region_type."})
+
+    def __str__(self):
+        return f"{self.get_operation_display()} on region {self.region_id}"

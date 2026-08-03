@@ -98,7 +98,18 @@
                     <span class="region-type-badge">{{ selected_region.get_region_type_display }}</span>
                     <span>{% trans "Region" %} {{ selected_region.id }}</span>
                 </div>
-                <p class="region-text">{{ selected_region.text|default:_('No text was extracted for this region.') }}</p>
+                <p class="region-text">{{ selected_region.effective_text|default:_('No text was extracted for this region.') }}</p>
+                {% if source_document and can_edit_document %}
+                <details class="correction-editor"><summary>{% trans "Suggest a text correction" %}</summary>
+                    <form method="post" action="{% url 'correct_region_text' selected_region.id %}">
+                        {% csrf_token %}
+                        <label>{% trans "Replacement text" %}<textarea name="replacement_text" required>{{ selected_region.effective_text }}</textarea></label>
+                        <input type="hidden" name="expected_current_text" value="{{ selected_region.effective_text }}">
+                        <label>{% trans "Reason (optional)" %}<input name="reason"></label>
+                        <button class="btn btn-primary" type="submit">{% trans "Save correction" %}</button>
+                    </form>
+                </details>
+                {% endif %}
                 <dl class="technical-summary">
                     <div><dt>{% trans "Page" %}</dt><dd>{{ selected_region.page_number }}</dd></div>
                     {% if selected_region.confidence %}<div><dt>{% trans "Confidence" %}</dt><dd>{{ selected_region.confidence|floatformat:2 }}</dd></div>{% endif %}

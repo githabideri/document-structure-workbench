@@ -1196,6 +1196,33 @@ class DocumentWorkspaceTest(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_editor_can_create_text_correction_without_overwriting_machine_text(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("correct_region_text", args=[self.region.pk]),
+            {
+                "expected_current_text": "Archive title",
+                "replacement_text": "Corrected archive title",
+                "reason": "Confirmed against scan",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        correction = self.region.corrections.get()
+        self.assertEqual(correction.before["text"], "Archive title")
+        self.assertEqual(correction.after["text"], "Corrected archive title")
+        self.region.refresh_from_db()
+        self.assertEqual(self.region.text, "Archive title")
+        self.assertEqual(self.region.effective_text, "Corrected archive title")
+
+    def test_viewer_cannot_create_text_correction(self):
+        self.client.force_login(self.viewer)
+        response = self.client.post(
+            reverse("correct_region_text", args=[self.region.pk]),
+            {"expected_current_text": "Archive title", "replacement_text": "Nope"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(self.region.corrections.exists())
+
 
 @override_settings(STORAGES={
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

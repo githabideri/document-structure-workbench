@@ -67,6 +67,13 @@
                         </a>
                         {% endfor %}
                     </svg>
+                    <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
+                        {% for region in page_regions %}
+                        <a href="?page={{ selected_page.page_number }}&region={{ region.id }}" class="region-hit region-link" data-region-id="{{ region.id }}" data-region-type="{{ region.region_type }}"
+                           style="left:{{ region.left|floatformat:'6' }}%;top:{{ region.top|floatformat:'6' }}%;width:{{ region.overlay_width|floatformat:'6' }}%;height:{{ region.overlay_height|floatformat:'6' }}%;"
+                           aria-label="{{ region.get_region_type_display }}">{{ region.get_region_type_display }}</a>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
             <div class="region-filters" aria-label="{% trans 'Region filters' %}">
@@ -200,7 +207,7 @@
     const counts = {};
     links.forEach((link) => {
         const box = link.querySelector('.region-box');
-        const type = [...box.classList].find((name) => name.startsWith('region-') && name !== 'region-box')?.replace('region-', '') || 'other';
+        const type = link.dataset.regionType || [...box.classList].find((name) => name.startsWith('region-') && name !== 'region-box')?.replace('region-', '') || 'other';
         counts[type] = (counts[type] || 0) + 1;
         link.dataset.regionType = type;
         const openRegion = (event) => {

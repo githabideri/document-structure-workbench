@@ -79,9 +79,9 @@ class DiagnosticsService:
         release_path = getattr(settings, "RELEASE_FILE", "")
         if release_path and Path(release_path).exists():
             release = Path(release_path).read_text().strip()
-        from .models import ChatRun
-        latest = ChatRun.objects.filter(worker_heartbeat_at__isnull=False).order_by("-worker_heartbeat_at").first()
-        worker_seen = latest.worker_heartbeat_at if latest else None
+        from .models import ChatRun, WorkerHeartbeat
+        latest = WorkerHeartbeat.objects.order_by("-last_seen").first()
+        worker_seen = latest.last_seen if latest else None
         worker_age = (timezone.now() - worker_seen).total_seconds() if worker_seen else None
         worker_ok = worker_age is not None and worker_age <= getattr(settings, "DSW_PROCESSING_STALE_AFTER_SECONDS", 90)
         provider = DiagnosticsService.provider_status()

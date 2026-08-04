@@ -980,6 +980,17 @@ class ChatRunEvent(models.Model):
         ordering = ["created_at", "id"]
 
 
+class WorkerHeartbeat(models.Model):
+    """Last liveness signal from a running processing/chat worker."""
+    worker_id = models.CharField(max_length=200, unique=True)
+    last_seen = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-last_seen"]
+
+
 class EvidenceItem(models.Model):
     """Exact evidence selected for a run, retaining retrieval explanation."""
 

@@ -13,7 +13,7 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from workbench.models import ChatRun, ProcessingJob, SourceDocument
+from workbench.models import ChatRun, ProcessingJob, SourceDocument, WorkerHeartbeat
 from workbench.chat import record_run_event
 from workbench.services import ChatRunService
 from workbench.processors.docling_serve import (
@@ -63,6 +63,7 @@ class Command(BaseCommand):
         try:
             while self.running:
                 try:
+                    self._heartbeat_worker()
                     claimed = self._claim_next_job()
                     if claimed:
                         job, action = claimed
@@ -98,6 +99,12 @@ class Command(BaseCommand):
     def _handle_signal(self, signum, frame):
         self.stdout.write(self.style.WARNING(f"Received signal {signum}, shutting down..."))
         self.running = False
+
+    def _heartbeat_worker(self):
+        WorkerHeartbeat.objects.update_or_create(
+            worker_id=self.worker_id,
+            defaults={"last_seen": timezone.now()},
+        )
 
     def _locked_first(self, queryset):
         options = {}

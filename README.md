@@ -63,7 +63,7 @@ The chat integration uses an OpenAI-compatible llama.cpp endpoint. Keep these va
 DSW_CHAT_BASE_URL=http://127.0.0.1:8081/v1
 DSW_CHAT_API_KEY=...
 DSW_CHAT_MODEL=Qwen3.6-35B-A3B-UD-IQ4_XS.gguf
-DSW_CHAT_TOOL_MODE=fallback  # automatic, native, or deterministic fallback
+DSW_CHAT_TOOL_MODE=automatic  # automatic, native, or provider-without-tools
 DSW_CHAT_WALL_CLOCK_TIMEOUT=120
 DSW_CHAT_MAX_TOOL_CALLS=3
 DSW_CHAT_MAX_RESULTS_PER_CALL=8
@@ -71,7 +71,7 @@ DSW_CHAT_MAX_EVIDENCE=24
 DSW_CHAT_CONTEXT_TOKEN_BUDGET=12000
 ```
 
-The chat workflow is deliberately evidence-first. A conversation freezes its document/revision scope, the worker records retrieved passages and selection reasons, and the final answer can cite only those persisted evidence markers.
+The chat workflow is model-directed. A conversation freezes its document/revision scope; the model may call the bounded search tool, whose initial implementation uses the lexical index. No server-side retrieval occurs before or instead of a model tool call, and the final answer can cite only persisted evidence markers.
 
 ## Project Structure
 

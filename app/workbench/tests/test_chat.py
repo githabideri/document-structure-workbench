@@ -38,12 +38,16 @@ class ChatTests(TestCase):
 
     @patch("workbench.chat.requests.post")
     def test_worker_run_persists_validated_citation(self, post):
-        post.return_value = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "It happened in 1957. [S1]"}}]})
+        post.side_effect = [
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": None, "tool_calls": [{"id": "call-1", "function": {"arguments": '{"query":"restoration 1957"}'}}]}}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "It happened in 1957. [S1]"}}]}),
+        ]
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         thread.selected_sources.set([self.source])
         from workbench.chat import create_chat_run, process_chat_run
         run = create_chat_run(thread, "restoration 1957")
-        process_chat_run(run)
+        with self.settings(DSW_CHAT_TOOL_MODE="native"):
+            process_chat_run(run)
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
         self.assertEqual(run.evidence_items.count(), 1)
@@ -55,7 +59,12 @@ class ChatTests(TestCase):
 
     @patch("workbench.chat.requests.post")
     def test_worker_uses_frozen_revision_scope_and_conversation_history(self, post):
-        post.return_value = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "The answer is 1957. [S1]"}}]})
+        post.side_effect = [
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": None, "tool_calls": [{"id": "call-1", "function": {"arguments": '{"query":"restoration 1957"}'}}]}}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "The answer is 1957. [S1]"}}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": None, "tool_calls": [{"id": "call-2", "function": {"arguments": '{"query":"restoration 1957"}'}}]}}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "The answer is 1957. [S1]"}}]}),
+        ]
         thread = ChatThread.objects.create(
             project=self.project, created_by=self.user,
             selected_revisions=[self.document.pk],
@@ -63,14 +72,21 @@ class ChatTests(TestCase):
         thread.selected_sources.set([self.source])
         from workbench.chat import create_chat_run, process_chat_run
         first = create_chat_run(thread, "What year?")
-        process_chat_run(first)
+        with self.settings(DSW_CHAT_TOOL_MODE="native"):
+            process_chat_run(first)
         second = create_chat_run(thread, "Can you restate the restoration year?")
-        process_chat_run(second)
+        with self.settings(DSW_CHAT_TOOL_MODE="native"):
+            process_chat_run(second)
         sent_messages = post.call_args_list[-1].kwargs["json"]["messages"]
         self.assertEqual(post.call_args_list[-1].kwargs["json"]["max_tokens"], 16384)
-        self.assertEqual(sent_messages[-2]["role"], "assistant")
-        self.assertEqual(sent_messages[-2]["content"], "The answer is 1957. [S1]")
-        self.assertEqual(sent_messages[-1]["content"], "Can you restate the restoration year?")
+        self.assertTrue(any(
+            message.get("role") == "assistant" and message.get("content") == "The answer is 1957. [S1]"
+            for message in sent_messages
+        ))
+        self.assertTrue(any(
+            message.get("role") == "user" and message.get("content") == "Can you restate the restoration year?"
+            for message in sent_messages
+        ))
         self.assertEqual(second.evidence_items.first().processed_revision_id, self.document.pk)
 
     @patch("workbench.chat.requests.post")

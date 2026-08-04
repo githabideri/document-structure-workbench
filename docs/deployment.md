@@ -176,12 +176,15 @@ browser-specific diagnostics.
 ### General chat scope
 
 Chat runs freeze their resolved authorization scope at submission time. Set
-`DSW_CHAT_TOOL_MODE` to `automatic`, `native`, or `fallback`; deployments without
-provider tool calling remain usable through the deterministic lexical index.
+`DSW_CHAT_TOOL_MODE` to `automatic`, `native`, or `fallback`; `fallback` sends
+ordinary provider requests without search tools and does not perform hidden
+server-side retrieval. The lexical index is used only after the model calls
+`search_evidence`.
 The `DSW_CHAT_MAX_TOOL_CALLS`, `DSW_CHAT_MAX_RESULTS_PER_CALL`,
 `DSW_CHAT_MAX_EVIDENCE`, `DSW_CHAT_CONTEXT_TOKEN_BUDGET`, and
 `DSW_CHAT_WALL_CLOCK_TIMEOUT` settings bound provider retrieval and context
 size. In `automatic` mode, a provider rejection of native tools is retried
-once deterministically without tools; `native` mode reports the rejection.
+once without tools; `native` mode reports the rejection. Neither path runs
+server-side retrieval without an explicit model tool call.
 These values are also reported by the
 anonymous health diagnostics endpoint without exposing API keys.

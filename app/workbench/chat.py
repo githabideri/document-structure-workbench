@@ -142,13 +142,9 @@ def process_chat_run(run, worker_id="chat-worker"):
     attachment_projects = list(SearchPassage.objects.filter(
         source_document_id__in=snapshot.get("attachment_ids", [])
     ).values_list("project_id", flat=True).distinct())
-    # In automatic/native mode the model decides whether the question needs
-    # archival search.  Fallback mode remains deterministic and retrieves
-    # before the provider request.
-    selected = [] if tool_mode in {"automatic", "native"} else select_evidence(
-        run.retrieval_query, source_ids, sorted(set(projects) | set(attachment_projects)), revision_ids=revision_ids,
-        limit=getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
-    )
+    # Retrieval is exclusively model-directed.  The lexical index is only
+    # consulted below after the model explicitly calls search_evidence.
+    selected = []
     EvidenceItem.objects.filter(run=run).delete()
     items = []
     for index, (score, passage, reason) in enumerate(selected, 1):

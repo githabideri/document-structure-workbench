@@ -33,6 +33,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         config["request"] = json.loads(self.rfile.read(length) or b"{}")
         config["authorization"] = self.headers.get("Authorization")
+        config["request_count"] = config.get("request_count", 0) + 1
         mode = config["mode"]
         if mode == "timeout":
             time.sleep(0.3)
@@ -45,6 +46,9 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 pass
             self.connection.close()
             return
+        if mode == "reject-tools" and config["request"].get("tools"):
+            self._send(400, {"error": {"message": "fake provider does not support tools"}})
+            return
         if mode in {"bad-request", "unauthorized", "unprocessable", "unavailable-model"}:
             status = {"bad-request": 400, "unauthorized": 401, "unprocessable": 422, "unavailable-model": 404}[mode]
             self._send(status, {"error": {"message": f"fake {mode}"}})
@@ -56,6 +60,16 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
+            return
+        if mode == "native-tool" and config["request"].get("tools") and config["request_count"] == 1:
+            message = {"content": None, "tool_calls": [{"id": "call-1", "type": "function",
+                        "function": {"name": "search_evidence", "arguments": '{"query":"alpha"}'}}]}
+            self._send(200, {"model": "fake-qwen", "choices": [{"finish_reason": "tool_calls", "message": message}]})
+            return
+        if mode == "malformed-tool" and config["request"].get("tools") and config["request_count"] == 1:
+            message = {"content": None, "tool_calls": [{"id": "call-bad", "type": "function",
+                        "function": {"name": "search_evidence", "arguments": "not-json"}}]}
+            self._send(200, {"model": "fake-qwen", "choices": [{"finish_reason": "tool_calls", "message": message}]})
             return
         if mode == "reasoning-only":
             message = {"content": "", "reasoning_content": "untrusted fake reasoning"}
@@ -129,12 +143,14 @@ class FakeProviderIntegrationTests(TestCase):
     def tearDown(self):
         self.provider.stop()
 
-    def run_mode(self, mode, timeout=2):
+    def run_mode(self, mode, timeout=2, tool_mode="fallback"):
         self.provider.config["mode"] = mode
+        self.provider.config["request_count"] = 0
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         thread.selected_sources.set([self.source])
         run = create_chat_run(thread, "alpha")
-        with self.settings(DSW_CHAT_BASE_URL=self.provider.url, DSW_CHAT_TIMEOUT=timeout):
+        with self.settings(DSW_CHAT_BASE_URL=self.provider.url, DSW_CHAT_TIMEOUT=timeout,
+                           DSW_CHAT_TOOL_MODE=tool_mode):
             try:
                 process_chat_run(run, worker_id="fake-integration-worker")
             except ChatProviderError as exc:
@@ -199,6 +215,29 @@ class FakeProviderIntegrationTests(TestCase):
             with self.subTest(mode=mode):
                 _run, error = self.run_mode(mode)
                 self.assertEqual(error, "provider_rejected")
+
+    def test_automatic_mode_retries_without_tools_when_provider_rejects_them(self):
+        run, error = self.run_mode("reject-tools", tool_mode="automatic")
+        self.assertIsNone(error)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertTrue(run.events.filter(name="tool_fallback").exists())
+        self.assertEqual(self.provider.config["request_count"], 2)
+
+    def test_native_tool_calls_persist_bounded_search_evidence(self):
+        run, error = self.run_mode("native-tool", tool_mode="native")
+        self.assertIsNone(error)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertEqual(run.evidence_items.count(), 1)
+        self.assertTrue(run.events.filter(name="tool_call").exists())
+
+    def test_malformed_tool_call_is_untrusted_and_does_not_crash_worker(self):
+        run, error = self.run_mode("malformed-tool", tool_mode="native")
+        self.assertIsNone(error)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertTrue(run.events.filter(error_code="provider_malformed_tool_call").exists())
 
     def test_timeout_connection_reset_and_malformed_json_are_classified(self):
         _run, error = self.run_mode("timeout", timeout=0.05)

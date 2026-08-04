@@ -20,7 +20,7 @@ Commands:
   doctor [--json]                         Check deployment health.
   api health                              Fetch the public health document.
   chat threads                            List accessible conversations.
-  chat ask --project ID --source ID --question TEXT
+  chat ask [--scope-mode project|all] [--project ID] [--attachment ID ...] --question TEXT
                                            Create a conversation/run.
   chat inspect|evidence|retry --run ID    Inspect or retry a run.
   support-bundle --run ID [--format FMT] [--output PATH]
@@ -59,10 +59,28 @@ case "$cmd" in
       evidence) [[ "${1:-}" == --run ]] || die "usage: dsw chat evidence --run RUN_ID"; request GET "/chat/runs/${2:?}/evidence/" ;;
       retry) [[ "${1:-}" == --run ]] || die "usage: dsw chat retry --run RUN_ID"; request POST "/chat/runs/${2:?}/retry/" '{}' ;;
       ask)
-        project=""; source=""; question=""
-        while (($#)); do case "$1" in --project) project="$2"; shift 2;; --source) source="$2"; shift 2;; --question) question="$2"; shift 2;; *) die "unknown option $1";; esac; done
-        [[ -n "$project" && -n "$source" && -n "$question" ]] || die "project, source, and question are required"
-        request POST /chat/threads/ "$(python3 -c 'import json,sys; print(json.dumps({"project_id":int(sys.argv[1]),"source_ids":[int(sys.argv[2])],"question":sys.argv[3]}))' "$project" "$source" "$question")"
+        mode="project"; project=""; attachments=(); question=""
+        while (($#)); do
+          case "$1" in
+            --scope-mode) mode="${2:?missing scope mode}"; shift 2;;
+            --project) project="$2"; shift 2;;
+            --source|--attachment) attachments+=("$2"); shift 2;;
+            --question) question="$2"; shift 2;;
+            *) die "unknown option $1";;
+          esac
+        done
+        [[ "$mode" == project || "$mode" == all ]] || die "scope mode must be project or all"
+        [[ -n "$question" ]] || die "question is required"
+        if [[ "$mode" == project && -z "$project" ]]; then die "project is required for project scope"; fi
+        python3 - "$mode" "$project" "$question" "${attachments[@]}" <<'PY' | { read -r body; request POST /chat/threads/ "$body"; }
+import json, sys
+mode, project, question = sys.argv[1:4]
+attachments = [int(value) for value in sys.argv[4:]]
+scope = {"mode": mode, "attachment_ids": attachments}
+if project:
+    scope["project_id"] = int(project)
+print(json.dumps({"scope": scope, "question": question}))
+PY
         ;;
       *) die "unknown chat command";;
     esac

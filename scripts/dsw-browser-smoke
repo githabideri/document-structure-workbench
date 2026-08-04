@@ -10,6 +10,7 @@ question="${DSW_BROWSER_QUESTION:-What does the selected document discuss?}"
 output_dir="${DSW_BROWSER_OUTPUT_DIR:-/tmp/dsw-browser-smoke-$(date +%Y%m%d-%H%M%S)}"
 project_id="${DSW_BROWSER_PROJECT_ID:-}"
 source_ids="${DSW_BROWSER_SOURCE_IDS:-}"
+scope_mode="${DSW_BROWSER_SCOPE_MODE:-all}"
 allow_remote="${DSW_BROWSER_ALLOW_REMOTE:-0}"
 browser="$(dirname "$0")/agent-browser-dsw"
 
@@ -28,6 +29,7 @@ Options:
   --password PASSWORD     Convenience only; prefer DSW_BROWSER_PASSWORD.
   --project-id ID         Expected fixture project ID.
   --source-ids IDS        Comma-separated fixture source IDs.
+  --scope-mode MODE       project or all (default: all).
   --question TEXT         Question to ask.
   --output-dir PATH       Artifact directory.
   --allow-remote          Permit non-local BASE_URL (required for staging).
@@ -35,7 +37,7 @@ Options:
 Environment:
   DSW_BROWSER_BASE_URL, DSW_BROWSER_USERNAME, DSW_BROWSER_PASSWORD,
   DSW_BROWSER_PROJECT_ID, DSW_BROWSER_SOURCE_IDS, DSW_BROWSER_ALLOW_REMOTE,
-  DSW_BROWSER_OUTPUT_DIR, DSW_BROWSER_WAIT_ATTEMPTS.
+  DSW_BROWSER_SCOPE_MODE, DSW_BROWSER_OUTPUT_DIR, DSW_BROWSER_WAIT_ATTEMPTS.
 EOF
 }
 while (($#)); do
@@ -46,6 +48,7 @@ while (($#)); do
     --password) password="${2:?missing password}"; shift 2;;
     --project-id) project_id="${2:?missing project ID}"; shift 2;;
     --source-ids) source_ids="${2:?missing source IDs}"; shift 2;;
+    --scope-mode) scope_mode="${2:?missing scope mode}"; shift 2;;
     --question) question="${2:?missing question}"; shift 2;;
     --output-dir) output_dir="${2:?missing output directory}"; shift 2;;
     --allow-remote) allow_remote=1; shift;;
@@ -57,6 +60,7 @@ case "$base_url" in
   http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*) ;;
   *) [[ "$allow_remote" == 1 ]] || { echo "browser-smoke: remote URL requires --allow-remote" >&2; exit 2; };;
 esac
+[[ "$scope_mode" == all || "$scope_mode" == project ]] || { echo "browser-smoke: --scope-mode must be all or project" >&2; exit 2; }
 if [[ "$allow_remote" == 1 && -z "$source_ids" ]]; then
   echo "browser-smoke: remote execution requires --source-ids for fixture safety" >&2
   exit 2
@@ -95,7 +99,7 @@ write_result() {
   local release url
   release="$(curl -fsS "$base_url/api/v1/health/" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("release") or "")' 2>/dev/null || true)"
   url="$($browser get url 2>/dev/null | tail -1 || true)"
-  python3 -c 'import json,sys; steps=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]; result={"status":"pass" if steps and all(x["status"]=="pass" for x in steps) else "fail","url":sys.argv[2],"release":sys.argv[3],"project_id":sys.argv[4],"source_ids":[x for x in sys.argv[5].split(",") if x],"screenshots":[sys.argv[6]+"/conversation.png",sys.argv[6]+"/cited-document.png",sys.argv[6]+"/returned-chat.png"],"scenarios":steps}; open(sys.argv[6]+"/result.json","w").write(json.dumps(result,indent=2)+"\n"); print(json.dumps(result))' "$steps_file" "$url" "$release" "$project_id" "$source_ids" "$output_dir"
+  python3 -c 'import json,sys; steps=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]; result={"status":"pass" if steps and all(x["status"]=="pass" for x in steps) else "fail","url":sys.argv[2],"release":sys.argv[3],"project_id":sys.argv[4],"scope_mode":sys.argv[5],"source_ids":[x for x in sys.argv[6].split(",") if x],"screenshots":[sys.argv[7]+"/conversation.png",sys.argv[7]+"/cited-document.png",sys.argv[7]+"/returned-chat.png"],"scenarios":steps}; open(sys.argv[7]+"/result.json","w").write(json.dumps(result,indent=2)+"\n"); print(json.dumps(result))' "$steps_file" "$url" "$release" "$project_id" "$scope_mode" "$source_ids" "$output_dir"
 }
 fail() { echo "browser-smoke: $*" >&2; exit 1; }
 finish() {
@@ -119,6 +123,9 @@ snapshot login
 
 step create_thread_open "$browser" open "$base_url/chat/" || fail "chat workspace did not open"
 snapshot chat-start
+scope_js="const scope=document.querySelector('#scope_mode'); if(scope){scope.value='${scope_mode}'; scope.dispatchEvent(new Event('change'));} const project=document.querySelector('#project_id'); if(project && '${scope_mode}'==='project' && '${project_id}') project.value='${project_id}'; JSON.stringify({scope:scope&&scope.value,project:project&&project.value});"
+step select-scope "$browser" eval -b "$(printf '%s' "$scope_js" | base64 -w0)" || fail "could not select chat scope"
+record verify-scope pass "mode=$scope_mode"
 source_count="$(count 'input[name=source]')"
 [[ "${source_count:-0}" -gt 0 ]] || fail "no accessible generic documents were discovered"
 record select-documents pass "discovered $source_count documents"

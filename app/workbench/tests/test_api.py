@@ -172,3 +172,24 @@ class ApiContractTests(TestCase):
         conversation = self.client.get(reverse("chat_thread", args=[thread.pk]))
         self.assertEqual(conversation.status_code, 200)
         self.assertContains(conversation, "Inspect run diagnostics")
+
+    @override_settings(STORAGES={"staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}})
+    def test_maintainer_diagnostics_supports_all_project_scope(self):
+        thread = ChatThread.objects.create(
+            project=None, created_by=self.user, scope_mode="all",
+            scope_config={"mode": "all", "project_ids": [self.project.pk],
+                          "source_ids": [self.make_source().pk], "revision_ids": [],
+                          "attachment_ids": [], "filters": {}},
+        )
+        message = ChatMessage.objects.create(thread=thread, role="user", text="all projects", ordinal=0)
+        run = ChatRun.objects.create(
+            thread=thread, user_message=message, state="completed",
+            scope_snapshot=thread.scope_config,
+            model_metadata={"final_answer": "safe all-project answer"},
+        )
+        self.client.force_login(self.user)
+        self.user.groups.create(name="Administrator")
+        response = self.client.get(reverse("chat_run_diagnostics", args=[run.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "All accessible projects")
+        self.assertContains(response, "safe all-project answer")

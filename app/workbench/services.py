@@ -134,15 +134,29 @@ class SupportBundleService:
     def build(run):
         thread = run.thread
         provider = (run.model_metadata or {}).get("provider", {})
-        sources = [{"id": source.id, "filename": source.filename, "revision_id": source.active_document_id}
-                   for source in thread.selected_sources.all()]
+        snapshot = run.scope_snapshot or thread.scope_config or {}
+        from .models import SourceDocument
+        source_ids = snapshot.get("source_ids") or list(thread.selected_sources.values_list("id", flat=True))
+        sources = [{"id": source.id, "filename": source.filename, "revision_id": source.active_document_id,
+                    "project_id": source.collection_id}
+                   for source in SourceDocument.objects.filter(id__in=source_ids).order_by("id")]
+        project = thread.project
+        project_data = {"id": project.id, "name": project.name} if project else {
+            "id": None, "name": "All accessible projects",
+            "ids": snapshot.get("project_ids", []),
+        }
         bundle = {
             "run": {"id": run.id, "state": run.state, "status": run.status_message, "error": run.error_message,
                     "created_at": run.created_at.isoformat(), "started_at": run.started_at.isoformat() if run.started_at else None,
                     "finished_at": run.finished_at.isoformat() if run.finished_at else None, "worker_id": run.worker_id,
                     "token_budget": run.token_budget, "source_tokens": run.source_tokens},
-            "project": {"id": thread.project_id, "name": thread.project.name},
-            "scope": {"sources": sources, "revision_ids": thread.selected_revisions or []},
+            "project": project_data,
+            "scope": {"mode": snapshot.get("mode", thread.scope_mode),
+                      "project_ids": snapshot.get("project_ids", []),
+                      "sources": sources,
+                      "revision_ids": snapshot.get("revision_ids", thread.selected_revisions or []),
+                      "attachment_ids": snapshot.get("attachment_ids", []),
+                      "filters": snapshot.get("filters", {})},
             "question": run.user_message.text,
             "history": list(thread.messages.exclude(pk=run.user_message_id).order_by("ordinal").values("role", "text")),
             "evidence": [{"marker": item.marker, "source_document_id": item.source_document_id, "revision_id": item.processed_revision_id,
@@ -162,7 +176,11 @@ class SupportBundleService:
     @staticmethod
     def markdown(bundle):
         run = bundle["run"]
-        lines = [f"# Chat support bundle — run {run['id']}", "", f"- State: {run['state']}", f"- Project: {bundle['project']['name']} ({bundle['project']['id']})", "", "## Question", bundle["question"], "", "## Final answer", bundle["final_answer"]]
+        project_id = bundle["project"].get("id")
+        project_label = bundle["project"]["name"]
+        if project_id is not None:
+            project_label += f" ({project_id})"
+        lines = [f"# Chat support bundle — run {run['id']}", "", f"- State: {run['state']}", f"- Project scope: {project_label}", "", "## Question", bundle["question"], "", "## Final answer", bundle["final_answer"]]
         if bundle.get("reasoning_content"):
             lines += ["", "## Provider reasoning content (untrusted diagnostic output)", bundle["reasoning_content"]]
         lines += ["", "## Evidence"]

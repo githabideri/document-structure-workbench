@@ -105,6 +105,7 @@ class DiagnosticsService:
             "max_evidence": getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
             "context_token_budget": getattr(settings, "DSW_CHAT_CONTEXT_TOKEN_BUDGET", 12000),
             "wall_clock_timeout": getattr(settings, "DSW_CHAT_WALL_CLOCK_TIMEOUT", 300),
+            "request_timeout": getattr(settings, "DSW_CHAT_TIMEOUT", 300),
         }
         if not configured:
             return result

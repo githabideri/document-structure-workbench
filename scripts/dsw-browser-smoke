@@ -117,7 +117,14 @@ step login "$browser" open "$base_url/login/" || fail "login navigation failed"
 step login_fill "$browser" find label Username fill "$username" || fail "username field not found"
 step login_password "$browser" find label Password fill "$password" || fail "password field not found"
 step login_submit "$browser" find role button click --name Login || fail "login submit failed"
-step login_wait "$browser" wait --text 'Home' || fail "login did not reach the authenticated workspace"
+if "$browser" wait --text 'Home' >"$output_dir/login_wait.log" 2>&1; then
+  record login_wait pass
+elif "$browser" wait --text 'Fragen' >"$output_dir/login_wait_localized.log" 2>&1; then
+  record login_wait pass "localized authenticated navigation"
+else
+  record login_wait fail "see $output_dir/login_wait*.log"
+  fail "login did not reach the authenticated workspace"
+fi
 record login pass
 snapshot login
 
@@ -146,9 +153,27 @@ else
     step select_second "$browser" find nth 2 'input[name=source]' check || fail "could not select second document"
   fi
 fi
-step ask_question "$browser" find label Question fill "$question" || fail "question field not found"
-step ask_submit "$browser" find role button click --name 'Start conversation' || fail "conversation submit failed"
-step create_thread_wait "$browser" wait --text 'Documents' || fail "conversation did not open"
+if "$browser" find label Question fill "$question" >"$output_dir/ask_question.log" 2>&1; then
+  record ask_question pass
+elif "$browser" find label Frage fill "$question" >"$output_dir/ask_question_localized.log" 2>&1; then
+  record ask_question pass "localized question label"
+else
+  record ask_question fail "see $output_dir/ask_question*.log"; fail "question field not found"
+fi
+if "$browser" find role button click --name 'Start conversation' >"$output_dir/ask_submit.log" 2>&1; then
+  record ask_submit pass
+elif "$browser" find role button click --name 'Gespräch starten' >"$output_dir/ask_submit_localized.log" 2>&1; then
+  record ask_submit pass "localized submit label"
+else
+  record ask_submit fail "see $output_dir/ask_submit*.log"; fail "conversation submit failed"
+fi
+if "$browser" wait --text 'Documents' >"$output_dir/create_thread_wait.log" 2>&1; then
+  record create_thread_wait pass
+elif "$browser" wait --text 'Dokumente' >"$output_dir/create_thread_wait_localized.log" 2>&1; then
+  record create_thread_wait pass "localized evidence panel"
+else
+  record create_thread_wait fail "see $output_dir/create_thread_wait*.log"; fail "conversation did not open"
+fi
 record create-thread pass
 snapshot conversation-start
 
@@ -176,7 +201,13 @@ snapshot cited-document
 step cited-document-screenshot "$browser" screenshot "$output_dir/cited-document.png" || fail "cited document screenshot failed"
 record open-citation pass
 step return-to-chat "$browser" back || fail "could not return to chat"
-step return-wait "$browser" wait --text 'Documents' || fail "return did not reach chat"
+if "$browser" wait --text 'Documents' >"$output_dir/return_wait.log" 2>&1; then
+  record return-wait pass
+elif "$browser" wait --text 'Dokumente' >"$output_dir/return_wait_localized.log" 2>&1; then
+  record return-wait pass "localized evidence panel"
+else
+  record return-wait fail "see $output_dir/return_wait*.log"; fail "return did not reach chat"
+fi
 snapshot returned-chat
 step return-screenshot "$browser" screenshot "$output_dir/returned-chat.png" || fail "return screenshot failed"
 record return-to-chat pass

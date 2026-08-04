@@ -1006,6 +1006,7 @@ class EvidenceItem(models.Model):
     page_region = models.ForeignKey(PageRegion, on_delete=models.CASCADE, null=True, blank=True)
     passage = models.ForeignKey(SearchPassage, on_delete=models.SET_NULL, null=True, blank=True)
     text = models.TextField()
+    page_text = models.TextField(blank=True)
     retrieval_method = models.CharField(max_length=50, blank=True)
     selection_reason = models.CharField(max_length=255, blank=True)
     score = models.FloatField(null=True, blank=True)

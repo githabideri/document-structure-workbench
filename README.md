@@ -72,6 +72,7 @@ DSW_CHAT_CONTEXT_TOKEN_BUDGET=12000
 ```
 
 The chat workflow is model-directed. A conversation freezes its document/revision scope; the model may call the bounded search tool, whose initial implementation uses the lexical index. No server-side retrieval occurs before or instead of a model tool call, and the final answer can cite only persisted evidence markers.
+Each search result includes both the matching passage and the full extracted text of that immutable page, subject to the configured context-token budget. This gives the model surrounding context without losing the precise passage used for citation.
 
 ## Project Structure
 

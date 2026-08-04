@@ -15,7 +15,7 @@ from django.urls import reverse
 from workbench.chat import ChatProviderError, create_chat_run, process_chat_run
 from workbench.models import (
     ChatThread, Collection, Document, Page, ProcessingJob, ProcessingPreset,
-    ProjectMembership, SearchPassage, SourceDocument, ApiToken,
+    ProjectMembership, SearchPassage, SourceDocument, ApiToken, ProcessingArtifact,
 )
 
 User = get_user_model()
@@ -139,6 +139,10 @@ class FakeProviderIntegrationTests(TestCase):
             project=self.project, source_document=self.source, processed_revision=document,
             processing_job=job, page=page, text="Alpha evidence is present.", normalized_text="alpha evidence is present.",
         )
+        ProcessingArtifact.objects.create(
+            job=job, artifact_type="page_text", page_number=1,
+            data={"text": "Page heading\nAlpha evidence is present.\nAdditional context that is not in the matching snippet."},
+        )
         self.raw_token = "fake-api-token"
         self.token = ApiToken.objects.create(
             user=self.user, name="fake integration", token_prefix="fake-api",
@@ -241,6 +245,11 @@ class FakeProviderIntegrationTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
         self.assertEqual(run.evidence_items.count(), 1)
+        self.assertEqual(run.evidence_items.first().page_text, "Page heading\nAlpha evidence is present.\nAdditional context that is not in the matching snippet.")
+        tool_message = self.provider.config["request"]["messages"][-1]
+        tool_payload = json.loads(tool_message["content"])
+        self.assertEqual(tool_payload["results"][0]["text"], "Alpha evidence is present.")
+        self.assertIn("Additional context", tool_payload["results"][0]["page_text"])
         self.assertTrue(run.events.filter(name="tool_call").exists())
 
     def test_automatic_mode_allows_direct_answer_when_model_declines_search(self):

@@ -162,7 +162,7 @@ class SupportBundleService:
             "question": run.user_message.text,
             "history": list(thread.messages.exclude(pk=run.user_message_id).order_by("ordinal").values("role", "text")),
             "evidence": [{"marker": item.marker, "source_document_id": item.source_document_id, "revision_id": item.processed_revision_id,
-                          "page": item.page.page_number if item.page else None, "text": item.text, "score": item.score,
+                          "page": item.page.page_number if item.page else None, "text": item.text, "page_text": item.page_text, "score": item.score,
                           "reason": item.selection_reason} for item in run.evidence_items.select_related("page").order_by("ordinal")],
             "prompt": (run.model_metadata or {}).get("prompt", ""),
             "provider_request": (run.model_metadata or {}).get("provider_request", {}),

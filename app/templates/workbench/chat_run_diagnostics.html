@@ -47,10 +47,14 @@
 
   <section class="diagnostics-card">
     <h2>{% trans "Selected evidence" %}</h2>
-    <p>{% trans "These passages were supplied to the model. They come from immutable processed revisions; the score is the deterministic lexical retrieval score." %}</p>
+    <p>{% trans "These results were supplied to the model. Each result contains the matching passage plus the full extracted text of its immutable page; the score is the deterministic lexical retrieval score." %}</p>
     <ol class="diagnostics-evidence-list">
       {% for item in diagnostics.evidence %}
-      <li><strong>[{{ item.marker }}]</strong> source {{ item.source_document_id }}, revision {{ item.revision_id }}, page {{ item.page }} — score {{ item.score }}<br><span>{{ item.text }}</span><small>{{ item.reason }}</small></li>
+      <li><strong>[{{ item.marker }}]</strong> source {{ item.source_document_id }}, revision {{ item.revision_id }}, page {{ item.page }} — score {{ item.score }}<br>
+        <strong>{% trans "Matching passage" %}</strong><span>{{ item.text }}</span>
+        <details><summary>{% trans "Full page sent to model" %}</summary><span>{{ item.page_text }}</span></details>
+        <small>{{ item.reason }}</small>
+      </li>
       {% empty %}<li>{% trans "No evidence was selected." %}</li>{% endfor %}
     </ol>
   </section>

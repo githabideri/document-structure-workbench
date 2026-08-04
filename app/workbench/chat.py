@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils.html import conditional_escape, format_html
 from django.utils.safestring import mark_safe
 
-from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, SearchPassage
+from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, ProcessingArtifact, SearchPassage
 from .policy import ProjectAccessPolicy
 from .search import normalize_text
 
@@ -129,9 +129,35 @@ def assemble_run_context(run):
         page = item.page.page_number if item.page else "?"
         lines.append(
             f"[{item.marker}] {item.source_document.filename}; revision {item.processed_revision_id}; "
-            f"page {page}; region {item.page_region_id or '-'}\n{item.text}"
+            f"page {page}; region {item.page_region_id or '-'}\n"
+            f"MATCHING PASSAGE:\n{item.text}\n"
+            f"FULL PAGE:\n{item.page_text or item.text}"
         )
     return "\n\n".join(lines)
+
+
+def _full_page_text(passage):
+    """Return immutable extracted text for the evidence page, if available."""
+    if not passage.page:
+        return passage.text or ""
+    artifact = ProcessingArtifact.objects.filter(
+        job_id=passage.processing_job_id,
+        artifact_type="page_text",
+        page_number=passage.page.page_number,
+    ).values_list("data", flat=True).first()
+    if isinstance(artifact, dict) and artifact.get("text"):
+        return str(artifact["text"])
+    # Older revisions may not have a page_text artifact. Reconstruct the
+    # page from its immutable indexed regions rather than silently reducing
+    # the model's context to the matching snippet.
+    page_parts = SearchPassage.objects.filter(
+        processing_job_id=passage.processing_job_id,
+        page_id=passage.page_id,
+    ).order_by("ordinal").values_list("text", flat=True)
+    reconstructed = "\n".join(part for part in page_parts if part)
+    if reconstructed:
+        return reconstructed
+    return passage.text or ""
 
 
 def process_chat_run(run, worker_id="chat-worker"):
@@ -158,7 +184,7 @@ def process_chat_run(run, worker_id="chat-worker"):
             run=run, marker=f"S{index}", source_document=passage.source_document,
             processed_revision=passage.processed_revision, processing_job=passage.processing_job,
             page=passage.page, page_region=passage.page_region, passage=passage,
-            text=passage.text[:1600], retrieval_method="lexical",
+            text=passage.text[:1600], page_text=_full_page_text(passage), retrieval_method="lexical",
             selection_reason=("manual-attachment/" if passage.source_document_id in snapshot.get("attachment_ids", []) else "search/") + reason,
             score=score, ordinal=index,
         ))
@@ -267,10 +293,11 @@ def process_chat_run(run, worker_id="chat-worker"):
                         if passage.id in existing_passage_ids:
                             continue
                         marker = f"S{len(items) + 1}"
-                        evidence = EvidenceItem.objects.create(run=run, marker=marker, source_document=passage.source_document, processed_revision=passage.processed_revision, processing_job=passage.processing_job, page=passage.page, page_region=passage.page_region, passage=passage, text=passage.text[:1600], retrieval_method="native-tool", selection_reason="search-tool/" + reason, ordinal=len(items) + 1)
+                        page_text = _full_page_text(passage)
+                        evidence = EvidenceItem.objects.create(run=run, marker=marker, source_document=passage.source_document, processed_revision=passage.processed_revision, processing_job=passage.processing_job, page=passage.page, page_region=passage.page_region, passage=passage, text=passage.text[:1600], page_text=page_text, retrieval_method="native-tool", selection_reason="search-tool/" + reason, ordinal=len(items) + 1)
                         items.append(evidence)
                         existing_passage_ids.add(passage.id)
-                        result_entries.append({"marker": marker, "text": passage.text[:1600], "source_document_id": passage.source_document_id, "revision_id": passage.processed_revision_id, "page": passage.page.page_number if passage.page else None})
+                        result_entries.append({"marker": marker, "text": passage.text[:1600], "page_text": page_text, "source_document_id": passage.source_document_id, "revision_id": passage.processed_revision_id, "page": passage.page.page_number if passage.page else None})
                     result = {"results": result_entries}
                     record_run_event(run, "tool_call", metadata={"query": query, "result_count": len(found), "tool_call_number": tool_call_count})
                 tool_results.append({"role": "tool", "tool_call_id": call.get("id", f"tool-{tool_call_count}"), "content": json.dumps(result)})

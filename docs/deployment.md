@@ -187,7 +187,9 @@ budget still bounds the complete run.
 The `DSW_CHAT_MAX_RESULTS_PER_CALL`,
 `DSW_CHAT_MAX_EVIDENCE`, `DSW_CHAT_CONTEXT_TOKEN_BUDGET`, and
 `DSW_CHAT_WALL_CLOCK_TIMEOUT` settings bound provider retrieval and context
-size. In `automatic` mode, a provider rejection of native tools is retried
+size. Search tool results contain the matching indexed passage and the full
+extracted text of that passage's immutable page; the context-token budget
+bounds the combined prompt. In `automatic` mode, a provider rejection of native tools is retried
 once without tools; `native` mode reports the rejection. Neither path runs
 server-side retrieval without an explicit model tool call.
 These values are also reported by the

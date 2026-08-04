@@ -180,7 +180,8 @@ Chat runs freeze their resolved authorization scope at submission time. Set
 ordinary provider requests without search tools and does not perform hidden
 server-side retrieval. The lexical index is used only after the model calls
 `search_evidence`.
-The `DSW_CHAT_MAX_TOOL_CALLS`, `DSW_CHAT_MAX_RESULTS_PER_CALL`,
+The `DSW_CHAT_MAX_TOOL_CALLS` setting defaults to 10 and is hard-capped at 20.
+The `DSW_CHAT_MAX_RESULTS_PER_CALL`,
 `DSW_CHAT_MAX_EVIDENCE`, `DSW_CHAT_CONTEXT_TOKEN_BUDGET`, and
 `DSW_CHAT_WALL_CLOCK_TIMEOUT` settings bound provider retrieval and context
 size. In `automatic` mode, a provider rejection of native tools is retried

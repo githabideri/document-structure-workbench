@@ -18,6 +18,12 @@ from .search import normalize_text
 logger = logging.getLogger(__name__)
 
 
+def _is_serialized_tool_call(content):
+    """Detect a tool request emitted as ordinary text after tools are disabled."""
+    text = (content or "").strip().lower()
+    return "<tool_call>" in text or "<function=search_evidence>" in text
+
+
 class ChatProviderError(RuntimeError):
     def __init__(self, message, code="provider_protocol_error"):
         super().__init__(message)
@@ -235,7 +241,8 @@ def process_chat_run(run, worker_id="chat-worker"):
         provider_message = choice.get("message", {})
         tool_calls = provider_message.get("tool_calls") or []
         tool_call_count = 0
-        while tool_calls and tool_call_count < getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3):
+        max_tool_calls = min(20, max(1, int(getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 10))))
+        while tool_calls and tool_call_count < max_tool_calls:
             provider_messages.append(provider_message)
             tool_results = []
             for call in tool_calls:
@@ -266,11 +273,11 @@ def process_chat_run(run, worker_id="chat-worker"):
                     result = {"results": result_entries}
                     record_run_event(run, "tool_call", metadata={"query": query, "result_count": len(found), "tool_call_number": tool_call_count})
                 tool_results.append({"role": "tool", "tool_call_id": call.get("id", f"tool-{tool_call_count}"), "content": json.dumps(result)})
-                if tool_call_count >= getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3):
+                if tool_call_count >= max_tool_calls:
                     break
             provider_messages.extend(tool_results)
-            if tool_call_count >= getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3):
-                record_run_event(run, "tool_call_limit", metadata={"max_tool_calls": tool_call_count})
+            if tool_call_count >= max_tool_calls:
+                record_run_event(run, "tool_call_limit", metadata={"max_tool_calls": max_tool_calls})
                 # Give the model one final answer turn with tools disabled.
                 # Without this handoff, a model that emits a final tool request
                 # at the boundary would leave the run with no answer.
@@ -308,6 +315,9 @@ def process_chat_run(run, worker_id="chat-worker"):
         record_run_event(run, "provider_response", metadata={key: value for key, value in metadata.items() if key != "reasoning_content"}, duration_ms=int((timezone.now() - request_started).total_seconds() * 1000))
         if not answer:
             raise ChatProviderError("The provider returned no final answer.", "provider_no_final_answer")
+        if _is_serialized_tool_call(answer):
+            record_run_event(run, "final_answer_rejected", metadata={"reason": "serialized_tool_call"}, error_code="provider_no_final_answer")
+            raise ChatProviderError("The provider did not produce a final answer after the search budget.", "provider_no_final_answer")
     except requests.HTTPError as exc:
         detail = ""
         if exc.response is not None:

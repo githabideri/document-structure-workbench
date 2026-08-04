@@ -100,7 +100,7 @@ class DiagnosticsService:
                   "model_configured": bool(model), "model_available": None}
         result["tool_mode"] = getattr(settings, "DSW_CHAT_TOOL_MODE", "fallback")
         result["limits"] = {
-            "max_tool_calls": getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3),
+            "max_tool_calls": getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 10),
             "max_results_per_call": getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8),
             "max_evidence": getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
             "context_token_budget": getattr(settings, "DSW_CHAT_CONTEXT_TOKEN_BUDGET", 12000),
@@ -212,13 +212,15 @@ class SupportBundleService:
             elif name == "tool_call":
                 explanation = f"The model requested a search; the server returned {metadata.get('result_count', 0)} results for that query."
             elif name == "tool_fallback":
-                explanation = "The provider rejected native tools, so automatic mode retried with deterministic server-side retrieval."
+                explanation = "The provider rejected native tools, so automatic mode retried once without tools; no hidden retrieval was performed."
             elif name == "tool_call_rejected":
                 explanation = "The server rejected a malformed model tool request and did not execute it."
             elif name == "tool_call_limit":
                 explanation = f"The configured maximum of {metadata.get('max_tool_calls')} model search calls was reached."
             elif name == "provider_response":
                 explanation = "The model returned a response containing the answer and/or reasoning content."
+            elif name == "final_answer_rejected":
+                explanation = "The provider returned another tool request as text instead of a final answer; the run was not accepted as complete."
             elif name == "validating":
                 explanation = f"The server validated {metadata.get('citation_count', 0)} citations against persisted evidence."
             elif name == "completed":

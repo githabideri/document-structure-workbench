@@ -61,10 +61,14 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
             return
-        if mode == "native-tool" and config["request"].get("tools") and config["request_count"] == 1:
+        if mode in {"native-tool", "limit-tool"} and config["request"].get("tools") and (mode == "limit-tool" or config["request_count"] == 1):
             message = {"content": None, "tool_calls": [{"id": "call-1", "type": "function",
                         "function": {"name": "search_evidence", "arguments": '{"query":"alpha"}'}}]}
             self._send(200, {"model": "fake-qwen", "choices": [{"finish_reason": "tool_calls", "message": message}]})
+            return
+        if mode == "serialized-tool":
+            message = {"content": "<tool_call>\n<function=search_evidence>\n</tool_call>"}
+            self._send(200, {"model": "fake-qwen", "choices": [{"finish_reason": "stop", "message": message}]})
             return
         if mode == "malformed-tool" and config["request"].get("tools") and config["request_count"] == 1:
             message = {"content": None, "tool_calls": [{"id": "call-bad", "type": "function",
@@ -143,14 +147,17 @@ class FakeProviderIntegrationTests(TestCase):
     def tearDown(self):
         self.provider.stop()
 
-    def run_mode(self, mode, timeout=2, tool_mode="fallback"):
+    def run_mode(self, mode, timeout=2, tool_mode="fallback", max_tool_calls=None):
         self.provider.config["mode"] = mode
         self.provider.config["request_count"] = 0
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         thread.selected_sources.set([self.source])
         run = create_chat_run(thread, "alpha")
-        with self.settings(DSW_CHAT_BASE_URL=self.provider.url, DSW_CHAT_TIMEOUT=timeout,
-                           DSW_CHAT_TOOL_MODE=tool_mode):
+        setting_overrides = {"DSW_CHAT_BASE_URL": self.provider.url, "DSW_CHAT_TIMEOUT": timeout,
+                             "DSW_CHAT_TOOL_MODE": tool_mode}
+        if max_tool_calls is not None:
+            setting_overrides["DSW_CHAT_MAX_TOOL_CALLS"] = max_tool_calls
+        with self.settings(**setting_overrides):
             try:
                 process_chat_run(run, worker_id="fake-integration-worker")
             except ChatProviderError as exc:
@@ -248,6 +255,22 @@ class FakeProviderIntegrationTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
         self.assertTrue(run.events.filter(error_code="provider_malformed_tool_call").exists())
+
+    def test_tool_budget_gets_a_final_synthesis_turn(self):
+        run, error = self.run_mode("limit-tool", tool_mode="native", max_tool_calls=1)
+        self.assertIsNone(error)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertTrue(run.events.filter(name="tool_call_limit").exists())
+        self.assertTrue(run.events.filter(name="final_answer_request").exists())
+        self.assertEqual(run.assistant_message.text, "Alpha is documented here. [S1]")
+
+    def test_serialized_tool_markup_is_not_accepted_as_final_answer(self):
+        run, error = self.run_mode("serialized-tool", tool_mode="native")
+        self.assertEqual(error, "provider_no_final_answer")
+        run.refresh_from_db()
+        self.assertNotEqual(run.state, "completed")
+        self.assertTrue(run.events.filter(name="final_answer_rejected").exists())
 
     def test_timeout_connection_reset_and_malformed_json_are_classified(self):
         _run, error = self.run_mode("timeout", timeout=0.05)

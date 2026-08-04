@@ -1199,7 +1199,9 @@ def user_settings(request):
                     token_hash=ApiToken.hash_token(raw_token),
                     scopes=["projects:read", "documents:read", "tasks:read",
                             "documents:upload", "jobs:submit", "jobs:read",
-                            "reviews:write", "statistics:read"],
+                            "reviews:write", "statistics:read",
+                            "chat:read", "chat:write", "chat:retry",
+                            "support:read", "support:export"],
                 )
                 from django.contrib import messages
                 messages.success(

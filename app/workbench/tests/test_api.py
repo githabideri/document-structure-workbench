@@ -69,6 +69,10 @@ class ApiContractTests(TestCase):
         token = self.user.api_tokens.exclude(pk=self.token.pk).get()
         self.assertIn("documents:upload", token.scopes)
         self.assertIn("jobs:submit", token.scopes)
+        self.assertIn("chat:read", token.scopes)
+        self.assertIn("chat:write", token.scopes)
+        self.assertIn("chat:retry", token.scopes)
+        self.assertIn("support:export", token.scopes)
 
     def test_review_preference_is_mapped_to_model_choice(self):
         source = SourceDocument.objects.create(collection=self.project, filename="review.pdf")

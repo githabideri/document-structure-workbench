@@ -22,7 +22,7 @@
             <div class="form-group">
                 <label for="id_ui_language">{% trans "Interface language" %}</label>
                 <select name="ui_language" id="id_ui_language">
-                    {% for code, name in prefs.ui_language.field.choices %}
+                    {% for code, name in language_choices %}
                     <option value="{{ code }}" {% if prefs.ui_language == code %}selected{% endif %}>{{ name }}</option>
                     {% endfor %}
                 </select>

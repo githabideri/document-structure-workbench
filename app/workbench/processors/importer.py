@@ -52,6 +52,7 @@ from ..models import (
     PageRegion,
     ProcessingArtifact,
     ProcessingJob,
+    RegionCorrection,
     TableCandidate,
     TableExtraction,
 )
@@ -193,6 +194,11 @@ class ResultImporter:
 
     def _cleanup_existing_records(self, document: Document, result: ProcessorResult):
         """Clean up existing records for idempotent reimport."""
+        if RegionCorrection.objects.filter(region__job=self.job).exists():
+            raise ImportError(
+                "This processing revision has curator corrections and cannot be re-imported. "
+                "Create a new processing job to preserve the correction history."
+            )
         # Only clean records from THIS job (not other jobs' records)
         PageRegion.objects.filter(job=self.job).delete()
         ProcessingArtifact.objects.filter(job=self.job).delete()

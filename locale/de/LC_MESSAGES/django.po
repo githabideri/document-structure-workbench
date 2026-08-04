@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Document Structure Workbench 0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-02 19:12+0000\n"
+"POT-Creation-Date: 2026-08-04 14:48+0000\n"
 "PO-Revision-Date: 2026-08-02 18:40+0000\n"
 "Last-Translator: Document Structure Workbench Team\n"
 "Language-Team: German\n"
@@ -16,100 +16,1141 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: app/templates/base.html:7 app/templates/base.html:14
-#: app/templates/base.html:45
+#: app/templates/auth/login.html:3 app/templates/auth/login.html:7
+#: app/templates/auth/login.html:18
+msgid "Login"
+msgstr "Anmelden"
+
+#: app/templates/auth/login.html:3 app/templates/base.html:7
+#: app/templates/base.html:14 app/templates/base.html:58
 msgid "Document Structure Workbench"
 msgstr "Dokumentenstruktur-Arbeitsplatz"
 
-#: app/templates/base.html:17 app/templates/workbench/dashboard.html:3
-msgid "Dashboard"
-msgstr "Übersicht"
+#: app/templates/auth/login.html:11
+#| msgid "Filename"
+msgid "Username"
+msgstr "Benutzername"
 
-#: app/templates/base.html:18
-msgid "My Reviews"
-msgstr "Meine Bewertungen"
+#: app/templates/auth/login.html:15
+#: app/templates/workbench/user_settings.html:54
+msgid "Password"
+msgstr "Passwort"
 
-#: app/templates/base.html:19
+# Primary document workflow
+#: app/templates/base.html:17
+msgid "Home"
+msgstr "Start"
+
+#: app/templates/base.html:18 app/templates/workbench/collection_list.html:3
+#: app/templates/workbench/collection_list.html:8
 msgid "Projects"
 msgstr "Projekte"
 
-#: app/templates/base.html:20
-msgid "Guidelines"
-msgstr "Richtlinien"
+#: app/templates/base.html:19 app/templates/workbench/chat.html:87
+#: app/templates/workbench/collection_detail.html:15
+#: app/templates/workbench/collection_detail.html:27
+#: app/templates/workbench/document_list.html:3
+#: app/templates/workbench/document_list.html:8
+msgid "Documents"
+msgstr "Dokumente"
 
-#: app/templates/base.html:22
-msgid "Curator"
-msgstr "Kuratoren"
+#: app/templates/base.html:20 app/templates/workbench/search.html:3
+#: app/templates/workbench/search.html:10
+msgid "Search"
+msgstr "Suchen"
 
-#: app/templates/base.html:24 app/templates/workbench/user_settings.html:8
+#: app/templates/base.html:21 app/templates/workbench/chat.html:62
+msgid "Ask"
+msgstr "Fragen"
+
+#: app/templates/base.html:23 app/templates/workbench/review_list.html:28
+msgid "Review"
+msgstr "Bewerten"
+
+#: app/templates/base.html:25 app/templates/workbench/help.html:3
+msgid "Help"
+msgstr "Hilfe"
+
+#: app/templates/base.html:29 app/templates/workbench/user_settings.html:8
 msgid "Settings"
 msgstr "Einstellungen"
 
-#: app/templates/base.html:25
+#: app/templates/base.html:31 app/templates/workbench/curator_dashboard.html:3
+#: app/templates/workbench/curator_dashboard.html:7
+#: app/templates/workbench/dashboard.html:84
+msgid "Evaluation"
+msgstr "Evaluierung"
+
+#: app/templates/base.html:34
+msgid "Administration"
+msgstr "Administration"
+
+#: app/templates/base.html:36
 msgid "Logout"
 msgstr "Abmelden"
 
-#: app/templates/workbench/dashboard.html:8
+#: app/templates/workbench/_job_status_block.html:13
+#, python-format
+msgid "Processing: %(filename)s"
+msgstr "Verarbeitung: %(filename)s"
+
+#: app/templates/workbench/_job_status_block.html:17
+msgid "Processing progress"
+msgstr "Verarbeitungsfortschritt"
+
+#: app/templates/workbench/_job_status_block.html:18
+msgid "Upload received"
+msgstr "Upload empfangen"
+
+#: app/templates/workbench/_job_status_block.html:19
+msgid "Waiting for worker"
+msgstr "Warten auf einen Verarbeitungsdienst"
+
+#: app/templates/workbench/_job_status_block.html:20
+msgid "Submitting to Docling"
+msgstr "Übergabe an Docling"
+
+#: app/templates/workbench/_job_status_block.html:21
+msgid "Docling is analyzing the document"
+msgstr "Docling analysiert das Dokument"
+
+#: app/templates/workbench/_job_status_block.html:22
+msgid "Saving extracted results"
+msgstr "Extrahierte Ergebnisse werden gespeichert"
+
+#: app/templates/workbench/_job_status_block.html:23
+#: app/templates/workbench/collection_detail.html:41
+#: app/templates/workbench/dashboard.html:48
+#: app/templates/workbench/document_list.html:17
+msgid "Ready"
+msgstr "Bereit"
+
+#: app/templates/workbench/_job_status_block.html:28
+msgid ""
+"Processing has not reported a worker heartbeat recently. The worker may have "
+"stopped."
+msgstr ""
+"Die Verarbeitung hat seit einiger Zeit kein Lebenszeichen gemeldet. Der "
+"Verarbeitungsdienst wurde möglicherweise beendet."
+
+#: app/templates/workbench/_job_status_block.html:33
+msgid "The document is ready to inspect."
+msgstr "Das Dokument kann jetzt geprüft werden."
+
+#: app/templates/workbench/_job_status_block.html:35
+msgid "Processing produced partial results. This revision was not made active."
+msgstr ""
+"Die Verarbeitung lieferte unvollständige Ergebnisse. Diese Version wurde "
+"nicht aktiviert."
+
+#: app/templates/workbench/_job_status_block.html:45
+msgid "Elapsed:"
+msgstr "Vergangene Zeit:"
+
+#: app/templates/workbench/_job_status_block.html:46
+msgid "Worker heartbeat:"
+msgstr "Letztes Lebenszeichen:"
+
+#: app/templates/workbench/_job_status_block.html:46
+#: app/templates/workbench/_job_status_block.html:47
+msgid "ago"
+msgstr "zuvor"
+
+#: app/templates/workbench/_job_status_block.html:47
+msgid "Last processor response:"
+msgstr "Letzte Prozessorantwort:"
+
+#: app/templates/workbench/_job_status_block.html:48
+msgid "pages saved"
+msgstr "Seiten gespeichert"
+
+#: app/templates/workbench/_job_status_block.html:49
+msgid "tables found"
+msgstr "Tabellen gefunden"
+
+#: app/templates/workbench/_job_status_block.html:50
+msgid "Finished:"
+msgstr "Abgeschlossen:"
+
+#: app/templates/workbench/_job_status_block.html:55
+msgid "View Document"
+msgstr "Dokument anzeigen"
+
+#: app/templates/workbench/_job_status_block.html:56
+#: app/templates/workbench/_job_status_block.html:61
+#: app/templates/workbench/document_detail.html:16
+msgid "Back to Project"
+msgstr "Zurück zum Projekt"
+
+#: app/templates/workbench/_job_status_block.html:60
+msgid "Add another document"
+msgstr "Weiteres Dokument hinzufügen"
+
+#: app/templates/workbench/_job_status_block.html:67
+msgid "Resume polling"
+msgstr "Abfrage fortsetzen"
+
+#: app/templates/workbench/_job_status_block.html:68
+msgid "Retry result import"
+msgstr "Ergebnisimport wiederholen"
+
+#: app/templates/workbench/_job_status_block.html:72
+msgid "Mark failed"
+msgstr "Als fehlgeschlagen markieren"
+
+#: app/templates/workbench/chat.html:4 app/templates/workbench/chat.html:11
+msgid "Research conversations"
+msgstr "Recherchegespräche"
+
+#: app/templates/workbench/chat.html:10
+msgid "Evidence workspace"
+msgstr "Recherche-Arbeitsbereich"
+
+#: app/templates/workbench/chat.html:12
+msgid ""
+"Ask questions across selected archival documents and inspect the evidence "
+"behind every answer."
+msgstr ""
+"Stellen Sie Fragen zu ausgewählten Archivdokumenten und prüfen Sie die "
+"Belege hinter jeder Antwort."
+
+#: app/templates/workbench/chat.html:14
+msgid "New conversation"
+msgstr "Neues Gespräch"
+
+#: app/templates/workbench/chat.html:18 app/templates/workbench/chat.html:20
+msgid "Conversations"
+msgstr "Gespräche"
+
+#: app/templates/workbench/chat.html:26 app/templates/workbench/chat.html:40
+msgid "Untitled conversation"
+msgstr "Gespräch ohne Titel"
+
+#: app/templates/workbench/chat.html:30
+msgid "No conversations yet."
+msgstr "Noch keine Gespräche."
+
+#: app/templates/workbench/chat.html:35
+msgid "Conversation"
+msgstr "Gespräch"
+
+#: app/templates/workbench/chat.html:41
+msgid "Read-only research"
+msgstr "Recherche im Nur-Lese-Modus"
+
+#: app/templates/workbench/chat.html:43
+msgid "Evidence grounded"
+msgstr "Quellenbasiert"
+
+#: app/templates/workbench/chat.html:48
+msgid "You"
+msgstr "Sie"
+
+#: app/templates/workbench/chat.html:48
+msgid "DSW assistant"
+msgstr "DSW-Assistent"
+
+#: app/templates/workbench/chat.html:52 app/templates/workbench/chat.html:67
+msgid "Start a research conversation"
+msgstr "Recherchegespräch starten"
+
+#: app/templates/workbench/chat.html:52
+msgid "Ask a question about the selected documents."
+msgstr "Stellen Sie eine Frage zu den ausgewählten Dokumenten."
+
+#: app/templates/workbench/chat.html:55
+msgid "Working"
+msgstr "In Bearbeitung"
+
+#: app/templates/workbench/chat.html:61
+msgid "Ask a follow-up question"
+msgstr "Rückfrage stellen"
+
+#: app/templates/workbench/chat.html:68
+msgid ""
+"Choose the documents that should form the evidence scope, then ask your "
+"first question."
+msgstr ""
+"Wählen Sie die Dokumente für den Quellenumfang aus und stellen Sie "
+"anschließend Ihre erste Frage."
+
+#: app/templates/workbench/chat.html:73
+msgid "Evidence scope"
+msgstr "Evidenzumfang"
+
+#: app/templates/workbench/chat.html:76
+msgid "No accessible processed documents."
+msgstr "Keine zugänglichen verarbeiteten Dokumente."
+
+#: app/templates/workbench/chat.html:78
+msgid "Question"
+msgstr "Frage"
+
+#: app/templates/workbench/chat.html:79
+msgid "What does this document discuss?"
+msgstr "Worum geht es in diesem Dokument?"
+
+#: app/templates/workbench/chat.html:80
+msgid "Start conversation"
+msgstr "Gespräch starten"
+
+#: app/templates/workbench/chat.html:85
+#| msgid "Invented text"
+msgid "Evidence context"
+msgstr "Quellenkontext"
+
+#: app/templates/workbench/chat.html:88
+msgid "The frozen source scope for this conversation."
+msgstr "Der festgelegte Quellenumfang dieses Gesprächs."
+
+#: app/templates/workbench/chat.html:90
+#| msgid "Active processing"
+msgid "active revision"
+msgstr "aktive Revision"
+
+#: app/templates/workbench/chat.html:91
+#| msgid "No documents."
+msgid "No documents selected."
+msgstr "Keine Dokumente ausgewählt."
+
+#: app/templates/workbench/chat.html:96
+msgid "Latest evidence"
+msgstr "Aktuelle Belege"
+
+#: app/templates/workbench/chat.html:99
+#: app/templates/workbench/document_detail.html:32
+#: app/templates/workbench/document_detail.html:44
+#: app/templates/workbench/document_detail.html:130
+#: app/templates/workbench/search.html:17
+#| msgid "Pages"
+msgid "Page"
+msgstr "Seiten"
+
+#: app/templates/workbench/chat.html:100
+msgid "No matching evidence was found."
+msgstr "Keine passenden Belege gefunden."
+
+#: app/templates/workbench/collection_detail.html:8
+#: app/templates/workbench/document_new.html:18
+msgid "Project"
+msgstr "Projekt"
+
+#: app/templates/workbench/collection_detail.html:9
+#: app/templates/workbench/collection_list.html:9
+#: app/templates/workbench/collection_list.html:28
+#: app/templates/workbench/dashboard.html:14
+#: app/templates/workbench/dashboard.html:58
+#: app/templates/workbench/document_list.html:9
+#: app/templates/workbench/document_new.html:3
+msgid "Add document"
+msgstr "Dokument hinzufügen"
+
+#: app/templates/workbench/collection_detail.html:19
+msgid "Tables"
+msgstr "Tabellen"
+
+#: app/templates/workbench/collection_detail.html:23
+msgid "Reviews"
+msgstr "Bewertungen"
+
+#: app/templates/workbench/collection_detail.html:31
+msgid "Filename"
+msgstr "Dateiname"
+
+#: app/templates/workbench/collection_detail.html:32
+#: app/templates/workbench/user_settings.html:91
+msgid "Status"
+msgstr "Status"
+
+#: app/templates/workbench/collection_detail.html:33
+#: app/templates/workbench/collection_detail.html:41
+#: app/templates/workbench/document_list.html:17
+#| msgid "Upload received"
+msgid "Uploaded"
+msgstr "Hochgeladen"
+
+#: app/templates/workbench/collection_detail.html:34
+#: app/templates/workbench/collection_list.html:17
+#: app/templates/workbench/review_list.html:16
+#: app/templates/workbench/user_settings.html:92
+msgid "Actions"
+msgstr "Aktionen"
+
+#: app/templates/workbench/collection_detail.html:44
+msgid "Open"
+msgstr "Öffnen"
+
+#: app/templates/workbench/collection_detail.html:45
+msgid "View status"
+msgstr "Status anzeigen"
+
+#: app/templates/workbench/collection_detail.html:49
+#| msgid "The document is ready to inspect."
+msgid "No documents in this project yet."
+msgstr "Das Dokument kann jetzt geprüft werden."
+
+#: app/templates/workbench/collection_list.html:8
+msgid ""
+"Projects keep related source documents and their processing history together."
+msgstr ""
+"Projekte bündeln zusammengehörige Quelldokumente und ihre "
+"Verarbeitungshistorie."
+
+#: app/templates/workbench/collection_list.html:14
+#: app/templates/workbench/user_settings.html:88
+msgid "Name"
+msgstr "Name"
+
+#: app/templates/workbench/collection_list.html:15
+msgid "Type"
+msgstr "Typ"
+
+#: app/templates/workbench/collection_list.html:16
+#: app/templates/workbench/user_settings.html:90
+msgid "Created"
+msgstr "Erstellt"
+
+#: app/templates/workbench/collection_list.html:27
+#: app/templates/workbench/review_list.html:30
+msgid "View"
+msgstr "Ansehen"
+
+#: app/templates/workbench/collection_list.html:32
+msgid "No projects are available to you yet."
+msgstr "Ihnen sind noch keine Projekte zugewiesen."
+
+#: app/templates/workbench/dashboard.html:3
+msgid "Dashboard"
+msgstr "Übersicht"
+
+#: app/templates/workbench/dashboard.html:10
 #, python-format
 msgid "Welcome, %(username)s"
 msgstr "Willkommen, %(username)s"
 
-#: app/templates/workbench/dashboard.html:14
-msgid "Process a document"
-msgstr "Dokument verarbeiten"
-
-#: app/templates/workbench/dashboard.html:15
-msgid "Upload a PDF and extract its content"
-msgstr "PDF hochladen und Inhalte extrahieren"
-
-#: app/templates/workbench/dashboard.html:19
-msgid "Review results"
-msgstr "Ergebnisse prüfen"
+#: app/templates/workbench/dashboard.html:11
+msgid "Turn scans into structured documents you can inspect and improve."
+msgstr "Machen Sie aus Scans strukturierte Dokumente, die Sie prüfen und verbessern können."
 
 #: app/templates/workbench/dashboard.html:20
-msgid "Compare and evaluate extraction results"
-msgstr "Extraktionsergebnisse vergleichen und bewerten"
+msgid "Active processing"
+msgstr "Aktive Verarbeitung"
 
-#: app/templates/workbench/dashboard.html:24
-msgid "Learn with examples"
-msgstr "Mit Beispielen lernen"
+#: app/templates/workbench/dashboard.html:34
+msgid "Recent documents"
+msgstr "Neueste Dokumente"
 
-#: app/templates/workbench/dashboard.html:25
-msgid "Explore benchmark documents with ground truth"
-msgstr "Benchmark-Dokumente mit Referenzergebnissen erkunden"
-
-#: app/templates/workbench/dashboard.html:33
-msgid "Total Tasks"
-msgstr "Aufgaben gesamt"
-
-#: app/templates/workbench/dashboard.html:37
-msgid "Completed"
-msgstr "Abgeschlossen"
-
-#: app/templates/workbench/dashboard.html:41
-msgid "In Progress"
-msgstr "In Bearbeitung"
-
-#: app/templates/workbench/dashboard.html:45
-msgid "Available"
-msgstr "Verfügbar"
-
-#: app/templates/workbench/dashboard.html:49
-msgid "Needs Expert"
-msgstr "Sachverstand nötig"
+#: app/templates/workbench/dashboard.html:35
+#| msgid "View"
+msgid "View all"
+msgstr "Ansehen"
 
 #: app/templates/workbench/dashboard.html:55
-msgid "Start Next Review"
-msgstr "Nächste Bewertung starten"
+#: app/templates/workbench/document_list.html:20
+#| msgid "No documents."
+msgid "No documents yet"
+msgstr "Noch keine Dokumente."
 
 #: app/templates/workbench/dashboard.html:57
-msgid "View All Reviews"
-msgstr "Alle Bewertungen anzeigen"
+msgid "Add a PDF to begin building your project."
+msgstr "Fügen Sie eine PDF-Datei hinzu, um Ihr Projekt zu beginnen."
+
+#: app/templates/workbench/dashboard.html:60
+msgid "You can view documents after a project editor adds them."
+msgstr "Sie können Dokumente ansehen, sobald ein Projektbearbeiter sie hinzugefügt hat."
+
+#: app/templates/workbench/dashboard.html:69
+msgid "Items needing attention"
+msgstr "Zu prüfende Elemente"
+
+#: app/templates/workbench/dashboard.html:84
+msgid "Assigned comparison and review work."
+msgstr "Zugewiesene Vergleichs- und Bewertungsaufgaben."
+
+#: app/templates/workbench/dashboard.html:85
+#| msgid "My Reviews"
+msgid "Open reviews"
+msgstr "Offene Bewertungen"
+
+#: app/templates/workbench/dashboard.html:87
+#, python-format
+msgid ""
+"%(in_progress)s in progress · %(needs_expert)s need expert attention · "
+"%(completed)s completed"
+msgstr ""
+"%(in_progress)s in Bearbeitung · %(needs_expert)s benötigen fachliche "
+"Prüfung · %(completed)s abgeschlossen"
+
+#: app/templates/workbench/document_detail.html:9
+#| msgid "Documents"
+msgid "Document workspace"
+msgstr "Dokumenten-Arbeitsbereich"
+
+#: app/templates/workbench/document_detail.html:12
+msgid "Inspect the original scan and the structure detected by the processor."
+msgstr "Prüfen Sie den Originalscan und die vom Verarbeitungsdienst erkannte Struktur."
+
+#: app/templates/workbench/document_detail.html:13
+#| msgid "Pages"
+msgid "pages"
+msgstr "Seiten"
+
+#: app/templates/workbench/document_detail.html:16
+msgid "Return to conversation"
+msgstr "Zum Gespräch zurückkehren"
+
+#: app/templates/workbench/document_detail.html:20
+#| msgid "Documents"
+msgid "Document pages"
+msgstr "Dokumentseiten"
+
+#: app/templates/workbench/document_detail.html:22
+msgid "Pages"
+msgstr "Seiten"
+
+#: app/templates/workbench/document_detail.html:34
+msgid "No pages were imported."
+msgstr "Es wurden keine Seiten importiert."
+
+#: app/templates/workbench/document_detail.html:38
+msgid "Original page scan"
+msgstr "Originalscan der Seite"
+
+#: app/templates/workbench/document_detail.html:40
+msgid "Original scan"
+msgstr "Originalscan"
+
+#: app/templates/workbench/document_detail.html:43
+msgid "Previous page"
+msgstr "Vorherige Seite"
+
+#: app/templates/workbench/document_detail.html:45
+#| msgid "Source page"
+msgid "Next page"
+msgstr "Nächste Seite"
+
+#: app/templates/workbench/document_detail.html:50
+msgid "Scan controls"
+msgstr "Scan-Steuerung"
+
+#: app/templates/workbench/document_detail.html:51
+msgid "Zoom out"
+msgstr "Verkleinern"
+
+#: app/templates/workbench/document_detail.html:53
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+#: app/templates/workbench/document_detail.html:54
+msgid "Fit"
+msgstr "Einpassen"
+
+#: app/templates/workbench/document_detail.html:58
+msgid "Original document page"
+msgstr "Originaldokumentseite"
+
+#: app/templates/workbench/document_detail.html:59
+msgid "Detected regions"
+msgstr "Erkannte Bereiche"
+
+#: app/templates/workbench/document_detail.html:65
+msgid "suppressed"
+msgstr "ausgeblendet"
+
+#: app/templates/workbench/document_detail.html:70
+msgid "Select detected region"
+msgstr "Erkannten Bereich auswählen"
+
+#: app/templates/workbench/document_detail.html:79
+msgid "Region filters"
+msgstr "Bereichsfilter"
+
+#: app/templates/workbench/document_detail.html:80
+msgid "Show"
+msgstr "Anzeigen"
+
+#: app/templates/workbench/document_detail.html:81
+msgid "All"
+msgstr "Alle"
+
+#: app/templates/workbench/document_detail.html:82
+msgid "Show suppressed"
+msgstr "Ausgeblendete anzeigen"
+
+#: app/templates/workbench/document_detail.html:85
+msgid "Detected structure"
+msgstr "Erkannte Struktur"
+
+#: app/templates/workbench/document_detail.html:85
+msgid "click a region to inspect it"
+msgstr "Klicken Sie auf einen Bereich, um ihn zu prüfen"
+
+#: app/templates/workbench/document_detail.html:87
+msgid "No page image is available for this page."
+msgstr "Für diese Seite ist kein Bild verfügbar."
+
+#: app/templates/workbench/document_detail.html:91
+#: app/templates/workbench/document_detail.html:93
+msgid "Extracted content"
+msgstr "Extrahierte Inhalte"
+
+#: app/templates/workbench/document_detail.html:94
+#| msgid "Ready"
+msgid "Read-only"
+msgstr "Bereit"
+
+#: app/templates/workbench/document_detail.html:99
+msgid "Suppressed"
+msgstr "Ausgeblendet"
+
+#: app/templates/workbench/document_detail.html:100
+msgid "Region"
+msgstr "Bereich"
+
+#: app/templates/workbench/document_detail.html:102
+msgid "No text was extracted for this region."
+msgstr "Für diesen Bereich wurde kein Text extrahiert."
+
+#: app/templates/workbench/document_detail.html:104
+msgid "Suggest a text correction"
+msgstr "Textkorrektur vorschlagen"
+
+#: app/templates/workbench/document_detail.html:107
+msgid "Replacement text"
+msgstr "Ersatztext"
+
+#: app/templates/workbench/document_detail.html:109
+#| msgid "Comment (optional)"
+msgid "Reason (optional)"
+msgstr "Begründung (optional)"
+
+#: app/templates/workbench/document_detail.html:110
+msgid "Save correction"
+msgstr "Korrektur speichern"
+
+#: app/templates/workbench/document_detail.html:114
+msgid "Region type"
+msgstr "Bereichstyp"
+
+#: app/templates/workbench/document_detail.html:115
+#| msgid "Change password"
+msgid "Change type"
+msgstr "Typ ändern"
+
+#: app/templates/workbench/document_detail.html:119
+msgid "Suppress region"
+msgstr "Bereich ausblenden"
+
+#: app/templates/workbench/document_detail.html:122
+msgid "Restore region"
+msgstr "Bereich wiederherstellen"
+
+#: app/templates/workbench/document_detail.html:126
+#| msgid "Collections"
+msgid "Correction history"
+msgstr "Korrekturverlauf"
+
+#: app/templates/workbench/document_detail.html:127
+msgid "Undo"
+msgstr "Rückgängig"
+
+#: app/templates/workbench/document_detail.html:127
+#| msgid "No collections yet."
+msgid "No corrections yet."
+msgstr "Noch keine Korrekturen."
+
+#: app/templates/workbench/document_detail.html:131
+#: app/templates/workbench/review_detail.html:188
+msgid "Confidence"
+msgstr "Konfidenz"
+
+#: app/templates/workbench/document_detail.html:132
+#| msgid "Processing progress"
+msgid "Processor"
+msgstr "Verarbeitungsdienst"
+
+#: app/templates/workbench/document_detail.html:132
+#| msgid "Documents"
+msgid "Document processor"
+msgstr "Dokumentenverarbeitung"
+
+#: app/templates/workbench/document_detail.html:134
+#| msgid "Technical Details"
+msgid "Technical details"
+msgstr "Technische Details"
+
+#: app/templates/workbench/document_detail.html:136
+#| msgid "Processing progress"
+msgid "Processing job"
+msgstr "Verarbeitungsauftrag"
+
+#: app/templates/workbench/document_detail.html:137
+#| msgid "Your preference:"
+msgid "Original reference"
+msgstr "Originalreferenz"
+
+#: app/templates/workbench/document_detail.html:138
+msgid "Coordinates"
+msgstr "Koordinaten"
+
+#: app/templates/workbench/document_detail.html:144
+msgid "Full page text"
+msgstr "Vollständiger Seitentext"
+
+#: app/templates/workbench/document_detail.html:145
+msgid "No page text was imported."
+msgstr "Es wurde kein Seitentext importiert."
+
+#: app/templates/workbench/document_detail.html:147
+msgid "Tables on this page"
+msgstr "Tabellen auf dieser Seite"
+
+#: app/templates/workbench/document_detail.html:147
+msgid "No readable table extraction is available."
+msgstr "Keine lesbare Tabellenerkennung verfügbar."
+
+#: app/templates/workbench/document_list.html:8
+msgid "Uploaded sources and their latest analysis status."
+msgstr "Hochgeladene Quellen und ihr aktueller Analysestatus."
+
+#: app/templates/workbench/document_list.html:20
+msgid "Documents you can access will appear here."
+msgstr "Dokumente, auf die Sie zugreifen können, werden hier angezeigt."
+
+#: app/templates/workbench/document_new.html:7
+#| msgid "No documents."
+msgid "New document"
+msgstr "Keine Dokumente."
+
+#: app/templates/workbench/document_new.html:8
+#: app/templates/workbench/help.html:11
+msgid "Add a document"
+msgstr "Dokument hinzufügen"
+
+#: app/templates/workbench/document_new.html:9
+msgid ""
+"Choose where this document belongs, then upload the original PDF for "
+"analysis."
+msgstr ""
+"Wählen Sie den Zielort für dieses Dokument und laden Sie anschließend die "
+"Original-PDF zur Analyse hoch."
+
+#: app/templates/workbench/document_new.html:20
+msgid "Choose a project"
+msgstr "Projekt auswählen"
+
+#: app/templates/workbench/document_new.html:25
+msgid "The project controls who can see and work with this document."
+msgstr "Das Projekt legt fest, wer dieses Dokument sehen und bearbeiten darf."
+
+#: app/templates/workbench/document_new.html:32
+#: app/templates/workbench/review_list.html:12
+msgid "Document"
+msgstr "Dokument"
+
+#: app/templates/workbench/document_new.html:35
+msgid "Choose a PDF or drop it here"
+msgstr "PDF auswählen oder hier ablegen"
+
+#: app/templates/workbench/document_new.html:36
+msgid "Maximum file size: 50 MB"
+msgstr "Maximale Dateigröße: 50 MB"
+
+#: app/templates/workbench/document_new.html:45
+msgid "Analysis"
+msgstr "Analyse"
+
+#: app/templates/workbench/document_new.html:48
+msgid "Standard analysis"
+msgstr "Standardanalyse"
+
+#: app/templates/workbench/document_new.html:48
+msgid "Extract page images, text, regions, and tables for inspection."
+msgstr "Seitenbilder, Text, Bereiche und Tabellen zur Prüfung extrahieren."
+
+#: app/templates/workbench/document_new.html:52
+msgid "Advanced evaluation options"
+msgstr "Erweiterte Evaluierungsoptionen"
+
+#: app/templates/workbench/document_new.html:53
+msgid ""
+"Use these only when comparing extraction methods or creating benchmark "
+"reviews."
+msgstr ""
+"Verwenden Sie diese Optionen nur zum Vergleich von Extraktionsmethoden "
+"oder für Benchmark-Bewertungen."
+
+#: app/templates/workbench/document_new.html:67
+msgid "What happens next"
+msgstr "Wie es weitergeht"
+
+#: app/templates/workbench/document_new.html:68
+msgid ""
+"The upload enters a processing queue. You will see when a worker starts, "
+"when Docling is analyzing it, and when the extracted results are ready."
+msgstr ""
+"Der Upload wird in eine Verarbeitungsschlange eingereiht. Sie sehen, wann "
+"ein Worker startet, Docling das Dokument analysiert und die extrahierten "
+"Ergebnisse bereitstehen."
+
+#: app/templates/workbench/document_new.html:72
+msgid "Upload and analyze"
+msgstr "Hochladen und analysieren"
+
+#: app/templates/workbench/document_new.html:73
+#: app/templates/workbench/project_process.html:87
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#: app/templates/workbench/document_new.html:78
+msgid "You do not have an editable project"
+msgstr "Sie haben kein bearbeitbares Projekt"
+
+#: app/templates/workbench/document_new.html:79
+msgid "Ask a project owner for Editor access before uploading a document."
+msgstr "Bitten Sie vor dem Upload eines Dokuments einen Projekteigentümer um Bearbeitungsrechte."
+
+#: app/templates/workbench/document_new.html:80
+msgid "View projects"
+msgstr "Projekte anzeigen"
+
+#: app/templates/workbench/guidelines.html:3
+#: app/templates/workbench/guidelines.html:7
+#: app/templates/workbench/review_detail.html:210
+msgid "Review Guidelines"
+msgstr "Bewertungsrichtlinien"
+
+#: app/templates/workbench/guidelines.html:10
+msgid "Structure Errors"
+msgstr "Strukturfehler"
+
+#: app/templates/workbench/guidelines.html:11
+msgid "These errors relate to the table's grid structure."
+msgstr "Diese Fehler betreffen die Gitterstruktur der Tabelle."
+
+#: app/templates/workbench/guidelines.html:13
+#: app/templates/workbench/review_detail.html:160
+msgid "Wrong row count"
+msgstr "Falsche Zeilenzahl"
+
+#: app/templates/workbench/guidelines.html:13
+msgid "The table has too many or too few rows compared to the source."
+msgstr ""
+"Die Tabelle hat im Vergleich zur Quelle zu viele oder zu wenige Zeilen."
+
+#: app/templates/workbench/guidelines.html:14
+#: app/templates/workbench/review_detail.html:161
+msgid "Wrong column count"
+msgstr "Falsche Spaltenzahl"
+
+#: app/templates/workbench/guidelines.html:14
+msgid "The table has too many or too few columns."
+msgstr "Die Tabelle hat zu viele oder zu wenige Spalten."
+
+#: app/templates/workbench/guidelines.html:15
+#: app/templates/workbench/review_detail.html:162
+msgid "Bad rowspan"
+msgstr "Falsche Zeilenüberspannung"
+
+#: app/templates/workbench/guidelines.html:15
+msgid ""
+"A cell that should span multiple rows does not, or spans the wrong number."
+msgstr ""
+"Eine Zelle, die mehrere Zeilen überspannen sollte, tut dies nicht oder "
+"spannt die falsche Anzahl."
+
+#: app/templates/workbench/guidelines.html:16
+#: app/templates/workbench/review_detail.html:163
+msgid "Bad colspan"
+msgstr "Falsche Spaltenüberspannung"
+
+#: app/templates/workbench/guidelines.html:16
+msgid ""
+"A cell that should span multiple columns does not, or spans the wrong number."
+msgstr ""
+"Eine Zelle, die mehrere Spalten überspannen sollte, tut dies nicht oder "
+"spannt die falsche Anzahl."
+
+#: app/templates/workbench/guidelines.html:17
+#: app/templates/workbench/review_detail.html:164
+msgid "Wrong cell assignment"
+msgstr "Falsche Zellenzuordnung"
+
+#: app/templates/workbench/guidelines.html:17
+msgid "Text is placed in the wrong cell (wrong row or column)."
+msgstr "Text befindet sich in der falschen Zelle (falsche Zeile oder Spalte)."
+
+#: app/templates/workbench/guidelines.html:18
+#: app/templates/workbench/review_detail.html:165
+msgid "Missing cell"
+msgstr "Fehlende Zelle"
+
+#: app/templates/workbench/guidelines.html:18
+msgid "A cell that should exist is completely absent."
+msgstr "Eine Zelle, die vorhanden sein sollte, fehlt vollständig."
+
+#: app/templates/workbench/guidelines.html:19
+#: app/templates/workbench/review_detail.html:166
+msgid "Extra cell"
+msgstr "Zusätzliche Zelle"
+
+#: app/templates/workbench/guidelines.html:19
+msgid "A cell that should not exist is present."
+msgstr "Eine Zelle, die nicht vorhanden sein sollte, ist da."
+
+#: app/templates/workbench/guidelines.html:20
+#: app/templates/workbench/review_detail.html:167
+msgid "Header error"
+msgstr "Kopfzeilenfehler"
+
+#: app/templates/workbench/guidelines.html:20
+msgid ""
+"A header row is treated as body data, or body data is treated as a header."
+msgstr ""
+"Eine Kopfzeile wird als Datenzeile behandelt, oder eine Datenzeile wird als "
+"Kopfzeile behandelt."
+
+#: app/templates/workbench/guidelines.html:25
+msgid "Text Errors"
+msgstr "Textfehler"
+
+#: app/templates/workbench/guidelines.html:26
+msgid "These errors relate to the text content within cells."
+msgstr "Diese Fehler betreffen den Textinhalt in den Zellen."
+
+#: app/templates/workbench/guidelines.html:28
+#: app/templates/workbench/review_detail.html:168
+msgid "Missing text"
+msgstr "Fehlender Text"
+
+#: app/templates/workbench/guidelines.html:28
+msgid "Text that should be in a cell is absent."
+msgstr "Text, der in einer Zelle stehen sollte, fehlt."
+
+#: app/templates/workbench/guidelines.html:29
+#: app/templates/workbench/review_detail.html:169
+msgid "Invented text"
+msgstr "Erfundener Text"
+
+#: app/templates/workbench/guidelines.html:29
+msgid "Text appears that is not in the source document."
+msgstr "Text erscheint, der nicht im Quelldokument vorhanden ist."
+
+#: app/templates/workbench/guidelines.html:30
+#: app/templates/workbench/review_detail.html:170
+msgid "Numeric error"
+msgstr "Zahlenfehler"
+
+#: app/templates/workbench/guidelines.html:30
+msgid ""
+"A number is wrong (wrong digit, missing minus sign, wrong decimal separator)."
+msgstr ""
+"Eine Zahl ist falsch (falsche Ziffer, fehlendes Minuszeichen, falscher "
+"Dezimaltrenner)."
+
+#: app/templates/workbench/guidelines.html:31
+#: app/templates/workbench/review_detail.html:171
+msgid "OCR/transcription error"
+msgstr "OCR-/Transkriptionsfehler"
+
+#: app/templates/workbench/guidelines.html:31
+#| msgid "Text is garbled or misread (e.g., \"0\" for \"O\", \"1\" for \"l\")."
+msgid "Text is garbled or misread (e.g., \\"
+msgstr ""
+"Text ist unleserlich oder falsch gelesen (z. B. \"0\" statt \"O\", \"1\" "
+"statt \"l\")."
+
+#: app/templates/workbench/guidelines.html:36
+msgid "Detection and Crop Errors"
+msgstr "Erkennungs- und Zuschnittfehler"
+
+#: app/templates/workbench/guidelines.html:37
+msgid ""
+"These errors relate to how the table was detected and cropped from the page."
+msgstr ""
+"Diese Fehler betreffen, wie die Tabelle erkannt und von der Seite "
+"ausgeschnitten wurde."
+
+#: app/templates/workbench/guidelines.html:39
+#: app/templates/workbench/review_detail.html:172
+msgid "Bad crop"
+msgstr "Falscher Ausschnitt"
+
+#: app/templates/workbench/guidelines.html:39
+msgid "Part of the table is cut off, or adjacent text/paragraphs are included."
+msgstr ""
+"Ein Teil der Tabelle ist abgeschnitten, oder benachbarter Text/Absätze sind "
+"enthalten."
+
+#: app/templates/workbench/guidelines.html:40
+#: app/templates/workbench/review_detail.html:173
+msgid "Bad detection"
+msgstr "Falsche Erkennung"
+
+#: app/templates/workbench/guidelines.html:40
+msgid "Two tables were merged into one, or one table was split into two."
+msgstr ""
+"Zwei Tabellen wurden zu einer zusammengefasst, oder eine Tabelle wurde in "
+"zwei aufgeteilt."
+
+#: app/templates/workbench/guidelines.html:45
+msgid "Scoring Guide"
+msgstr "Bewertungsskala"
+
+#: app/templates/workbench/guidelines.html:49
+msgid "Score"
+msgstr "Punktzahl"
+
+#: app/templates/workbench/guidelines.html:50
+msgid "Meaning"
+msgstr "Bedeutung"
+
+#: app/templates/workbench/guidelines.html:56
+msgid "Correct — no errors or only trivial formatting differences."
+msgstr "Korrekt — keine Fehler oder nur unerhebliche Formatunterschiede."
+
+#: app/templates/workbench/guidelines.html:60
+msgid "Minor correction — small errors that don't affect understanding."
+msgstr ""
+"Geringfügige Korrektur — kleine Fehler, die das Verständnis nicht "
+"beeinträchtigen."
+
+#: app/templates/workbench/guidelines.html:64
+msgid "Major correction — significant errors that require manual fixing."
+msgstr ""
+"Erhebliche Korrektur — signifikante Fehler, die manuelles Beheben erfordern."
+
+#: app/templates/workbench/guidelines.html:68
+msgid "Unusable — the output cannot be used without complete re-entry."
+msgstr ""
+"Nicht nutzbar — das Ergebnis kann ohne vollständige Neueingabe nicht "
+"verwendet werden."
+
+#: app/templates/workbench/guidelines.html:75
+#: app/templates/workbench/user_settings.html:9
+msgid "Back to Dashboard"
+msgstr "Zurück zur Übersicht"
+
+#: app/templates/workbench/help.html:7
+msgid "How it works"
+msgstr "So funktioniert es"
+
+#: app/templates/workbench/help.html:8
+msgid "From scan to inspectable document"
+msgstr "Vom Scan zum prüfbaren Dokument"
+
+#: app/templates/workbench/help.html:9
+msgid ""
+"The workbench keeps the original scan connected to everything extracted from "
+"it."
+msgstr ""
+"Der Arbeitsbereich verknüpft den Originalscan mit allem, was daraus "
+"extrahiert wurde."
+
+#: app/templates/workbench/help.html:11
+#| msgid "Choose a project you can edit."
+msgid "Choose its project and upload a PDF."
+msgstr "Wählen Sie ein Projekt aus, das Sie bearbeiten können."
+
+#: app/templates/workbench/help.html:12
+msgid "Follow the analysis"
+msgstr "Analyse verfolgen"
+
+#: app/templates/workbench/help.html:12
+msgid ""
+"See whether the document is waiting, being analyzed, ready, or needs "
+"attention."
+msgstr ""
+"Sehen Sie, ob das Dokument wartet, analysiert wird, bereit ist oder "
+"Aufmerksamkeit benötigt."
+
+#: app/templates/workbench/help.html:13
+msgid "Inspect the result"
+msgstr "Ergebnis prüfen"
+
+#: app/templates/workbench/help.html:13
+msgid ""
+"Open the processed document and compare extracted content with its source."
+msgstr ""
+"Öffnen Sie das verarbeitete Dokument und vergleichen Sie die extrahierten "
+"Inhalte mit der Quelle."
+
+#: app/templates/workbench/help.html:15
+msgid ""
+"Comparison reviews and technical evaluation tools are available separately "
+"to users who need them."
+msgstr ""
+"Vergleichsbewertungen und technische Auswertungswerkzeuge stehen den "
+"jeweiligen Benutzern separat zur Verfügung."
+
+#: app/templates/workbench/job_status.html:3
+#, python-format
+msgid "Job Status — %(filename)s"
+msgstr "Auftragsstatus — %(filename)s"
+
+#: app/templates/workbench/project_process.html:3
+#: app/templates/workbench/project_process.html:46
+#, python-format
+msgid "Upload Document — %(name)s"
+msgstr "Dokument hochladen — %(name)s"
+
+#: app/templates/workbench/project_process.html:53
+#| msgid "Processing progress"
+msgid "Processing Purpose"
+msgstr "Verarbeitungszweck"
+
+#: app/templates/workbench/project_process.html:65
+msgid "PDF File"
+msgstr "PDF-Datei"
+
+#: app/templates/workbench/project_process.html:68
+msgid "Click to choose or drag & drop a PDF here"
+msgstr "Klicken Sie zur Auswahl oder ziehen Sie eine PDF-Datei hierher."
+
+#: app/templates/workbench/project_process.html:71
+msgid "Maximum 50 MB. PDF only."
+msgstr "Maximal 50 MB. Nur PDF-Dateien."
+
+#: app/templates/workbench/project_process.html:75
+#| msgid "What happens next"
+msgid "What happens next:"
+msgstr "Wie es weitergeht"
+
+#: app/templates/workbench/project_process.html:77
+msgid "Document received and validated"
+msgstr "Dokument empfangen und geprüft"
+
+#: app/templates/workbench/project_process.html:78
+#| msgid "Processing progress"
+msgid "Processing queued"
+msgstr "Verarbeitung eingereiht"
+
+#: app/templates/workbench/project_process.html:79
+msgid "Pages extracted and images generated"
+msgstr "Seiten extrahiert und Bilder erzeugt"
+
+#: app/templates/workbench/project_process.html:80
+msgid "Tables and regions detected"
+msgstr "Tabellen und Bereiche erkannt"
+
+#: app/templates/workbench/project_process.html:81
+msgid "Results imported into the workspace"
+msgstr "Ergebnisse in den Arbeitsbereich importiert"
+
+#: app/templates/workbench/project_process.html:82
+msgid "You can view results in the document workspace"
+msgstr "Sie können die Ergebnisse im Dokumenten-Arbeitsbereich ansehen."
+
+#: app/templates/workbench/project_process.html:86
+#| msgid "Upload received"
+msgid "Upload & Process"
+msgstr "Hochladen und verarbeiten"
 
 #: app/templates/workbench/review_detail.html:3
 #, python-format
 msgid "Review: %(document.external_id)s - %(table_candidate.stable_table_id)s"
-msgstr "Bewertung: %(document.external_id)s - %(table_candidate.stable_table_id)s"
+msgstr ""
+"Bewertung: %(document.external_id)s - %(table_candidate.stable_table_id)s"
 
 #: app/templates/workbench/review_detail.html:38
 #, python-format
@@ -117,38 +1158,47 @@ msgid "%(document.external_id)s — Page %(page_number)s — %(table_id)s"
 msgstr "%(document.external_id)s — Seite %(page_number)s — %(table_id)s"
 
 #: app/templates/workbench/review_detail.html:40
+#: app/templates/workbench/review_reveal.html:28
 msgid "Source page"
 msgstr "Quellenseite"
 
 #: app/templates/workbench/review_detail.html:43
+#: app/templates/workbench/review_reveal.html:31
 msgid "Table crop"
 msgstr "Tabellenausschnitt"
 
 #: app/templates/workbench/review_detail.html:49
+#: app/templates/workbench/review_reveal.html:38
 msgid "Review Submitted"
 msgstr "Bewertung übermittelt"
 
 #: app/templates/workbench/review_detail.html:50
+#: app/templates/workbench/review_reveal.html:39
 msgid "Your preference:"
 msgstr "Ihre Präferenz:"
 
 #: app/templates/workbench/review_detail.html:51
+#: app/templates/workbench/review_reveal.html:40
 msgid "Confidence:"
-msgstr "Sicherheit:"
+msgstr "Konfidenz:"
 
 #: app/templates/workbench/review_detail.html:52
+#: app/templates/workbench/review_reveal.html:41
 msgid "Comment:"
 msgstr "Kommentar:"
 
 #: app/templates/workbench/review_detail.html:56
+#: app/templates/workbench/review_reveal.html:59
 msgid "Ground Truth"
 msgstr "Referenzergebnis"
 
 #: app/templates/workbench/review_detail.html:59
+#: app/templates/workbench/review_reveal.html:62
 msgid "Rows:"
 msgstr "Zeilen:"
 
 #: app/templates/workbench/review_detail.html:59
+#: app/templates/workbench/review_reveal.html:62
 msgid "Columns:"
 msgstr "Spalten:"
 
@@ -156,39 +1206,44 @@ msgstr "Spalten:"
 msgid "Technical Details"
 msgstr "Technische Details"
 
-#: app/templates/workbench/review_detail.html:64
+#: app/templates/workbench/review_detail.html:65
+#: app/templates/workbench/review_reveal.html:45
 msgid "Candidate X was:"
 msgstr "Kandidat X war:"
 
-#: app/templates/workbench/review_detail.html:65
+#: app/templates/workbench/review_detail.html:71
+#: app/templates/workbench/review_reveal.html:51
 msgid "Candidate Y was:"
 msgstr "Kandidat Y war:"
 
-#: app/templates/workbench/review_detail.html:75
+#: app/templates/workbench/review_detail.html:78
+#: app/templates/workbench/review_reveal.html:68
 msgid "Your post-reveal note:"
 msgstr "Ihr Nachtrag:"
 
-#: app/templates/workbench/review_detail.html:79
+#: app/templates/workbench/review_detail.html:82
+#: app/templates/workbench/review_reveal.html:72
 msgid "Add a post-reveal note:"
 msgstr "Nachtrag hinzufügen:"
 
-#: app/templates/workbench/review_detail.html:81
+#: app/templates/workbench/review_detail.html:84
+#: app/templates/workbench/review_reveal.html:74
 msgid "Save Note"
 msgstr "Nachtrag speichern"
 
-#: app/templates/workbench/review_detail.html:92
+#: app/templates/workbench/review_detail.html:95
 msgid "Candidate X:"
 msgstr "Kandidat X:"
 
-#: app/templates/workbench/review_detail.html:92
+#: app/templates/workbench/review_detail.html:95
 msgid "Candidate Y:"
 msgstr "Kandidat Y:"
 
-#: app/templates/workbench/review_detail.html:96
+#: app/templates/workbench/review_detail.html:99
 msgid "Blinded Review:"
 msgstr "Verblindete Bewertung:"
 
-#: app/templates/workbench/review_detail.html:96
+#: app/templates/workbench/review_detail.html:99
 msgid ""
 "Candidates X and Y are anonymous. Model identities will be revealed after "
 "you submit your review."
@@ -196,169 +1251,189 @@ msgstr ""
 "Kandidat X und Kandidat Y sind anonym. Die Modelle werden erst nach "
 "Übermittlung Ihrer Bewertung enthüllt."
 
-#: app/templates/workbench/review_detail.html:102
-#: app/templates/workbench/review_detail.html:178
-#, python-format
-msgid "Candidate %(label_a)s"
-msgstr "Kandidat %(label_a)s"
+#: app/templates/workbench/review_detail.html:105
+#: app/templates/workbench/review_detail.html:179
+#| msgid "Candidate X:"
+msgid "Candidate X"
+msgstr "Kandidat X:"
 
-#: app/templates/workbench/review_detail.html:103
-#: app/templates/workbench/review_detail.html:114
+#: app/templates/workbench/review_detail.html:106
+#: app/templates/workbench/review_detail.html:117
 msgid "Dimensions:"
 msgstr "Abmessungen:"
 
-#: app/templates/workbench/review_detail.html:105
-#: app/templates/workbench/review_detail.html:116
+#: app/templates/workbench/review_detail.html:108
+#: app/templates/workbench/review_detail.html:119
 msgid "Warnings:"
 msgstr "Warnungen:"
 
-#: app/templates/workbench/review_detail.html:113
-#: app/templates/workbench/review_detail.html:180
-#, python-format
-msgid "Candidate %(label_b)s"
-msgstr "Kandidat %(label_b)s"
+#: app/templates/workbench/review_detail.html:116
+#: app/templates/workbench/review_detail.html:181
+#| msgid "Candidate Y:"
+msgid "Candidate Y"
+msgstr "Kandidat Y:"
 
-#: app/templates/workbench/review_detail.html:125
+#: app/templates/workbench/review_detail.html:128
 msgid "Review Form"
 msgstr "Bewertungsformular"
 
-#: app/templates/workbench/review_detail.html:132
-#, python-format
-msgid "Candidate %(label_a)s — Structure"
+#: app/templates/workbench/review_detail.html:133
+#| msgid "Candidate %(label_a)s — Structure"
+msgid "Candidate X — Structure"
 msgstr "Kandidat %(label_a)s — Struktur"
 
-#: app/templates/workbench/review_detail.html:135
-#: app/templates/workbench/review_detail.html:147
+#: app/templates/workbench/review_detail.html:136
+#: app/templates/workbench/review_detail.html:148
 msgid "3 Correct"
 msgstr "3 Korrekt"
 
-#: app/templates/workbench/review_detail.html:137
-#: app/templates/workbench/review_detail.html:149
+#: app/templates/workbench/review_detail.html:138
+#: app/templates/workbench/review_detail.html:150
 msgid "2 Minor"
 msgstr "2 Geringe Fehler"
 
-#: app/templates/workbench/review_detail.html:139
-#: app/templates/workbench/review_detail.html:151
+#: app/templates/workbench/review_detail.html:140
+#: app/templates/workbench/review_detail.html:152
 msgid "1 Major"
 msgstr "1 Große Fehler"
 
-#: app/templates/workbench/review_detail.html:141
-#: app/templates/workbench/review_detail.html:153
+#: app/templates/workbench/review_detail.html:142
+#: app/templates/workbench/review_detail.html:154
 msgid "0 Unusable"
 msgstr "0 Nicht nutzbar"
 
-#: app/templates/workbench/review_detail.html:144
-#, python-format
-msgid "Candidate %(label_b)s — Structure"
-msgstr "Kandidat %(label_b)s — Struktur"
+#: app/templates/workbench/review_detail.html:145
+#| msgid "Candidate %(label_a)s — Structure"
+msgid "Candidate Y — Structure"
+msgstr "Kandidat %(label_a)s — Struktur"
 
-#: app/templates/workbench/review_detail.html:157
+#: app/templates/workbench/review_detail.html:158
 msgid "Error Categories (select all that apply)"
 msgstr "Fehlerkategorien (alle zutreffenden auswählen)"
 
-#: app/templates/workbench/review_detail.html:159
-msgid "Wrong row count"
-msgstr "Falsche Zeilenzahl"
-
-#: app/templates/workbench/review_detail.html:160
-msgid "Wrong column count"
-msgstr "Falsche Spaltenzahl"
-
-#: app/templates/workbench/review_detail.html:161
-msgid "Bad rowspan"
-msgstr "Falsche Zeilenüberspannung"
-
-#: app/templates/workbench/review_detail.html:162
-msgid "Bad colspan"
-msgstr "Falsche Spaltenüberspannung"
-
-#: app/templates/workbench/review_detail.html:163
-msgid "Wrong cell assignment"
-msgstr "Falsche Zellenzuordnung"
-
-#: app/templates/workbench/review_detail.html:164
-msgid "Missing cell"
-msgstr "Fehlende Zelle"
-
-#: app/templates/workbench/review_detail.html:165
-msgid "Extra cell"
-msgstr "Zusätzliche Zelle"
-
-#: app/templates/workbench/review_detail.html:166
-msgid "Header error"
-msgstr "Kopfzeilenfehler"
-
-#: app/templates/workbench/review_detail.html:167
-msgid "Missing text"
-msgstr "Fehlender Text"
-
-#: app/templates/workbench/review_detail.html:168
-msgid "Invented text"
-msgstr "Erfindung im Text"
-
-#: app/templates/workbench/review_detail.html:169
-msgid "Numeric error"
-msgstr "Zahlenfehler"
-
-#: app/templates/workbench/review_detail.html:170
-msgid "OCR/transcription error"
-msgstr "OCR-/Transkriptionsfehler"
-
-#: app/templates/workbench/review_detail.html:171
-msgid "Bad crop"
-msgstr "Falscher Ausschnitt"
-
-#: app/templates/workbench/review_detail.html:172
-msgid "Bad detection"
-msgstr "Falsche Erkennung"
-
-#: app/templates/workbench/review_detail.html:175
+#: app/templates/workbench/review_detail.html:176
 msgid "Preferred Result"
 msgstr "Bevorzugtes Ergebnis"
 
-#: app/templates/workbench/review_detail.html:182
+#: app/templates/workbench/review_detail.html:183
 msgid "Equivalent"
 msgstr "Gleichwertig"
 
-#: app/templates/workbench/review_detail.html:184
+#: app/templates/workbench/review_detail.html:185
 msgid "Neither"
 msgstr "Keines"
 
-#: app/templates/workbench/review_detail.html:187
-msgid "Confidence"
-msgstr "Sicherheit"
-
-#: app/templates/workbench/review_detail.html:190
+#: app/templates/workbench/review_detail.html:191
 msgid "High"
 msgstr "Hoch"
 
-#: app/templates/workbench/review_detail.html:192
+#: app/templates/workbench/review_detail.html:193
 msgid "Medium"
 msgstr "Mittel"
 
-#: app/templates/workbench/review_detail.html:194
+#: app/templates/workbench/review_detail.html:195
 msgid "Low"
 msgstr "Niedrig"
 
-#: app/templates/workbench/review_detail.html:197
+#: app/templates/workbench/review_detail.html:198
 msgid "Comment (optional)"
 msgstr "Kommentar (optional)"
 
-#: app/templates/workbench/review_detail.html:200
+#: app/templates/workbench/review_detail.html:201
 msgid "Submit Review"
 msgstr "Bewertung übermitteln"
 
-#: app/templates/workbench/review_detail.html:208
+#: app/templates/workbench/review_detail.html:209
+#: app/templates/workbench/review_reveal.html:81
 msgid "Back to Reviews"
 msgstr "Zurück zu Bewertungen"
 
-#: app/templates/workbench/review_detail.html:209
-msgid "Review Guidelines"
-msgstr "Bewertungsrichtlinien"
+#: app/templates/workbench/review_list.html:3
+msgid "My Reviews"
+msgstr "Meine Bewertungen"
 
-#: app/templates/workbench/user_settings.html:9
-msgid "Back to Dashboard"
-msgstr "Zurück zur Übersicht"
+#: app/templates/workbench/review_list.html:7
+msgid "My Review Tasks"
+msgstr "Meine Bewertungsaufgaben"
+
+#: app/templates/workbench/review_list.html:13
+msgid "Table ID"
+msgstr "Tabelle-ID"
+
+#: app/templates/workbench/review_list.html:14
+msgid "State"
+msgstr "Status"
+
+#: app/templates/workbench/review_list.html:15
+msgid "Priority"
+msgstr "Priorität"
+
+#: app/templates/workbench/review_list.html:36
+msgid "No review tasks assigned."
+msgstr "Keine Bewertungsaufgaben zugewiesen."
+
+#: app/templates/workbench/review_reveal.html:3
+#, python-format
+#| msgid ""
+#| "Review: %(document.external_id)s - %(table_candidate.stable_table_id)s"
+msgid "Review Result: %(task.table_candidate.document.external_id)s"
+msgstr "Bewertungsergebnis: %(task.table_candidate.document.external_id)s"
+
+#: app/templates/workbench/review_reveal.html:24
+#, python-format
+#| msgid "%(document.external_id)s — Page %(page_number)s — %(table_id)s"
+msgid ""
+"%(task.table_candidate.document.external_id)s — Page "
+"%(task.table_candidate.page.page_number)s — "
+"%(task.table_candidate.stable_table_id)s"
+msgstr "%(task.table_candidate.document.external_id)s — Seite %(task.table_candidate.page.page_number)s — %(task.table_candidate.stable_table_id)s"
+
+#: app/templates/workbench/review_reveal.html:43
+msgid "Model Identities Revealed"
+msgstr "Modellidentitäten aufgedeckt"
+
+#: app/templates/workbench/review_reveal.html:82
+#| msgid "Start Next Review"
+msgid "Next Review"
+msgstr "Nächste Bewertung starten"
+
+#: app/templates/workbench/search.html:6
+#| msgid "Recent documents"
+msgid "Search documents"
+msgstr "Neueste Dokumente"
+
+#: app/templates/workbench/search.html:6
+msgid "Find text and identifiers in authorized processed revisions."
+msgstr "Finden Sie Text und Kennungen in zugelassenen verarbeiteten Revisionen."
+
+#: app/templates/workbench/search.html:9
+#| msgid "Back to Project"
+msgid "Search the project"
+msgstr "Zurück zum Projekt"
+
+#: app/templates/workbench/search.html:10
+msgid "e.g. R-184 or restoration"
+msgstr "z. B. R-184 oder Restaurierung"
+
+#: app/templates/workbench/search.html:13
+#, python-format
+msgid "%(counter)s result"
+msgid_plural "%(counter)s results"
+msgstr[0] "%(counter)s Treffer"
+msgstr[1] "%(counter)s Treffer"
+
+#: app/templates/workbench/search.html:18
+#| msgid "Confidence"
+msgid "Open evidence"
+msgstr "Belege öffnen"
+
+#: app/templates/workbench/search.html:20
+msgid "No matches"
+msgstr "Keine Treffer"
+
+#: app/templates/workbench/search.html:20
+msgid "Try an exact identifier, name, or phrase."
+msgstr "Versuchen Sie eine exakte Kennung, einen Namen oder eine Wortgruppe."
 
 #: app/templates/workbench/user_settings.html:16
 msgid "General"
@@ -386,15 +1461,12 @@ msgstr "Einführende Erklärungen anzeigen"
 
 #: app/templates/workbench/user_settings.html:45
 msgid "Display plain-language explanations alongside technical details."
-msgstr "Einfache, verständliche Erklärungen neben technischen Details anzeigen."
+msgstr ""
+"Einfache, verständliche Erklärungen neben technischen Details anzeigen."
 
 #: app/templates/workbench/user_settings.html:48
 msgid "Save preferences"
 msgstr "Einstellungen speichern"
-
-#: app/templates/workbench/user_settings.html:54
-msgid "Password"
-msgstr "Passwort"
 
 #: app/templates/workbench/user_settings.html:61
 msgid "Current password"
@@ -420,25 +1492,9 @@ msgstr "API-Token"
 msgid "Token"
 msgstr "Token"
 
-#: app/templates/workbench/user_settings.html:88
-msgid "Name"
-msgstr "Name"
-
 #: app/templates/workbench/user_settings.html:89
 msgid "Scopes"
 msgstr "Berechtigungen"
-
-#: app/templates/workbench/user_settings.html:90
-msgid "Created"
-msgstr "Erstellt"
-
-#: app/templates/workbench/user_settings.html:91
-msgid "Status"
-msgstr "Status"
-
-#: app/templates/workbench/user_settings.html:92
-msgid "Actions"
-msgstr "Aktionen"
 
 #: app/templates/workbench/user_settings.html:108
 msgid "Revoked"
@@ -468,402 +1524,303 @@ msgstr "z. B. deployment-tool"
 msgid "Create token"
 msgstr "Token erstellen"
 
-#: app/templates/workbench/review_list.html:4
-msgid "My Review Tasks"
-msgstr "Meine Bewertungsaufgaben"
+#: app/workbench/models.py:600
+msgid "Queued"
+msgstr "Warteschlange"
 
-#: app/templates/workbench/review_list.html:9
-msgid "Document"
-msgstr "Dokument"
+#: app/workbench/models.py:601
+#| msgid "Submitting to Docling"
+msgid "Submitting to processor"
+msgstr "Übergabe an Prozessor"
 
-#: app/templates/workbench/review_list.html:10
-msgid "Table ID"
-msgstr "Tabelle-ID"
+#: app/workbench/models.py:602
+#| msgid "Processing progress"
+msgid "Processing"
+msgstr "Verarbeitung"
 
-#: app/templates/workbench/review_list.html:11
-msgid "State"
-msgstr "Status"
+#: app/workbench/models.py:603
+msgid "Importing results"
+msgstr "Ergebnisse werden übernommen"
 
-#: app/templates/workbench/review_list.html:12
-msgid "Priority"
-msgstr "Priorität"
+#: app/workbench/models.py:604
+msgid "Submission uncertain"
+msgstr "Übermittlungsstatus unklar"
 
-#: app/templates/workbench/review_list.html:24
-msgid "Review"
-msgstr "Bewerten"
+#: app/workbench/models.py:605
+msgid "Interrupted"
+msgstr "Unterbrochen"
 
-#: app/templates/workbench/review_list.html:26
-msgid "View"
-msgstr "Ansehen"
+#: app/workbench/models.py:606
+msgid "Completed"
+msgstr "Abgeschlossen"
 
-#: app/templates/workbench/review_list.html:31
-msgid "No review tasks assigned."
-msgstr "Keine Bewertungsaufgaben zugewiesen."
+#: app/workbench/models.py:607
+msgid "Partially completed"
+msgstr "Teilweise abgeschlossen"
 
-#: app/templates/workbench/collection_list.html:3
-#: app/templates/workbench/collection_list.html:6
-msgid "Collections"
-msgstr "Sammlungen"
+#: app/workbench/models.py:608
+msgid "Failed"
+msgstr "Fehlgeschlagen"
 
-#: app/templates/workbench/collection_list.html:10
-msgid "Type"
-msgstr "Typ"
+#: app/workbench/models.py:609
+msgid "Cancelled"
+msgstr "Abgebrochen"
 
-#: app/templates/workbench/collection_list.html:24
-msgid "No collections yet."
-msgstr "Noch keine Sammlungen."
+#: app/workbench/models.py:776
+msgid "Text block"
+msgstr "Textbereich"
 
-#: app/templates/workbench/collection_detail.html:13
-msgid "Documents"
-msgstr "Dokumente"
+#: app/workbench/models.py:777
+msgid "Title / heading"
+msgstr "Titel / Überschrift"
 
-#: app/templates/workbench/collection_detail.html:17
-msgid "Tables"
-msgstr "Tabellen"
+#: app/workbench/models.py:778
+msgid "Table"
+msgstr "Tabelle"
 
-#: app/templates/workbench/collection_detail.html:21
-msgid "Reviews"
-msgstr "Bewertungen"
+#: app/workbench/models.py:779
+msgid "Figure / image"
+msgstr "Abbildung / Bild"
 
-#: app/templates/workbench/collection_detail.html:30
-msgid "External ID"
-msgstr "Externe ID"
+#: app/workbench/models.py:780
+msgid "Form"
+msgstr "Formular"
 
-#: app/templates/workbench/collection_detail.html:31
-msgid "Filename"
-msgstr "Dateiname"
+#: app/workbench/models.py:781
+msgid "List"
+msgstr "Liste"
 
-#: app/templates/workbench/collection_detail.html:32
-msgid "Pages"
-msgstr "Seiten"
+#: app/workbench/models.py:782
+msgid "Page header"
+msgstr "Kopfzeile"
 
-#: app/templates/workbench/collection_detail.html:42
-msgid "No documents."
-msgstr "Keine Dokumente."
+#: app/workbench/models.py:783
+msgid "Page footer"
+msgstr "Fußzeile"
 
-#: app/templates/workbench/guidelines.html:8
-msgid "Structure Errors"
-msgstr "Strukturfehler"
+#: app/workbench/models.py:784
+#| msgid "Neither"
+msgid "Other"
+msgstr "Keines"
 
-#: app/templates/workbench/guidelines.html:9
-msgid "These errors relate to the table's grid structure."
-msgstr "Diese Fehler betreffen die Gitterstruktur der Tabelle."
+#: app/workbench/views.py:74 app/workbench/views.py:190
+#| msgid "You do not have an editable project"
+msgid "You do not have access to this project."
+msgstr "Sie haben kein bearbeitbares Projekt"
 
-#: app/templates/workbench/guidelines.html:11
-msgid "The table has too many or too few rows compared to the source."
-msgstr "Die Tabelle hat im Vergleich zur Quelle zu viele oder zu wenige Zeilen."
+#: app/workbench/views.py:276
+msgid "Choose at least one document and enter a question."
+msgstr "Wählen Sie mindestens ein Dokument aus und geben Sie eine Frage ein."
 
-#: app/templates/workbench/guidelines.html:12
-msgid "The table has too many or too few columns."
-msgstr "Die Tabelle hat zu viele oder zu wenige Spalten."
+#: app/workbench/views.py:282
+msgid "The selected documents are not accessible."
+msgstr "Auf die ausgewählten Dokumente kann nicht zugegriffen werden."
 
-#: app/templates/workbench/guidelines.html:13
-msgid "A cell that should span multiple rows does not, or spans the wrong number."
-msgstr "Eine Zelle, die mehrere Zeilen überspannen sollte, tut dies nicht oder spannt die falsche Anzahl."
+#: app/workbench/views.py:372 app/workbench/views.py:1393
+#: app/workbench/views.py:1412
+#| msgid "You do not have an editable project"
+msgid "You do not have access to this document."
+msgstr "Sie haben kein bearbeitbares Projekt"
 
-#: app/templates/workbench/guidelines.html:14
-msgid "A cell that should span multiple columns does not, or spans the wrong number."
-msgstr "Eine Zelle, die mehrere Spalten überspannen sollte, tut dies nicht oder spannt die falsche Anzahl."
+#: app/workbench/views.py:475 app/workbench/views.py:525
+msgid "This region changed since it was inspected. Reload it before editing."
+msgstr "Dieser Bereich wurde seit der letzten Prüfung geändert. Laden Sie ihn vor der Bearbeitung neu."
 
-#: app/templates/workbench/guidelines.html:15
-msgid "Text is placed in the wrong cell (wrong row or column)."
-msgstr "Text befindet sich in der falschen Zelle (falsche Zeile oder Spalte)."
+#: app/workbench/views.py:477
+msgid "Replacement text cannot be empty."
+msgstr "Der Ersatztext darf nicht leer sein."
 
-#: app/templates/workbench/guidelines.html:16
-msgid "A cell that should exist is completely absent."
-msgstr "Eine Zelle, die vorhanden sein sollte, fehlt vollständig."
+#: app/workbench/views.py:488 app/workbench/views.py:535
+msgid "Correction saved. The original machine extraction remains unchanged."
+msgstr "Korrektur gespeichert. Die ursprüngliche maschinelle Extraktion bleibt unverändert."
 
-#: app/templates/workbench/guidelines.html:17
-msgid "A cell that should not exist is present."
-msgstr "Eine Zelle, die nicht vorhanden sein sollte, ist da."
+#: app/workbench/views.py:507
+msgid "Choose a valid region type."
+msgstr "Wählen Sie einen gültigen Bereichstyp."
 
-#: app/templates/workbench/guidelines.html:18
-msgid "A header row is treated as body data, or body data is treated as a header."
-msgstr "Eine Kopfzeile wird als Datenzeile behandelt, oder eine Datenzeile wird als Kopfzeile behandelt."
+#: app/workbench/views.py:517
+msgid "A note cannot be empty."
+msgstr "Eine Notiz darf nicht leer sein."
 
-#: app/templates/workbench/guidelines.html:23
-msgid "Text Errors"
-msgstr "Textfehler"
+#: app/workbench/views.py:522
+msgid "Unsupported correction operation."
+msgstr "Nicht unterstützte Korrekturaktion."
 
-#: app/templates/workbench/guidelines.html:24
-msgid "These errors relate to the text content within cells."
-msgstr "Diese Fehler betreffen den Textinhalt in den Zellen."
-
-#: app/templates/workbench/guidelines.html:26
-msgid "Text that should be in a cell is absent."
-msgstr "Text, der in einer Zelle stehen sollte, fehlt."
-
-#: app/templates/workbench/guidelines.html:27
-msgid "Text appears that is not in the source document."
-msgstr "Text erscheint, der nicht im Quelldokument vorhanden ist."
-
-#: app/templates/workbench/guidelines.html:28
-msgid "A number is wrong (wrong digit, missing minus sign, wrong decimal separator)."
-msgstr "Eine Zahl ist falsch (falsche Ziffer, fehlendes Minuszeichen, falscher Dezimaltrenner)."
-
-#: app/templates/workbench/guidelines.html:29
-msgid "Text is garbled or misread (e.g., \"0\" for \"O\", \"1\" for \"l\")."
-msgstr "Text ist unleserlich oder falsch gelesen (z. B. \"0\" statt \"O\", \"1\" statt \"l\")."
-
-#: app/templates/workbench/guidelines.html:34
-msgid "Detection and Crop Errors"
-msgstr "Erkennungs- und Zuschnittfehler"
-
-#: app/templates/workbench/guidelines.html:35
-msgid "These errors relate to how the table was detected and cropped from the page."
-msgstr "Diese Fehler betreffen, wie die Tabelle erkannt und von der Seite ausgeschnitten wurde."
-
-#: app/templates/workbench/guidelines.html:37
-msgid "Part of the table is cut off, or adjacent text/paragraphs are included."
-msgstr "Ein Teil der Tabelle ist abgeschnitten, oder benachbarter Text/Absätze sind enthalten."
-
-#: app/templates/workbench/guidelines.html:38
-msgid "Two tables were merged into one, or one table was split into two."
-msgstr "Zwei Tabellen wurden zu einer zusammengefasst, oder eine Tabelle wurde in zwei aufgeteilt."
-
-#: app/templates/workbench/guidelines.html:43
-msgid "Scoring Guide"
-msgstr "Bewertungsskala"
-
-#: app/templates/workbench/guidelines.html:47
-msgid "Score"
-msgstr "Punktzahl"
-
-#: app/templates/workbench/guidelines.html:48
-msgid "Meaning"
-msgstr "Bedeutung"
-
-#: app/templates/workbench/guidelines.html:53
-msgid "Correct — no errors or only trivial formatting differences."
-msgstr "Korrekt — keine Fehler oder nur unerhebliche Formatunterschiede."
-
-#: app/templates/workbench/guidelines.html:56
-msgid "Minor correction — small errors that don't affect understanding."
-msgstr "Geringfügige Korrektur — kleine Fehler, die das Verständnis nicht beeinträchtigen."
-
-#: app/templates/workbench/guidelines.html:59
-msgid "Major correction — significant errors that require manual fixing."
-msgstr "Erhebliche Korrektur — signifikante Fehler, die manuelles Beheben erfordern."
-
-#: app/templates/workbench/guidelines.html:62
-msgid "Unusable — the output cannot be used without complete re-entry."
-msgstr "Nicht nutzbar — das Ergebnis kann ohne vollständige Neueingabe nicht verwendet werden."
-
-#: app/workbench/views.py
+#: app/workbench/views.py:611
 msgid "Task skipped. It will remain available for later."
 msgstr "Aufgabe übersprungen. Sie bleibt später verfügbar."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:630
 msgid "Task marked as needing expert review."
 msgstr "Aufgabe als fachliche Prüfung benötigt markiert."
 
-#: app/workbench/views.py
-msgid "This review was already submitted. Your original response has been preserved."
-msgstr "Diese Bewertung wurde bereits übermittelt. Ihre ursprüngliche Antwort wurde gespeichert."
+#: app/workbench/views.py:642 app/workbench/views.py:722
+#: app/workbench/views.py:781
+msgid "You do not have access to this task."
+msgstr "Sie haben keinen Zugriff auf diese Aufgabe."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:734
+msgid ""
+"This review was already submitted. Your original response has been preserved."
+msgstr ""
+"Diese Bewertung wurde bereits übermittelt. Ihre ursprüngliche Antwort wurde "
+"gespeichert."
+
+#: app/workbench/views.py:743
 msgid "Missing extraction data for this table."
 msgstr "Fehlende Extraktionsdaten für diese Tabelle."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:768
 msgid "Review submitted successfully."
 msgstr "Bewertung erfolgreich übermittelt."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:831
 msgid "Post-reveal note saved."
 msgstr "Nachtrag gespeichert."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:856 app/workbench/views.py:883
+#| msgid "You do not have an editable project"
+msgid "You do not have access to this table."
+msgstr "Sie haben kein bearbeitbares Projekt"
+
+#: app/workbench/views.py:1131
 msgid "Preferences saved."
 msgstr "Einstellungen gespeichert."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:1150
 #, python-format
 msgid "Token created: %(token)s. Copy it now — it won't be shown again."
-msgstr "Token erstellt: %(token)s. Kopieren Sie ihn jetzt — er wird nicht mehr angezeigt."
+msgstr ""
+"Token erstellt: %(token)s. Kopieren Sie ihn jetzt — er wird nicht mehr "
+"angezeigt."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:1161
 msgid "Token revoked."
 msgstr "Token widerrufen."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:1164
 msgid "Token not found."
 msgstr "Token nicht gefunden."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:1172
 msgid "Current password is incorrect."
 msgstr "Aktuelles Passwort ist falsch."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:1175
 msgid "New passwords do not match."
 msgstr "Neue Passwörter stimmen nicht überein."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:1178
 msgid "New password must be at least 8 characters."
 msgstr "Neues Passwort muss mindestens 8 Zeichen lang sein."
 
-#: app/workbench/views.py
+#: app/workbench/views.py:1183
 msgid "Password changed."
 msgstr "Passwort geändert."
 
-#: app/templates/workbench/_job_status_block.html
-#, python-format
-msgid "Processing: %(filename)s"
-msgstr "Verarbeitung: %(filename)s"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Processing progress"
-msgstr "Verarbeitungsfortschritt"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Upload received"
-msgstr "Upload empfangen"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Waiting for worker"
-msgstr "Warten auf einen Verarbeitungsdienst"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Submitting to Docling"
-msgstr "Übergabe an Docling"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Docling is analyzing the document"
-msgstr "Docling analysiert das Dokument"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Saving extracted results"
-msgstr "Extrahierte Ergebnisse werden gespeichert"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Ready"
-msgstr "Bereit"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Processing has not reported a worker heartbeat recently. The worker may have stopped."
-msgstr "Die Verarbeitung hat seit einiger Zeit kein Lebenszeichen gemeldet. Der Verarbeitungsdienst wurde möglicherweise beendet."
-
-# Primary document workflow
-msgid "Home"
-msgstr "Start"
-
-msgid "Help"
-msgstr "Hilfe"
-
-msgid "Evaluation"
-msgstr "Evaluierung"
-
-msgid "Administration"
-msgstr "Administration"
-
-msgid "Project"
-msgstr "Projekt"
-
-msgid "Add document"
-msgstr "Dokument hinzufügen"
-
-msgid "Add a document"
-msgstr "Dokument hinzufügen"
-
-msgid "Recent documents"
-msgstr "Neueste Dokumente"
-
-msgid "Active processing"
-msgstr "Aktive Verarbeitung"
-
-msgid "Items needing attention"
-msgstr "Zu prüfende Elemente"
-
-msgid "Choose a project"
-msgstr "Projekt auswählen"
-
-msgid "Choose a PDF or drop it here"
-msgstr "PDF auswählen oder hier ablegen"
-
-msgid "Standard analysis"
-msgstr "Standardanalyse"
-
-msgid "Advanced evaluation options"
-msgstr "Erweiterte Evaluierungsoptionen"
-
-msgid "What happens next"
-msgstr "Wie es weitergeht"
-
-msgid "Upload and analyze"
-msgstr "Hochladen und analysieren"
-
-msgid "You do not have an editable project"
-msgstr "Sie haben kein bearbeitbares Projekt"
-
-msgid "View projects"
-msgstr "Projekte anzeigen"
-
-msgid "How it works"
-msgstr "So funktioniert es"
-
-msgid "Follow the analysis"
-msgstr "Analyse verfolgen"
-
-msgid "Inspect the result"
-msgstr "Ergebnis prüfen"
-
+#: app/workbench/views.py:1265
 msgid "Choose a project you can edit."
 msgstr "Wählen Sie ein Projekt aus, das Sie bearbeiten können."
 
+#: app/workbench/views.py:1267
 msgid "Choose a PDF to upload."
 msgstr "Wählen Sie ein PDF zum Hochladen aus."
 
-msgid "Add another document"
-msgstr "Weiteres Dokument hinzufügen"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "The document is ready to inspect."
-msgstr "Das Dokument kann jetzt geprüft werden."
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Processing produced partial results. This revision was not made active."
-msgstr "Die Verarbeitung lieferte unvollständige Ergebnisse. Diese Version wurde nicht aktiviert."
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Elapsed:"
-msgstr "Vergangene Zeit:"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Worker heartbeat:"
-msgstr "Letztes Lebenszeichen:"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "ago"
-msgstr "zuvor"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Last processor response:"
-msgstr "Letzte Prozessorantwort:"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "pages saved"
-msgstr "Seiten gespeichert"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "tables found"
-msgstr "Tabellen gefunden"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Finished:"
-msgstr "Abgeschlossen:"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "View Document"
-msgstr "Dokument anzeigen"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Back to Project"
-msgstr "Zurück zum Projekt"
-
-#: app/templates/workbench/_job_status_block.html
-msgid "Upload Another"
-msgstr "Weiteres Dokument hochladen"
-
-#: app/workbench/views.py
+#: app/workbench/views.py:1283
 msgid "Upload received. The document has been queued for analysis."
 msgstr "Upload empfangen. Das Dokument wurde zur Analyse eingereiht."
+
+#: app/workbench/views.py:1313
+#| msgid "You do not have an editable project"
+msgid "You do not have access to this job."
+msgstr "Sie haben kein bearbeitbares Projekt"
+
+#: app/workbench/views.py:1337
+msgid "You do not have access to this processing job."
+msgstr "Sie haben keinen Zugriff auf diesen Verarbeitungsauftrag."
+
+#: app/workbench/views.py:1343
+msgid "The uncertain processor submission was closed by an operator."
+msgstr "Die unklare Übermittlung wurde von einem Bediener geschlossen."
+
+#: app/workbench/views.py:1344
+msgid "Marked failed. Upload the document again to retry."
+msgstr "Als fehlgeschlagen markiert. Laden Sie das Dokument erneut hoch, um es wieder zu verarbeiten."
+
+#: app/workbench/views.py:1346
+msgid "The uncertain job was marked failed."
+msgstr "Der Auftrag mit unklarem Status wurde als fehlgeschlagen markiert."
+
+#: app/workbench/views.py:1351
+msgid "Recovery requested; the worker will continue this job."
+msgstr "Wiederaufnahme angefordert; der Worker wird diesen Auftrag fortsetzen."
+
+#: app/workbench/views.py:1353
+msgid "Recovery requested."
+msgstr "Wiederaufnahme angefordert."
+
+#: app/workbench/views.py:1355
+msgid "This job cannot be resumed from its current state."
+msgstr "Dieser Auftrag kann aus seinem aktuellen Status nicht fortgesetzt werden."
+
+#: app/workbench/views.py:1432
+#| msgid "You do not have an editable project"
+msgid "You do not have access to this artifact."
+msgstr "Sie haben kein bearbeitbares Projekt"
+
+#~ msgid "Guidelines"
+#~ msgstr "Richtlinien"
+
+#~ msgid "Curator"
+#~ msgstr "Kuratoren"
+
+#~ msgid "Process a document"
+#~ msgstr "Dokument verarbeiten"
+
+#~ msgid "Upload a PDF and extract its content"
+#~ msgstr "PDF hochladen und Inhalte extrahieren"
+
+#~ msgid "Review results"
+#~ msgstr "Ergebnisse prüfen"
+
+#~ msgid "Compare and evaluate extraction results"
+#~ msgstr "Extraktionsergebnisse vergleichen und bewerten"
+
+#~ msgid "Learn with examples"
+#~ msgstr "Mit Beispielen lernen"
+
+#~ msgid "Explore benchmark documents with ground truth"
+#~ msgstr "Benchmark-Dokumente mit Referenzergebnissen erkunden"
+
+#~ msgid "Total Tasks"
+#~ msgstr "Aufgaben gesamt"
+
+#~ msgid "In Progress"
+#~ msgstr "In Bearbeitung"
+
+#~ msgid "Available"
+#~ msgstr "Verfügbar"
+
+#~ msgid "Needs Expert"
+#~ msgstr "Sachverstand nötig"
+
+#~ msgid "View All Reviews"
+#~ msgstr "Alle Bewertungen anzeigen"
+
+#, python-format
+#~ msgid "Candidate %(label_a)s"
+#~ msgstr "Kandidat %(label_a)s"
+
+#, python-format
+#~ msgid "Candidate %(label_b)s"
+#~ msgstr "Kandidat %(label_b)s"
+
+#, python-format
+#~ msgid "Candidate %(label_b)s — Structure"
+#~ msgstr "Kandidat %(label_b)s — Struktur"
+
+#~ msgid "External ID"
+#~ msgstr "Externe ID"
+
+#~ msgid "Upload Another"
+#~ msgstr "Weiteres Dokument hochladen"

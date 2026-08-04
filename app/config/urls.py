@@ -37,6 +37,7 @@ urlpatterns = [
     # Upload / Processing
     path("projects/<int:project_id>/process/", views.project_process, name="project_process"),
     path("jobs/<int:job_id>/", views.job_status, name="job_status"),
+    path("jobs/<int:job_id>/recovery/", views.job_recovery_action, name="job_recovery_action"),
 
     # Secure artifact serving
     path("pages/<int:page_id>/image/", views.page_image, name="page_image"),

@@ -58,20 +58,20 @@
                     <img id="page-image" src="{% url 'page_image' selected_page.id %}" alt="{% trans 'Original document page' %}">
                     <svg class="region-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="{% trans 'Detected regions' %}">
                         {% for region in page_regions %}
-                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link" data-region-id="{{ region.id }}">
-                            <rect class="region-box region-{{ region.region_type }}{% if region.id == selected_region.id %} is-selected{% endif %}"
+                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}">
+                            <rect class="region-box region-{{ region.display_region_type }}{% if region.display_is_suppressed %} is-suppressed{% endif %}{% if region.id == selected_region.id %} is-selected{% endif %}"
                                   x="{{ region.left }}" y="{{ region.top }}" width="{{ region.overlay_width|floatformat:'6' }}" height="{{ region.overlay_height|floatformat:'6' }}"
                                   data-region-id="{{ region.id }}" role="button" tabindex="0">
-                                <title>{{ region.get_region_type_display }}</title>
+                                <title>{{ region.display_region_type_label }}{% if region.display_is_suppressed %} · {% trans "suppressed" %}{% endif %}</title>
                             </rect>
                         </a>
                         {% endfor %}
                     </svg>
                     <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
                         {% for region in page_regions %}
-                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" onclick="window.location.assign(this.getAttribute('href')); return false;" class="region-hit region-link" data-region-id="{{ region.id }}" data-region-type="{{ region.region_type }}"
+                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" onclick="window.location.assign(this.getAttribute('href')); return false;" class="region-hit region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}"
                            style="left:{{ region.overlay_left_percent|floatformat:'4' }}%;top:{{ region.overlay_top_percent|floatformat:'4' }}%;width:{{ region.overlay_width_percent|floatformat:'4' }}%;height:{{ region.overlay_height_percent|floatformat:'4' }}%;"
-                           aria-label="{{ region.get_region_type_display }}">{{ region.get_region_type_display }}</a>
+                           aria-label="{{ region.display_region_type_label }}">{{ region.display_region_type_label }}</a>
                         {% endfor %}
                     </div>
                 </div>
@@ -79,6 +79,7 @@
             <div class="region-filters" aria-label="{% trans 'Region filters' %}">
                 <span class="filter-label">{% trans "Show" %}</span>
                 <button type="button" class="filter-button is-active" data-region-filter="all">{% trans "All" %} <span data-filter-count="all"></span></button>
+                <button type="button" class="filter-button" data-show-suppressed="false">{% trans "Show suppressed" %}</button>
                 {% for value, label in region_types %}<button type="button" class="filter-button" data-region-filter="{{ value }}">{{ label }} <span data-filter-count="{{ value }}"></span></button>{% endfor %}
             </div>
             <div class="scan-legend"><span class="legend-swatch"></span>{% trans "Detected structure" %} · {% trans "click a region to inspect it" %}</div>
@@ -95,7 +96,7 @@
             {% if selected_region %}
             <section class="region-detail" id="region-{{ selected_region.id }}" data-selected-region="{{ selected_region.id }}">
                 <div class="region-detail-heading">
-                    <span class="region-type-badge">{{ selected_region.get_region_type_display }}</span>
+                    <span class="region-type-badge">{{ selected_region.display_region_type_label }}{% if selected_region.display_is_suppressed %} · {% trans "Suppressed" %}{% endif %}</span>
                     <span>{% trans "Region" %} {{ selected_region.id }}</span>
                 </div>
                 <p class="region-text">{{ selected_region.effective_text|default:_('No text was extracted for this region.') }}</p>
@@ -115,8 +116,11 @@
                     </form>
                     <form method="post" action="{% url 'correct_region' selected_region.id %}">
                         {% csrf_token %}<input type="hidden" name="operation" value="suppress"><input type="hidden" name="expected_current_value" value="{% if selected_region.is_suppressed %}true{% else %}false{% endif %}">
-                        <button class="btn btn-secondary" type="submit">{% if selected_region.is_suppressed %}{% trans "Keep suppressed" %}{% else %}{% trans "Suppress region" %}{% endif %}</button>
+                        {% if not selected_region.display_is_suppressed %}<button class="btn btn-secondary" type="submit">{% trans "Suppress region" %}</button>{% endif %}
                     </form>
+                    {% if selected_region.display_is_suppressed %}
+                    {% if selected_region.suppression_correction %}<form method="post" action="{% url 'revert_region_correction' selected_region.suppression_correction.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-secondary" type="submit">{% trans "Restore region" %}</button></form>{% endif %}
+                    {% endif %}
                 </details>
                 {% endif %}
                 {% if selected_region.corrections.all %}<details class="correction-history"><summary>{% trans "Correction history" %}</summary>
@@ -140,7 +144,7 @@
                 <h3>{% trans "Full page text" %}</h3>
                 {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
             </section>
-            {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.raw_html %}<div class="table-preview">{{ extraction.raw_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
+            {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.safe_html %}<div class="table-preview">{{ extraction.safe_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
         </aside>
     </div>
 </div>
@@ -226,7 +230,7 @@
     viewport?.addEventListener('pointerup', endPointer);
     viewport?.addEventListener('pointercancel', endPointer);
 
-    const links = [...document.querySelectorAll('.region-link')];
+    const links = [...document.querySelectorAll('.region-hit')];
     const counts = {};
     links.forEach((link) => {
         const box = link.querySelector('.region-box');
@@ -254,17 +258,27 @@
             });
         }
     });
-    document.querySelector('[data-filter-count="all"]')?.append(`(${links.length})`);
+    const uniqueIds = new Set(links.map((link) => link.dataset.regionId));
+    document.querySelector('[data-filter-count="all"]')?.append(`(${uniqueIds.size})`);
     Object.entries(counts).forEach(([type, count]) => document.querySelector(`[data-filter-count="${type}"]`)?.append(`(${count})`));
     document.querySelectorAll('[data-region-filter]').forEach((button) => button.addEventListener('click', () => {
         document.querySelectorAll('[data-region-filter]').forEach((item) => item.classList.toggle('is-active', item === button));
         const filter = button.dataset.regionFilter;
+        const showSuppressed = document.querySelector('[data-show-suppressed]')?.dataset.showSuppressed === 'true';
         links.forEach((link) => {
-            const visible = filter === 'all' || link.dataset.regionType === filter;
+            const visible = (filter === 'all' || link.dataset.regionType === filter) && (showSuppressed || link.dataset.suppressed !== 'true');
             link.hidden = !visible;
             link.style.display = visible ? '' : 'none';
         });
     }));
+    document.querySelector('[data-show-suppressed]')?.addEventListener('click', (button) => {
+        const control = button.currentTarget;
+        const visible = control.dataset.showSuppressed === 'true';
+        control.dataset.showSuppressed = visible ? 'false' : 'true';
+        control.classList.toggle('is-active', !visible);
+        document.querySelector('[data-region-filter].is-active')?.click();
+    });
+    document.querySelector('[data-region-filter].is-active')?.click();
 })();
 </script>
 {% endblock %}

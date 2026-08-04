@@ -45,6 +45,18 @@ from .base import DocumentProcessor, ProcessorResult
 logger = logging.getLogger(__name__)
 
 
+class SubmissionRejected(RuntimeError):
+    """The processor definitely rejected a submission."""
+
+
+class SubmissionUncertain(RuntimeError):
+    """The transport failed after submission may have reached the processor."""
+
+
+class ProcessorProtocolError(RuntimeError):
+    """The processor returned a response that violates its contract."""
+
+
 class DoclingServeProcessor(DocumentProcessor):
     """Process documents via Docling Serve v1 async API."""
 
@@ -125,16 +137,21 @@ class DoclingServeProcessor(DocumentProcessor):
             )
             resp.raise_for_status()
             result = resp.json()
-        except requests.ConnectionError:
+        except (requests.ConnectionError, requests.Timeout) as exc:
             logger.error("Cannot connect to Docling server at %s", self.server_url)
-            raise ConnectionError(f"Docling server unreachable: {self.server_url}")
-        except requests.RequestException as e:
-            logger.error("Docling submission failed: %s", e)
-            raise
+            raise SubmissionUncertain(
+                f"Docling submission outcome is uncertain: {self.server_url}"
+            ) from exc
+        except requests.HTTPError as exc:
+            logger.error("Docling submission failed: %s", exc)
+            raise SubmissionRejected(f"Docling rejected submission: {exc}") from exc
+        except requests.RequestException as exc:
+            logger.error("Docling submission failed: %s", exc)
+            raise SubmissionRejected(f"Docling submission failed: {exc}") from exc
 
         task_id = result.get("task_id")
         if not task_id:
-            raise ValueError(f"No task_id in response: {result}")
+            raise ProcessorProtocolError(f"No task_id in response: {result}")
 
         logger.info("Docling async task submitted: %s", task_id)
         return task_id
@@ -187,8 +204,12 @@ class DoclingServeProcessor(DocumentProcessor):
             )
             resp.raise_for_status()
             response = resp.json()
-        except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch results for {external_job_id}: {e}")
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            raise ConnectionError(
+                f"Result retrieval interrupted for {external_job_id}: {exc}"
+            ) from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Failed to fetch results for {external_job_id}: {exc}") from exc
 
         return self._parse_results(response)
 

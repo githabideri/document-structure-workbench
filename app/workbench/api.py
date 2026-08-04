@@ -616,7 +616,10 @@ def api_task_submit(request, task_id):
     # Validation
     if score_x is None or score_y is None:
         return JsonResponse({"error": "score_x and score_y required"}, status=400)
-    if preference not in ("x", "y", "tie", "neither"):
+    preference_map = {
+        "x": "candidate_x", "y": "candidate_y", "tie": "equivalent", "neither": "neither",
+    }
+    if preference not in preference_map:
         return JsonResponse({"error": "preference must be x, y, tie, or neither"}, status=400)
 
     owner = token.user if token.user_id else None
@@ -630,7 +633,7 @@ def api_task_submit(request, task_id):
             candidate_y=task.candidate_y,
             candidate_x_score=score_x,
             candidate_y_score=score_y,
-            preferred_result=preference,
+            preferred_result=preference_map[preference],
             confidence=confidence,
             comment=notes,
             structure_errors=[],

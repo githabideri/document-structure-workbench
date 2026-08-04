@@ -115,9 +115,18 @@ The next work is to harden the evidence planner and asynchronous chat UX: full-d
 
 The application provides a REST API for programmatic access:
 
-- `GET /api/status/` — Health check and summary
-- `GET /api/tasks/` — List review tasks
-- `GET /api/tasks/<id>/` — Task detail with extractions
+- `GET /api/v1/health/` — Health check and release information
+- `GET /api/v1/projects/` — List accessible projects
+- `GET /api/v1/projects/<id>/documents/` — List source and processed documents
+- `POST /api/v1/projects/<id>/upload/` — Upload a PDF and queue processing
+- `GET /api/v1/jobs/<id>/` — Processing status and result metadata
+- `GET /api/v1/tasks/` — List review tasks
+- `GET /api/v1/tasks/<id>/` — Task detail with blinded extractions
+- `POST /api/v1/tasks/<id>/submit/` — Submit a review
+- `GET /api/v1/statistics/` — Review statistics
+
+All endpoints except health use `Authorization: Bearer <token>`. Tokens are
+created from Settings and are project-scoped through membership and scopes.
 - `POST /api/tasks/<id>/submit/` — Submit review (requires API key)
 - `GET /api/statistics/` — Aggregate statistics
 

@@ -23,12 +23,42 @@ from django.db import transaction
 
 from .models import (
     Collection,
+    PageRegion,
     ProcessingJob,
     ProcessingPreset,
+    RegionCorrection,
     SourceDocument,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class CorrectionError(Exception):
+    """A correction could not be applied safely."""
+
+
+class CorrectionService:
+    """Single application boundary for human corrections."""
+
+    @staticmethod
+    def apply(*, region, user, operation, before, after, reason=""):
+        from .policy import ProjectAccessPolicy
+
+        if not ProjectAccessPolicy(user=user).can_edit(region.page.document.collection):
+            raise CorrectionError("You do not have permission to edit this project.")
+        if operation not in dict(RegionCorrection.OPERATIONS):
+            raise CorrectionError("Unsupported correction operation.")
+        correction = RegionCorrection(
+            region=region, document=region.page.document, created_by=user,
+            operation=operation, before=before, after=after, reason=reason,
+        )
+        try:
+            with transaction.atomic():
+                correction.full_clean()
+                correction.save()
+        except ValidationError as exc:
+            raise CorrectionError("The correction is not valid.") from exc
+        return correction
 
 
 class IngestionError(Exception):

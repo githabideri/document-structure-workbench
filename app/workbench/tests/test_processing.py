@@ -1229,7 +1229,8 @@ class DocumentWorkspaceTest(TestCase):
             reverse("correct_region", args=[self.region.pk]),
             {"operation": "type", "expected_current_value": "title", "region_type": "text"},
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"revision={self.document.pk}", response["Location"])
         self.region.refresh_from_db()
         correction = self.region.corrections.get(operation="type")
         self.assertEqual(self.region.effective_region_type, "text")

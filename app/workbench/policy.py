@@ -74,6 +74,10 @@ class ProjectAccessPolicy:
                 memberships__user=self.user
             ).distinct()
         elif self.token:
+            if self.token.user_id:
+                return Collection.objects.filter(
+                    memberships__user_id=self.token.user_id,
+                ).distinct()
             if self.token.project_id:
                 return Collection.objects.filter(pk=self.token.project_id)
             # Unscoped service account: no projects by default

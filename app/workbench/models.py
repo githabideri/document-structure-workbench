@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import JSONField
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
 
@@ -596,16 +597,16 @@ class ProcessingJob(models.Model):
     """A document processing job submitted by a user or worker."""
 
     JOB_STATES = [
-        ("queued", "Queued"),
-        ("submitting", "Submitting to processor"),
-        ("processing", "Processing"),
-        ("importing", "Importing results"),
-        ("submission_uncertain", "Submission uncertain"),
-        ("interrupted", "Interrupted"),
-        ("completed", "Completed"),
-        ("partial", "Partially completed"),
-        ("failed", "Failed"),
-        ("cancelled", "Cancelled"),
+        ("queued", _("Queued")),
+        ("submitting", _("Submitting to processor")),
+        ("processing", _("Processing")),
+        ("importing", _("Importing results")),
+        ("submission_uncertain", _("Submission uncertain")),
+        ("interrupted", _("Interrupted")),
+        ("completed", _("Completed")),
+        ("partial", _("Partially completed")),
+        ("failed", _("Failed")),
+        ("cancelled", _("Cancelled")),
     ]
 
     id = models.AutoField(primary_key=True)
@@ -685,6 +686,10 @@ class ProcessingJob(models.Model):
             "failed", "cancelled",
         ):
             self.finished_at = timezone.now()
+        elif new_state in ("submitting", "processing", "importing"):
+            # A resumed job is active again; its previous terminal timestamp
+            # must not make the status page imply that it has finished.
+            self.finished_at = None
         if new_state == "submitting":
             self.started_at = timezone.now()
         self.save(update_fields=["state", "started_at", "finished_at"])
@@ -768,15 +773,15 @@ class PageRegion(models.Model):
     """A detected region within a document page (generic, not table-specific)."""
 
     REGION_TYPES = [
-        ("text", "Text block"),
-        ("title", "Title / heading"),
-        ("table", "Table"),
-        ("figure", "Figure / image"),
-        ("form", "Form"),
-        ("list", "List"),
-        ("header", "Page header"),
-        ("footer", "Page footer"),
-        ("other", "Other"),
+        ("text", _("Text block")),
+        ("title", _("Title / heading")),
+        ("table", _("Table")),
+        ("figure", _("Figure / image")),
+        ("form", _("Form")),
+        ("list", _("List")),
+        ("header", _("Page header")),
+        ("footer", _("Page footer")),
+        ("other", _("Other")),
     ]
 
     id = models.AutoField(primary_key=True)

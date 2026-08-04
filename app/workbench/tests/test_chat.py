@@ -52,6 +52,17 @@ class ChatTests(TestCase):
         response = self.client.post(reverse("chat"), {})
         self.assertContains(response, "Choose at least one document")
 
+    def test_chat_has_session_sidebar_and_context_panel(self):
+        thread = ChatThread.objects.create(
+            project=self.project, created_by=self.user, title="Restoration history",
+        )
+        thread.selected_sources.set([self.source])
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("chat_thread", args=[thread.pk]))
+        self.assertContains(response, "Restoration history")
+        self.assertContains(response, "Conversations")
+        self.assertContains(response, "Evidence context")
+
     def test_workspace_citation_offers_return_to_thread(self):
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         self.client.force_login(self.user)

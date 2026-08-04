@@ -27,6 +27,7 @@ from .models import (
     Page, PageRegion, ProcessingArtifact, RegionCorrection, Review, ReviewTask, SourceDocument, TableCandidate,
     TableExtraction,
 )
+from .models import LANGUAGES
 
 
 # --- Permission helpers ---
@@ -264,6 +265,9 @@ def chat_view(request):
     policy = ProjectAccessPolicy(user=request.user)
     projects = list(policy.visible_projects())
     sources = list(SourceDocument.objects.filter(collection__in=projects, is_archived=False).select_related("collection", "active_document")[:100])
+    threads = list(ChatThread.objects.filter(
+        created_by=request.user, project__in=projects,
+    ).select_related("project").order_by("-updated_at", "-id")[:50])
     error = None
     selected_ids = request.POST.getlist("source") if request.method == "POST" else request.GET.getlist("source")
     if request.method == "POST":
@@ -289,6 +293,7 @@ def chat_view(request):
     return render(request, "workbench/chat.html", {
         "sources": sources, "selected_ids": set(selected_ids), "error": error,
         "thread": None, "chat_messages": [], "latest_run": None,
+        "threads": threads,
     })
 
 
@@ -307,6 +312,9 @@ def chat_thread_view(request, thread_id):
             create_chat_run(thread, question)
         return redirect("chat_thread", thread_id=thread.id)
     sources = list(thread.selected_sources.select_related("collection"))
+    threads = list(ChatThread.objects.filter(
+        created_by=request.user, project__in=policy.visible_projects(),
+    ).select_related("project").order_by("-updated_at", "-id")[:50])
     latest_run = thread.runs.prefetch_related("evidence_items").order_by("-created_at").first()
     evidence_items = list(latest_run.evidence_items.select_related("source_document", "page") if latest_run else [])
     return render(request, "workbench/chat.html", {
@@ -314,6 +322,7 @@ def chat_thread_view(request, thread_id):
         "thread": thread, "chat_messages": thread.messages.all(), "latest_run": latest_run,
         "evidence_items": evidence_items,
         "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
+        "threads": threads,
     })
 
 
@@ -383,6 +392,14 @@ def document_detail(request, document_id):
         .prefetch_related("corrections")
     )
     for region in regions:
+        region.display_region_type = region.effective_region_type
+        region.display_region_type_label = dict(PageRegion.REGION_TYPES).get(
+            region.display_region_type, region.display_region_type,
+        )
+        region.display_is_suppressed = region.is_suppressed
+        region.suppression_correction = region.corrections.filter(
+            operation="suppress", status="active",
+        ).order_by("-created_at", "-id").first()
         region.overlay_width = region.right - region.left
         region.overlay_height = region.bottom - region.top
         region.overlay_left_percent = region.left * 100
@@ -411,6 +428,16 @@ def document_detail(request, document_id):
             page_text = artifact.data.get("text", "") if isinstance(artifact.data, dict) else ""
 
     tables = document.tables.filter(page=page).select_related("page").prefetch_related("extractions") if page else []
+    for table in tables:
+        for extraction in table.extractions.all():
+            if extraction.raw_html:
+                import bleach
+                extraction.safe_html = bleach.clean(
+                    extraction.raw_html,
+                    tags=["table", "thead", "tbody", "tr", "th", "td", "caption", "p", "br"],
+                    attributes={"th": ["colspan", "rowspan"], "td": ["colspan", "rowspan"]},
+                    strip=True,
+                )
 
     return render(request, "workbench/document_detail.html", {
         "document": document,
@@ -436,15 +463,12 @@ def document_detail(request, document_id):
 @require_POST
 def correct_region_text(request, region_id):
     """Apply one explicit, reversible text correction to a region."""
-    from .policy import ProjectAccessPolicy
+    from .services import CorrectionError, CorrectionService
     region = get_object_or_404(
         PageRegion.objects.select_related("page__document__collection", "source_document"),
         pk=region_id,
     )
     document = region.page.document
-    if not ProjectAccessPolicy(user=request.user).can_edit(document.collection):
-        messages.error(request, _("You do not have permission to edit this project."))
-        return redirect("document_detail", document.id)
     expected = request.POST.get("expected_current_text", "")
     replacement = request.POST.get("replacement_text", "")
     if region.effective_text != expected:
@@ -452,16 +476,16 @@ def correct_region_text(request, region_id):
     elif not replacement.strip():
         messages.error(request, _("Replacement text cannot be empty."))
     else:
-        RegionCorrection.objects.create(
-            region=region,
-            document=document,
-            created_by=request.user,
-            operation="text",
-            before={"text": region.effective_text},
-            after={"text": replacement},
-            reason=request.POST.get("reason", "").strip(),
-        )
-        messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
+        try:
+            CorrectionService.apply(
+                region=region, user=request.user, operation="text",
+                before={"text": region.effective_text}, after={"text": replacement},
+                reason=request.POST.get("reason", "").strip(),
+            )
+        except CorrectionError as error:
+            messages.error(request, _(str(error)))
+        else:
+            messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
     source = getattr(getattr(document, "processing_job", None), "source_document", None)
     target = source.id if source else document.id
     query = f"?revision={document.id}&page={region.page_number}&region={region.id}" if source else f"?page={region.page_number}&region={region.id}"
@@ -472,17 +496,16 @@ def correct_region_text(request, region_id):
 @require_POST
 def correct_region(request, region_id):
     """Apply a typed correction operation to one immutable-revision region."""
-    from .policy import ProjectAccessPolicy
+    from .services import CorrectionError, CorrectionService
     region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "source_document"), pk=region_id)
     document = region.page.document
-    if not ProjectAccessPolicy(user=request.user).can_edit(document.collection):
-        return JsonResponse({"error": "permission_denied"}, status=403)
     operation = request.POST.get("operation", "")
     expected = request.POST.get("expected_current_value", "")
     if operation == "type":
         value = request.POST.get("region_type", "")
         if value not in dict(PageRegion.REGION_TYPES):
-            return JsonResponse({"error": "invalid_region_type"}, status=400)
+            messages.error(request, _("Choose a valid region type."))
+            return _redirect_to_region(request, region)
         current = region.effective_region_type
         after, before = {"region_type": value}, {"region_type": current}
     elif operation == "suppress":
@@ -491,19 +514,33 @@ def correct_region(request, region_id):
     elif operation == "note":
         note = request.POST.get("note", "").strip()
         if not note:
-            return JsonResponse({"error": "empty_note"}, status=400)
+            messages.error(request, _("A note cannot be empty."))
+            return _redirect_to_region(request, region)
         after, before = {"note": note}, {}
         current = ""
     else:
-        return JsonResponse({"error": "unsupported_operation"}, status=400)
+        messages.error(request, _("Unsupported correction operation."))
+        return _redirect_to_region(request, region)
     if operation in {"type", "suppress"} and expected != current:
-        return JsonResponse({"error": "stale_region"}, status=409)
-    correction = RegionCorrection.objects.create(
-        region=region, document=document, created_by=request.user,
-        operation=operation, before=before, after=after,
-        reason=request.POST.get("reason", "").strip(),
-    )
-    return JsonResponse({"id": correction.id, "status": correction.status})
+        messages.error(request, _("This region changed since it was inspected. Reload it before editing."))
+        return _redirect_to_region(request, region)
+    try:
+        CorrectionService.apply(
+            region=region, user=request.user, operation=operation,
+            before=before, after=after, reason=request.POST.get("reason", "").strip(),
+        )
+    except CorrectionError as error:
+        messages.error(request, _(str(error)))
+        return _redirect_to_region(request, region)
+    messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
+    return _redirect_to_region(request, region)
+
+
+def _redirect_to_region(request, region):
+    source = getattr(getattr(region.page.document, "processing_job", None), "source_document", None)
+    target = source.id if source else region.page.document_id
+    query = f"?revision={region.page.document_id}&page={region.page_number}&region={region.id}" if source else f"?page={region.page_number}&region={region.id}"
+    return redirect(f"{reverse('document_detail', args=[target])}{query}")
 
 
 @login_required
@@ -1083,7 +1120,10 @@ def user_settings(request):
         action = request.POST.get("action")
 
         if action == "update_preferences":
-            prefs.ui_language = request.POST.get("ui_language", prefs.ui_language)
+            submitted_language = request.POST.get("ui_language", prefs.ui_language)
+            valid_languages = {code for code, _label in LANGUAGES}
+            if submitted_language in valid_languages:
+                prefs.ui_language = submitted_language
             prefs.timezone = request.POST.get("timezone", prefs.timezone)
             prefs.guided_explanations = "guided_explanations" in request.POST
             prefs.save()
@@ -1101,6 +1141,7 @@ def user_settings(request):
                     token_prefix=raw_token[:8],
                     token_hash=ApiToken.hash_token(raw_token),
                     scopes=["projects:read", "documents:read", "tasks:read",
+                            "documents:upload", "jobs:submit", "jobs:read",
                             "reviews:write", "statistics:read"],
                 )
                 from django.contrib import messages
@@ -1161,6 +1202,7 @@ def user_settings(request):
         "prefs": prefs,
         "tokens": tokens,
         "now": now,
+        "language_choices": LANGUAGES,
         "timezone_choices": timezone_choices,
     })
 
@@ -1283,6 +1325,37 @@ def job_status(request, job_id):
     return render(request, "workbench/job_status.html", context)
 
 
+@login_required
+@require_POST
+def job_recovery_action(request, job_id):
+    """Resume an interrupted job or explicitly close an uncertain job."""
+    from .policy import ProjectAccessPolicy
+    from .models import ProcessingJob
+
+    job = get_object_or_404(ProcessingJob, pk=job_id)
+    if not ProjectAccessPolicy(user=request.user).can_access_job(job):
+        messages.error(request, _("You do not have access to this processing job."))
+        return redirect("dashboard")
+
+    action = request.POST.get("action")
+    if action == "mark_failed" and job.state == "submission_uncertain":
+        job.transition_to("failed")
+        job.error_message = _("The uncertain processor submission was closed by an operator.")
+        job.status_message = _("Marked failed. Upload the document again to retry.")
+        job.save(update_fields=["error_message", "status_message"])
+        messages.warning(request, _("The uncertain job was marked failed."))
+    elif job.state == "interrupted" and job.external_job_id:
+        target = "importing" if action == "retry_import" else "processing"
+        job.transition_to(target)
+        job.error_message = ""
+        job.status_message = _("Recovery requested; the worker will continue this job.")
+        job.save(update_fields=["error_message", "status_message"])
+        messages.success(request, _("Recovery requested."))
+    else:
+        messages.error(request, _("This job cannot be resumed from its current state."))
+    return redirect("job_status", job_id=job.id)
+
+
 # --- Secure artifact serving ---
 
 def _resolve_artifact_path(relative_path: str) -> Path:
@@ -1375,8 +1448,12 @@ def artifact_content(request, artifact_id):
     elif resolved.suffix in (".png", ".jpg", ".jpeg"):
         content_type = f"image/{resolved.suffix.lstrip('.')}"
     elif resolved.suffix == ".html":
-        content_type = "text/html"
+        # Never execute imported HTML in the same origin as the workbench.
+        content_type = "application/octet-stream"
     elif resolved.suffix == ".txt":
         content_type = "text/plain"
 
-    return FileResponse(open(resolved, "rb"), content_type=content_type)
+    response = FileResponse(open(resolved, "rb"), content_type=content_type)
+    if resolved.suffix == ".html":
+        response["Content-Disposition"] = f'attachment; filename="{resolved.name}"'
+    return response

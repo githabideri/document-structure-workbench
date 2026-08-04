@@ -15,7 +15,10 @@ from django.utils import timezone
 
 from workbench.models import ChatRun, ProcessingJob, SourceDocument
 from workbench.chat import process_chat_run
-from workbench.processors.docling_serve import DoclingServeProcessor
+from workbench.processors.docling_serve import (
+    DoclingServeProcessor, ProcessorProtocolError, SubmissionRejected,
+    SubmissionUncertain,
+)
 from workbench.processors.importer import ImportError as ImporterError
 from workbench.processors.importer import ResultImporter
 
@@ -194,10 +197,11 @@ class Command(BaseCommand):
                     task_id = self.processor.submit(job.source_document, job.preset_snapshot or {})
                 except FileNotFoundError:
                     raise
-                except Exception as exc:
-                    # Once submission begins, absence of a task ID is ambiguous.
+                except SubmissionUncertain as exc:
                     self._mark_submission_uncertain(job, str(exc))
                     return
+                except (SubmissionRejected, ProcessorProtocolError) as exc:
+                    raise RuntimeError(str(exc)) from exc
                 job.external_job_id = task_id
                 job.save(update_fields=["external_job_id"])
                 job.transition_to("processing")

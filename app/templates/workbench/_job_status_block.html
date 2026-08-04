@@ -61,4 +61,15 @@
         <a href="{% url 'collection_detail' job.source_document.collection_id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>
     </div>
     {% endif %}
+
+    {% if job.state == "interrupted" and job.external_job_id %}
+    <div class="job-actions">
+        <form method="post" action="{% url 'job_recovery_action' job.id %}">{% csrf_token %}<input type="hidden" name="action" value="resume_polling"><button class="btn btn-primary" type="submit">{% trans "Resume polling" %}</button></form>
+        {% if job.result_document_id %}<form method="post" action="{% url 'job_recovery_action' job.id %}">{% csrf_token %}<input type="hidden" name="action" value="retry_import"><button class="btn btn-secondary" type="submit">{% trans "Retry result import" %}</button></form>{% endif %}
+    </div>
+    {% elif job.state == "submission_uncertain" %}
+    <div class="job-actions">
+        <form method="post" action="{% url 'job_recovery_action' job.id %}">{% csrf_token %}<input type="hidden" name="action" value="mark_failed"><button class="btn btn-secondary" type="submit">{% trans "Mark failed" %}</button></form>
+    </div>
+    {% endif %}
 </div>

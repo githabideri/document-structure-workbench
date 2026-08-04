@@ -132,7 +132,7 @@ def process_chat_run(run, worker_id="chat-worker"):
         response = requests.post(
             f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
-            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": 4096,
+            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": settings.DSW_CHAT_MAX_TOKENS,
                   "messages": ([{"role": "system", "content": system}] + history +
                                [{"role": "user", "content": run.retrieval_query}])},
             timeout=settings.DSW_CHAT_TIMEOUT,
@@ -202,7 +202,7 @@ def ask_read_only(question, source_ids, projects):
         response = requests.post(
             f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
-            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": 4096,
+            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": settings.DSW_CHAT_MAX_TOKENS,
                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": question}]},
             timeout=settings.DSW_CHAT_TIMEOUT,
         )

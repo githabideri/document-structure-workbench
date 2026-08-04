@@ -9,7 +9,7 @@ from workbench.models import ChatMessage, ChatRun, ChatThread, Collection, Docum
 User = get_user_model()
 
 
-@override_settings(STORAGES={"staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}}, DSW_CHAT_BASE_URL="http://llama.test/v1", DSW_CHAT_MODEL="qwen")
+@override_settings(STORAGES={"staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}}, DSW_CHAT_BASE_URL="http://llama.test/v1", DSW_CHAT_MODEL="qwen", DSW_CHAT_MAX_TOKENS=16384)
 class ChatTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("chat-user", password="pass")
@@ -66,6 +66,7 @@ class ChatTests(TestCase):
         second = create_chat_run(thread, "Can you restate the restoration year?")
         process_chat_run(second)
         sent_messages = post.call_args_list[-1].kwargs["json"]["messages"]
+        self.assertEqual(post.call_args_list[-1].kwargs["json"]["max_tokens"], 16384)
         self.assertEqual(sent_messages[-2]["role"], "assistant")
         self.assertEqual(sent_messages[-2]["content"], "The answer is 1957. [S1]")
         self.assertEqual(sent_messages[-1]["content"], "Can you restate the restoration year?")

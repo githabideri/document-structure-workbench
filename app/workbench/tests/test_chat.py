@@ -67,6 +67,7 @@ class ChatTests(TestCase):
         process_chat_run(second)
         sent_messages = post.call_args_list[-1].kwargs["json"]["messages"]
         self.assertEqual(sent_messages[-2]["role"], "assistant")
+        self.assertEqual(sent_messages[-2]["content"], "The answer is 1957. [S1]")
         self.assertEqual(sent_messages[-1]["content"], "Can you restate the restoration year?")
         self.assertEqual(second.evidence_items.first().processed_revision_id, self.document.pk)
 

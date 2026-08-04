@@ -121,9 +121,12 @@ def process_chat_run(run, worker_id="chat-worker"):
         "Answer only from supplied evidence, state uncertainty, and cite claims with supplied markers "
         "such as [S1]. Never invent citations or URLs.\n\nEVIDENCE:\n" + context
     )
-    history = list(
-        thread.messages.exclude(pk=run.user_message_id).order_by("ordinal").values("role", "text")
-    )[-12:]
+    history_rows = list(thread.messages.exclude(pk=run.user_message_id)
+                        .order_by("ordinal").values("role", "text"))[-12:]
+    history = [
+        {"role": item["role"], "content": item["text"]}
+        for item in history_rows
+    ]
     ChatRun.objects.filter(pk=run.pk).update(state="generating", status_message="Asking the configured Qwen model.")
     try:
         response = requests.post(
@@ -139,6 +142,16 @@ def process_chat_run(run, worker_id="chat-worker"):
         answer = payload["choices"][0]["message"].get("content", "")
         if not answer:
             raise RuntimeError("The provider returned reasoning without a final answer.")
+    except requests.HTTPError as exc:
+        detail = ""
+        if exc.response is not None:
+            try:
+                detail = exc.response.json().get("error", {}).get("message", "")
+            except ValueError:
+                detail = exc.response.text[:300]
+        raise RuntimeError(
+            "The chat provider rejected the request. " + (detail or "Check the model request format.")
+        ) from exc
     except requests.RequestException as exc:
         raise RuntimeError("The configured chat provider is unreachable.") from exc
     ChatRun.objects.filter(pk=run.pk).update(state="validating", status_message="Validating source citations.")

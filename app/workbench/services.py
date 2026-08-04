@@ -222,6 +222,8 @@ class SupportBundleService:
                 explanation = "The model returned a response containing the answer and/or reasoning content."
             elif name == "final_answer_rejected":
                 explanation = "The provider returned another tool request as text instead of a final answer; the run was not accepted as complete."
+            elif name == "citation_rejected":
+                explanation = f"The provider cited markers that were not retrieved for this run ({', '.join(metadata.get('invalid_citations', []))}); the answer was not accepted."
             elif name == "failed":
                 explanation = f"The run stopped without a valid answer ({event.get('error_code') or 'unknown error'}). It can be retried if the provider issue is transient."
             elif name == "validating":

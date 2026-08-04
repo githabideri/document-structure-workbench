@@ -92,7 +92,7 @@ class ChatTests(TestCase):
     @patch("workbench.chat.requests.post")
     def test_provider_reasoning_is_diagnostic_only_and_support_bundle_is_auditable(self, post):
         post.return_value = Mock(status_code=200, json=lambda: {"model": "qwen", "choices": [{"finish_reason": "stop", "message": {
-            "content": "The answer is 1957. [S1]", "reasoning_content": "untrusted internal diagnostic text",
+            "content": "The answer is 1957.", "reasoning_content": "untrusted internal diagnostic text",
         }}]})
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         thread.selected_sources.set([self.source])
@@ -103,7 +103,7 @@ class ChatTests(TestCase):
         run.refresh_from_db()
         self.assertNotIn("reasoning_content", run.assistant_message.text)
         bundle = SupportBundleService.build(run)
-        self.assertEqual(bundle["final_answer"], "The answer is 1957. [S1]")
+        self.assertEqual(bundle["final_answer"], "The answer is 1957.")
         self.assertEqual(bundle["reasoning_content"], "untrusted internal diagnostic text")
         self.assertNotIn("Authorization", json.dumps(bundle))
 

@@ -82,7 +82,10 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             message = {"content": ""}
             finish_reason = "stop"
         else:
-            message = {"content": "Alpha is documented here. [S1]"}
+            answer = "Alpha is documented here."
+            if mode in {"native-tool", "limit-tool"} and config["request_count"] > 1:
+                answer += " [S1]"
+            message = {"content": answer}
             finish_reason = "length" if mode == "finish-length" else "stop"
         self._send(200, {"model": "fake-qwen", "choices": [{"finish_reason": finish_reason, "message": message}],
                          "usage": {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}})
@@ -169,7 +172,7 @@ class FakeProviderIntegrationTests(TestCase):
         self.assertIsNone(error)
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
-        self.assertEqual(run.assistant_message.text, "Alpha is documented here. [S1]")
+        self.assertEqual(run.assistant_message.text, "Alpha is documented here.")
         self.assertEqual(self.provider.config["authorization"], "Bearer fake-secret")
         self.assertEqual(self.provider.config["request"]["model"], "fake-qwen")
         self.assertEqual(run.model_metadata["provider"]["finish_reason"], "stop")
@@ -195,7 +198,7 @@ class FakeProviderIntegrationTests(TestCase):
             )
         self.assertEqual(inspected.status_code, 200)
         self.assertEqual(inspected.json()["run"]["state"], "completed")
-        self.assertEqual(inspected.json()["run"]["answer"], "Alpha is documented here. [S1]")
+        self.assertEqual(inspected.json()["run"]["answer"], "Alpha is documented here.")
 
     @staticmethod
     def _get_run(run_id):

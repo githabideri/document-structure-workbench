@@ -389,7 +389,7 @@ def chat_run_diagnostics(request, run_id):
         "provider": bundle["provider"], "final_answer": bundle["final_answer"],
         "reasoning_content": bundle.get("reasoning_content"), "events": bundle["events"],
     }
-    tool_events = [event for event in bundle["events"] if event["name"] in {"tool_call", "tool_fallback", "tool_call_rejected", "tool_call_limit", "final_answer_request", "final_answer_rejected"}]
+    tool_events = [event for event in bundle["events"] if event["name"] in {"tool_call", "tool_fallback", "tool_call_rejected", "tool_call_limit", "final_answer_request", "final_answer_rejected", "citation_rejected"}]
     used_model_tools = bool([event for event in bundle["events"] if event["name"] == "tool_call"])
     retrieval_event = next((event for event in bundle["events"] if event["name"] == "evidence_selected"), {})
     provider_summary = {

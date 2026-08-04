@@ -903,10 +903,12 @@ class SearchPassage(models.Model):
 class ChatThread(models.Model):
     """A persistent, revision-scoped research conversation."""
 
-    project = models.ForeignKey(Collection, on_delete=models.CASCADE, related_name="chat_threads")
+    project = models.ForeignKey(Collection, on_delete=models.CASCADE, null=True, blank=True, related_name="chat_threads")
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="chat_threads")
     title = models.CharField(max_length=255, blank=True)
     search_enabled = models.BooleanField(default=False)
+    scope_mode = models.CharField(max_length=20, choices=[("project", "Project"), ("all", "All accessible projects")], default="project")
+    scope_config = JSONField(default=dict, blank=True)
     search_project = models.ForeignKey(Collection, on_delete=models.SET_NULL, null=True, blank=True, related_name="search_chat_threads")
     selected_revisions = JSONField(default=list, blank=True)
     scope_snapshot = JSONField(default=dict, blank=True)
@@ -954,6 +956,7 @@ class ChatRun(models.Model):
     worker_heartbeat_at = models.DateTimeField(null=True, blank=True)
     lease_expires_at = models.DateTimeField(null=True, blank=True)
     retrieval_query = models.TextField(blank=True)
+    scope_snapshot = JSONField(default=dict, blank=True)
     token_budget = models.PositiveIntegerField(default=12000)
     source_tokens = models.PositiveIntegerField(default=0)
     model_metadata = JSONField(default=dict, blank=True)

@@ -265,39 +265,44 @@ def chat_view(request):
     policy = ProjectAccessPolicy(user=request.user)
     projects = list(policy.visible_projects())
     sources = list(SourceDocument.objects.filter(collection__in=projects, is_archived=False).select_related("collection", "active_document")[:100])
-    thread_queryset = ChatThread.objects.filter(project__in=projects)
+    visible_project_ids = {p.id for p in projects}
+    thread_queryset = ChatThread.objects.all()
+    thread_queryset = [thread for thread in thread_queryset.select_related("project")
+                       if thread.project_id in visible_project_ids or
+                       visible_project_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
     if not is_admin(request.user):
-        thread_queryset = thread_queryset.filter(created_by=request.user)
-    threads = list(thread_queryset.select_related("project").order_by("-updated_at", "-id")[:50])
+        thread_queryset = [thread for thread in thread_queryset if thread.created_by_id == request.user.id]
+    threads = sorted(thread_queryset, key=lambda item: (item.updated_at, item.id), reverse=True)[:50]
     error = None
     selected_ids = request.POST.getlist("source") if request.method == "POST" else request.GET.getlist("source")
+    selected_mode = request.POST.get("scope_mode", "all") if request.method == "POST" else request.GET.get("scope_mode", "all")
+    selected_project_id = request.POST.get("project_id") if request.method == "POST" else request.GET.get("project_id")
     if request.method == "POST":
         question = request.POST.get("question", "").strip()
-        if not question or not selected_ids:
-            error = _("Choose at least one document and enter a question.")
+        if not question:
+            error = _("Choose at least one document or project scope and enter a question.")
         else:
-            allowed = {str(source.id) for source in sources}
-            selected_ids = [sid for sid in selected_ids if sid in allowed]
-            selected_sources = [source for source in sources if str(source.id) in selected_ids]
-            if not selected_sources:
-                error = _("The selected documents are not accessible.")
-            else:
-                project = selected_sources[0].collection
-                revision_ids = [source.active_document_id for source in selected_sources if source.active_document_id]
+            from .policy import ProjectAccessPolicy
+            try:
+                scope = policy.resolve_chat_scope(
+                    mode=selected_mode, project_id=int(selected_project_id) if selected_project_id else None,
+                    source_ids=selected_ids,
+                )
+                project = Collection.objects.filter(pk=selected_project_id).first() if selected_project_id else None
                 thread = ChatThread.objects.create(
                     project=project, created_by=request.user, title=question[:120],
                     model=getattr(settings, "DSW_CHAT_MODEL", ""),
-                    selected_revisions=revision_ids,
-                    scope_snapshot={
-                        "source_ids": [source.id for source in selected_sources],
-                        "revision_ids": revision_ids,
-                    },
+                    scope_mode=selected_mode, scope_config=scope,
+                    selected_revisions=scope["revision_ids"],
                 )
-                thread.selected_sources.set(selected_sources)
-                create_chat_run(thread, question)
+                thread.selected_sources.set(SourceDocument.objects.filter(pk__in=scope["attachment_ids"]))
+                create_chat_run(thread, question, scope=scope)
                 return redirect("chat_thread", thread_id=thread.id)
+            except (ValueError, PermissionError):
+                error = _("The selected scope or documents are not accessible.")
     return render(request, "workbench/chat.html", {
-        "sources": sources, "selected_ids": set(selected_ids), "error": error,
+        "sources": sources, "projects": projects, "selected_ids": set(selected_ids),
+        "selected_mode": selected_mode, "selected_project_id": selected_project_id, "error": error,
         "thread": None, "chat_messages": [], "latest_run": None,
         "threads": threads, "is_admin": is_admin(request.user),
     })
@@ -313,7 +318,9 @@ def chat_thread_view(request, thread_id):
         thread_queryset = thread_queryset.filter(created_by=request.user)
     thread = get_object_or_404(thread_queryset, pk=thread_id)
     policy = ProjectAccessPolicy(user=request.user)
-    if not policy.can_view(thread.project):
+    if thread.project_id and not policy.can_view(thread.project):
+        return redirect("chat")
+    if not thread.project_id and not set((thread.scope_config or {}).get("project_ids", [])) & set(policy.visible_projects().values_list("id", flat=True)):
         return redirect("chat")
     if request.method == "POST":
         question = request.POST.get("question", "").strip()
@@ -322,10 +329,14 @@ def chat_thread_view(request, thread_id):
             create_chat_run(thread, question)
         return redirect("chat_thread", thread_id=thread.id)
     sources = list(thread.selected_sources.select_related("collection"))
-    thread_queryset = ChatThread.objects.filter(project__in=policy.visible_projects())
+    visible_projects = policy.visible_projects()
+    visible_project_ids = set(visible_projects.values_list("id", flat=True))
+    thread_queryset = [thread for thread in ChatThread.objects.all().select_related("project")
+                       if thread.project_id in visible_project_ids or
+                       visible_project_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
     if not is_admin(request.user):
-        thread_queryset = thread_queryset.filter(created_by=request.user)
-    threads = list(thread_queryset.select_related("project").order_by("-updated_at", "-id")[:50])
+        thread_queryset = [thread for thread in thread_queryset if thread.created_by_id == request.user.id]
+    threads = sorted(thread_queryset, key=lambda item: (item.updated_at, item.id), reverse=True)[:50]
     messages = list(thread.messages.all())
     assistant_runs = {
         run.assistant_message_id: run

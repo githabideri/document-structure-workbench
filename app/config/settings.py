@@ -146,6 +146,11 @@ DSW_CHAT_API_KEY = os.environ.get("DSW_CHAT_API_KEY", "")
 DSW_CHAT_MODEL = os.environ.get("DSW_CHAT_MODEL", "")
 DSW_CHAT_TIMEOUT = int(os.environ.get("DSW_CHAT_TIMEOUT", "120"))
 DSW_CHAT_MAX_TOKENS = int(os.environ.get("DSW_CHAT_MAX_TOKENS", "16384"))
+DSW_CHAT_TOOL_MODE = os.environ.get("DSW_CHAT_TOOL_MODE", "fallback")
+DSW_CHAT_MAX_TOOL_CALLS = int(os.environ.get("DSW_CHAT_MAX_TOOL_CALLS", "3"))
+DSW_CHAT_MAX_RESULTS_PER_CALL = int(os.environ.get("DSW_CHAT_MAX_RESULTS_PER_CALL", "8"))
+DSW_CHAT_MAX_EVIDENCE = int(os.environ.get("DSW_CHAT_MAX_EVIDENCE", "24"))
+DSW_CHAT_CONTEXT_TOKEN_BUDGET = int(os.environ.get("DSW_CHAT_CONTEXT_TOKEN_BUDGET", "12000"))
 
 # Fail clearly when API URL is absent in production
 if not DEBUG and not DSW_DOCLING_API_URL:

@@ -98,6 +98,13 @@ class DiagnosticsService:
         configured = bool(base_url and model)
         result = {"configured": configured, "reachable": None,
                   "model_configured": bool(model), "model_available": None}
+        result["tool_mode"] = getattr(settings, "DSW_CHAT_TOOL_MODE", "fallback")
+        result["limits"] = {
+            "max_tool_calls": getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3),
+            "max_results_per_call": getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8),
+            "max_evidence": getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
+            "context_token_budget": getattr(settings, "DSW_CHAT_CONTEXT_TOKEN_BUDGET", 12000),
+        }
         if not configured:
             return result
         headers = {"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if getattr(settings, "DSW_CHAT_API_KEY", "") else {}

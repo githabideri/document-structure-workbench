@@ -569,7 +569,10 @@ def api_task_detail(request, task_id):
 
 def _chat_thread_json(thread):
     return {"id": thread.id, "project_id": thread.project_id, "title": thread.title,
-            "scope": {"source_ids": list(thread.selected_sources.values_list("id", flat=True)), "revision_ids": thread.selected_revisions or []},
+            "scope": {"mode": thread.scope_mode, "project_id": thread.project_id,
+                       "source_ids": list(thread.selected_sources.values_list("id", flat=True)),
+                       "revision_ids": thread.selected_revisions or [],
+                       **(thread.scope_config or {})},
             "created_at": thread.created_at.isoformat(), "updated_at": thread.updated_at.isoformat()}
 
 
@@ -596,28 +599,35 @@ def api_chat_threads(request):
     if request.method == "GET":
         identity = request._api_token.user if request._api_token.user_id else None
         policy = ProjectAccessPolicy(user=identity, token=request._api_token)
-        threads = ChatThread.objects.filter(project__in=policy.visible_projects()).select_related("project")
+        visible_ids = set(policy.visible_projects().values_list("id", flat=True))
+        threads = [thread for thread in ChatThread.objects.all().select_related("project")
+                   if thread.project_id in visible_ids or visible_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
         return JsonResponse({"request_id": request._request_id, "threads": [_chat_thread_json(thread) for thread in threads[:100]]})
     from .chat import create_chat_run
     try:
         data = json.loads(request.body or "{}")
-        project_id = int(data["project_id"])
+        mode = data.get("scope", {}).get("mode", data.get("scope_mode", "project"))
+        project_value = data.get("project_id", data.get("scope", {}).get("project_id"))
+        project_id = int(project_value) if project_value is not None else None
         source_ids = [int(value) for value in data.get("source_ids", [])]
+        source_ids += [int(value) for value in data.get("scope", {}).get("attachment_ids", [])]
         question = str(data.get("question", "")).strip()
-        if not source_ids or not question:
-            raise ValueError("project_id, source_ids, and question are required")
-        project = get_object_or_404(Collection, pk=project_id)
+        if not question:
+            raise ValueError("question is required")
         policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
-        if not policy.can_view(project):
-            return JsonResponse({"error": {"code": "forbidden", "message": "Project is not accessible."}, "request_id": request._request_id}, status=403)
-        sources = list(SourceDocument.objects.filter(pk__in=source_ids, collection=project, is_archived=False))
-        if len(sources) != len(set(source_ids)):
-            return JsonResponse({"error": {"code": "forbidden", "message": "One or more sources are not accessible."}, "request_id": request._request_id}, status=403)
+        try:
+            scope = policy.resolve_chat_scope(mode=mode, project_id=project_id, source_ids=source_ids,
+                                              revision_ids=data.get("scope", {}).get("revision_ids"),
+                                              filters=data.get("scope", {}).get("filters"))
+        except (ValueError, PermissionError) as exc:
+            return JsonResponse({"error": {"code": "forbidden", "message": str(exc)}, "request_id": request._request_id}, status=403)
+        project = Collection.objects.filter(pk=project_id).first() if project_id else None
         thread = ChatThread.objects.create(project=project, created_by=request._api_token.user if request._api_token.user_id else None,
                                             title=data.get("title", question[:120]), model=getattr(settings, "DSW_CHAT_MODEL", ""),
-                                            selected_revisions=[source.active_document_id for source in sources if source.active_document_id])
-        thread.selected_sources.set(sources)
-        run = create_chat_run(thread, question)
+                                            scope_mode=mode, scope_config=scope,
+                                            selected_revisions=scope["revision_ids"])
+        thread.selected_sources.set(SourceDocument.objects.filter(pk__in=scope["attachment_ids"]))
+        run = create_chat_run(thread, question, scope=scope)
         run.request_id = request._request_id
         run.save(update_fields=["request_id"])
         return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread), "run": _chat_run_json(run) }, status=201)
@@ -630,7 +640,9 @@ def api_chat_threads(request):
 def api_chat_threads_list(request):
     identity = request._api_token.user if request._api_token.user_id else None
     policy = ProjectAccessPolicy(user=identity, token=request._api_token)
-    threads = ChatThread.objects.filter(project__in=policy.visible_projects()).select_related("project")
+    visible_ids = set(policy.visible_projects().values_list("id", flat=True))
+    threads = [thread for thread in ChatThread.objects.all().select_related("project")
+               if thread.project_id in visible_ids or visible_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
     return JsonResponse({"request_id": request._request_id, "threads": [_chat_thread_json(thread) for thread in threads[:100]]})
 
 
@@ -639,7 +651,9 @@ def api_chat_threads_list(request):
 def api_chat_thread_detail(request, thread_id):
     thread = get_object_or_404(ChatThread.objects.select_related("project"), pk=thread_id)
     policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
-    if not policy.can_view(thread.project):
+    if thread.project_id and not policy.can_view(thread.project):
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
+    if not thread.project_id and not set((thread.scope_config or {}).get("project_ids", [])) & set(policy.visible_projects().values_list("id", flat=True)):
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
     runs = thread.runs.select_related("assistant_message").order_by("created_at")
     messages = [{"id": message.id, "role": message.role, "text": message.text, "ordinal": message.ordinal, "created_at": message.created_at.isoformat()} for message in thread.messages.all()]
@@ -652,7 +666,7 @@ def api_chat_thread_detail(request, thread_id):
 def api_chat_thread_runs(request, thread_id):
     thread = get_object_or_404(ChatThread.objects.select_related("project"), pk=thread_id)
     policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
-    if not policy.can_view(thread.project):
+    if thread.project_id and not policy.can_view(thread.project):
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
     try:
         data = json.loads(request.body or "{}")
@@ -660,7 +674,19 @@ def api_chat_thread_runs(request, thread_id):
         if not question:
             raise ValueError("question is required")
         from .chat import create_chat_run
-        run = create_chat_run(thread, question)
+        scope_data = data.get("scope")
+        scope = None
+        if scope_data is not None:
+            try:
+                scope = policy.resolve_chat_scope(
+                    mode=scope_data.get("mode", thread.scope_mode),
+                    project_id=scope_data.get("project_id", thread.project_id),
+                    source_ids=scope_data.get("attachment_ids", scope_data.get("source_ids", [])),
+                    revision_ids=scope_data.get("revision_ids"), filters=scope_data.get("filters"),
+                )
+            except (ValueError, PermissionError) as exc:
+                return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": str(exc)}}, status=403)
+        run = create_chat_run(thread, question, scope=scope)
         run.request_id = request._request_id
         run.save(update_fields=["request_id"])
         return JsonResponse({"request_id": request._request_id, "run": _chat_run_json(run)}, status=201)
@@ -671,7 +697,9 @@ def api_chat_thread_runs(request, thread_id):
 def _api_chat_run(request, run_id):
     run = get_object_or_404(ChatRun.objects.select_related("thread", "assistant_message", "thread__project"), pk=run_id)
     policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
-    if not policy.can_view(run.thread.project):
+    if run.thread.project_id and not policy.can_view(run.thread.project):
+        return None
+    if not run.thread.project_id and not set((run.scope_snapshot or {}).get("project_ids", [])) & set(policy.visible_projects().values_list("id", flat=True)):
         return None
     return run
 

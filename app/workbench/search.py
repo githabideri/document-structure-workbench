@@ -61,3 +61,10 @@ def search_project(projects, query, *, source_ids=None, limit=20):
     if source_ids:
         qs = qs.filter(source_document_id__in=source_ids)
     return list(qs.select_related("source_document", "processed_revision", "page", "page_region")[:limit])
+
+
+def search_scope(scope, query, *, limit=20):
+    """Stable read-only retrieval interface used by chat and future indexes."""
+    from .models import Collection
+    projects = Collection.objects.filter(id__in=scope.get("project_ids", []))
+    return search_project(projects, query, source_ids=scope.get("source_ids", []), limit=limit)

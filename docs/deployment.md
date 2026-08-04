@@ -173,3 +173,12 @@ source IDs. It writes screenshots, accessibility snapshots, command logs, and
 
 See [Browser smoke and debugging](browser-smoke.md) for fixture setup and
 browser-specific diagnostics.
+### General chat scope
+
+Chat runs freeze their resolved authorization scope at submission time. Set
+`DSW_CHAT_TOOL_MODE` to `automatic`, `native`, or `fallback`; deployments without
+provider tool calling remain usable through the deterministic lexical index.
+The `DSW_CHAT_MAX_TOOL_CALLS`, `DSW_CHAT_MAX_RESULTS_PER_CALL`,
+`DSW_CHAT_MAX_EVIDENCE`, and `DSW_CHAT_CONTEXT_TOKEN_BUDGET` settings bound
+provider retrieval and context size. These values are also reported by the
+anonymous health diagnostics endpoint without exposing API keys.

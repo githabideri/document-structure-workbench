@@ -100,6 +100,57 @@ class ProjectAccessPolicy:
             return self._check_token_access(project, min_role="viewer")
         return False
 
+    def resolve_chat_scope(self, *, mode="project", project_id=None, source_ids=None,
+                           revision_ids=None, filters=None):
+        """Resolve and freeze a chat scope using this identity's current access.
+
+        The returned primitive-only dictionary is safe to persist on a run. Every
+        source and revision is checked against the same authorized project set.
+        """
+        from .models import SourceDocument
+        visible = self.visible_projects()
+        visible_ids = set(visible.values_list("id", flat=True))
+        mode = mode if mode in {"project", "all"} else "project"
+        if mode == "project":
+            if project_id is None:
+                raise ValueError("project_id is required for project scope")
+            project_id = int(project_id)
+            if project_id not in visible_ids:
+                raise PermissionError("Project is not accessible.")
+            project_ids = [project_id]
+        else:
+            project_ids = sorted(visible_ids)
+        requested_sources = {int(value) for value in (source_ids or [])}
+        # Attachments may come from any project the identity can view; the
+        # selected project/all-project mode controls search results separately.
+        sources = SourceDocument.objects.filter(
+            id__in=requested_sources, collection_id__in=visible_ids, is_archived=False,
+        ).select_related("collection")
+        if sources.count() != len(requested_sources):
+            raise PermissionError("One or more attached documents are not accessible.")
+        if mode == "all" and not requested_sources:
+            requested_sources = set(SourceDocument.objects.filter(
+                collection_id__in=project_ids, is_archived=False,
+            ).values_list("id", flat=True))
+        elif mode == "project":
+            # Project scope searches every accessible source in that project;
+            # supplied source_ids are manual attachments, not a hidden filter.
+            requested_sources |= set(SourceDocument.objects.filter(
+                collection_id=project_id, is_archived=False,
+            ).values_list("id", flat=True))
+        if revision_ids is None:
+            revisions = list(SourceDocument.objects.filter(id__in=requested_sources).values_list("active_document_id", flat=True))
+            revision_ids = sorted({value for value in revisions if value})
+        else:
+            revision_ids = sorted({int(value) for value in revision_ids if value})
+        return {
+            "mode": mode, "project_ids": project_ids,
+            "source_ids": sorted(requested_sources),
+            "revision_ids": revision_ids,
+            "attachment_ids": sorted({int(value) for value in (source_ids or [])}),
+            "filters": filters or {},
+        }
+
     def can_edit(self, project):
         """Can the identity edit this project (upload, modify)?"""
         if self._check_global_admin():

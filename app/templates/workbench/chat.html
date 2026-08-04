@@ -9,7 +9,7 @@
     <div>
       <p class="eyebrow">{% trans "Evidence workspace" %}</p>
       <h1>{% trans "Research conversations" %}</h1>
-      <p class="page-intro">{% trans "Ask questions across selected archival documents and inspect the evidence behind every answer." %}</p>
+        <p class="page-intro">{% trans "Ask research questions across an authorized project scope, with optional document attachments." %}</p>
     </div>
     <a class="btn btn-primary" href="{% url 'chat' %}">{% trans "New conversation" %}</a>
   </header>
@@ -65,18 +65,30 @@
       {% else %}
       <div class="chat-empty-start">
         <h2>{% trans "Start a research conversation" %}</h2>
-        <p>{% trans "Choose the documents that should form the evidence scope, then ask your first question." %}</p>
+        <p>{% trans "Choose a project or all accessible projects. Attachments are added to the search scope." %}</p>
       </div>
       <form method="post" class="chat-form chat-start-form">
         {% csrf_token %}
         <fieldset>
-          <legend>{% trans "Evidence scope" %}</legend>
+          <legend>{% trans "Search scope" %}</legend>
+          <label for="scope_mode">{% trans "Scope" %}</label>
+          <select id="scope_mode" name="scope_mode">
+            <option value="all"{% if selected_mode == 'all' %} selected{% endif %}>{% trans "All accessible projects" %}</option>
+            <option value="project"{% if selected_mode == 'project' %} selected{% endif %}>{% trans "One project" %}</option>
+          </select>
+          <label for="project_id">{% trans "Project (for project scope)" %}</label>
+          <select id="project_id" name="project_id">
+            <option value="">{% trans "Choose a project" %}</option>
+            {% for project in projects %}<option value="{{ project.id }}"{% if selected_project_id|stringformat:'s' == project.id|stringformat:'s' %} selected{% endif %}>{{ project.name }}</option>{% endfor %}
+          </select>
+          <p class="chat-context-intro">{% trans "The selected scope is frozen for this question. Change it for the next turn." %}</p>
+          <h3>{% trans "Optional attachments" %}</h3>
           {% for source in sources %}
           <label class="checkbox-row" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}"><input type="checkbox" name="source" value="{{ source.id }}" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}" {% if source.id|stringformat:'s' in selected_ids %}checked{% endif %}> <span>{{ source.filename }}<small>{{ source.collection.name }}</small></span></label>
           {% empty %}<p>{% trans "No accessible processed documents." %}</p>{% endfor %}
         </fieldset>
         <label for="question">{% trans "Question" %}</label>
-        <textarea id="question" name="question" rows="5" required placeholder="{% trans 'What does this document discuss?' %}"></textarea>
+        <textarea id="question" name="question" rows="5" required placeholder="{% trans 'What should I research?' %}"></textarea>
         <button class="btn btn-primary" type="submit">{% trans "Start conversation" %}</button>
       </form>
       {% endif %}

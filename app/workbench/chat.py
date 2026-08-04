@@ -2,6 +2,7 @@
 import requests
 import logging
 import re
+import json
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
@@ -10,6 +11,7 @@ from django.utils.html import conditional_escape, format_html
 from django.utils.safestring import mark_safe
 
 from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, SearchPassage
+from .policy import ProjectAccessPolicy
 from .search import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -83,14 +85,29 @@ def select_evidence(question, source_ids, projects, revision_ids=None, limit=24)
     return selected
 
 
-def create_chat_run(thread, question):
+def _legacy_scope(thread):
+    """Compatibility scope for conversations created before scoped chat."""
+    if thread.scope_config:
+        return dict(thread.scope_config)
+    return {
+        "mode": "project", "project_ids": [thread.project_id] if thread.project_id else [],
+        "source_ids": list(thread.selected_sources.values_list("id", flat=True)),
+        "revision_ids": thread.selected_revisions or [],
+        "attachment_ids": list(thread.selected_sources.values_list("id", flat=True)),
+        "filters": {},
+    }
+
+
+def create_chat_run(thread, question, *, scope=None):
     """Persist a user message and queued run atomically."""
     with transaction.atomic():
         ordinal = thread.messages.count()
         message = ChatMessage.objects.create(thread=thread, role="user", text=question, ordinal=ordinal)
+        snapshot = scope or _legacy_scope(thread)
         run = ChatRun.objects.create(
             thread=thread, user_message=message, retrieval_query=question,
             token_budget=getattr(settings, "DSW_CHAT_MAX_TOKENS", 16384),
+            scope_snapshot=snapshot,
             status_message="Waiting for an evidence worker.",
         )
         record_run_event(run, "queued")
@@ -115,11 +132,18 @@ def process_chat_run(run, worker_id="chat-worker"):
     now = timezone.now()
     ChatRun.objects.filter(pk=run.pk).update(state="retrieving", started_at=now, worker_id=worker_id, worker_heartbeat_at=now, status_message="Searching all selected document pages.")
     thread = run.thread
-    source_ids = list(thread.selected_sources.values_list("id", flat=True))
-    projects = [thread.project]
-    revision_ids = thread.selected_revisions or None
+    snapshot = run.scope_snapshot or _legacy_scope(thread)
+    source_ids = snapshot.get("source_ids", [])
+    projects = list(snapshot.get("project_ids", []))
+    revision_ids = snapshot.get("revision_ids") or None
     record_run_event(run, "retrieving")
-    selected = select_evidence(run.retrieval_query, source_ids, projects, revision_ids=revision_ids)
+    attachment_projects = list(SearchPassage.objects.filter(
+        source_document_id__in=snapshot.get("attachment_ids", [])
+    ).values_list("project_id", flat=True).distinct())
+    selected = select_evidence(
+        run.retrieval_query, source_ids, sorted(set(projects) | set(attachment_projects)), revision_ids=revision_ids,
+        limit=getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
+    )
     EvidenceItem.objects.filter(run=run).delete()
     items = []
     for index, (score, passage, reason) in enumerate(selected, 1):
@@ -127,7 +151,8 @@ def process_chat_run(run, worker_id="chat-worker"):
             run=run, marker=f"S{index}", source_document=passage.source_document,
             processed_revision=passage.processed_revision, processing_job=passage.processing_job,
             page=passage.page, page_region=passage.page_region, passage=passage,
-            text=passage.text[:1600], retrieval_method="lexical", selection_reason=reason,
+            text=passage.text[:1600], retrieval_method="lexical",
+            selection_reason=("manual-attachment/" if passage.source_document_id in snapshot.get("attachment_ids", []) else "search/") + reason,
             score=score, ordinal=index,
         ))
     EvidenceItem.objects.bulk_create(items)
@@ -139,7 +164,7 @@ def process_chat_run(run, worker_id="chat-worker"):
         "Answer only from supplied evidence, state uncertainty, and cite claims with supplied markers "
         "such as [S1]. Never invent citations or URLs.\n\nEVIDENCE:\n" + context
     )
-    run.model_metadata = {**(run.model_metadata or {}), "prompt": system}
+    run.model_metadata = {**(run.model_metadata or {}), "prompt": system, "scope_snapshot": snapshot}
     run.save(update_fields=["model_metadata"])
     record_run_event(run, "assembling", metadata={"source_tokens": sum(len(item.text.split()) for item in items)})
     history_rows = list(thread.messages.exclude(pk=run.user_message_id)
@@ -157,12 +182,16 @@ def process_chat_run(run, worker_id="chat-worker"):
         provider_messages = ([{"role": "system", "content": system}] + history + [{"role": "user", "content": run.retrieval_query}])
         run.model_metadata = {**(run.model_metadata or {}), "provider_request": {"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": run.token_budget, "messages": provider_messages}}
         run.save(update_fields=["model_metadata"])
+        tool_mode = getattr(settings, "DSW_CHAT_TOOL_MODE", "fallback")
+        tools = [{"type": "function", "function": {"name": "search_evidence", "description": "Search the frozen archival scope.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}}]
+        request_payload = {"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": settings.DSW_CHAT_MAX_TOKENS, "messages": provider_messages}
+        if tool_mode in {"automatic", "native"}:
+            request_payload["tools"] = tools
+            request_payload["tool_choice"] = "auto"
         response = requests.post(
             f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
-            json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": settings.DSW_CHAT_MAX_TOKENS,
-                  "messages": provider_messages},
-            timeout=settings.DSW_CHAT_TIMEOUT,
+            json=request_payload, timeout=settings.DSW_CHAT_TIMEOUT,
         )
         response.raise_for_status()
         try:
@@ -171,6 +200,43 @@ def process_chat_run(run, worker_id="chat-worker"):
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ChatProviderError("The chat provider returned an invalid response.", "provider_protocol_error") from exc
         provider_message = choice.get("message", {})
+        tool_calls = provider_message.get("tool_calls") or []
+        tool_call_count = 0
+        while tool_calls and tool_call_count < getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3):
+            provider_messages.append(provider_message)
+            tool_results = []
+            for call in tool_calls:
+                tool_call_count += 1
+                function = call.get("function", {}) if isinstance(call, dict) else {}
+                try:
+                    arguments = json.loads(function.get("arguments", "{}"))
+                    query = str(arguments["query"]).strip()
+                    if not query:
+                        raise ValueError("empty query")
+                except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                    record_run_event(run, "tool_call_rejected", metadata={"reason": "malformed_tool_call"}, error_code="provider_malformed_tool_call")
+                    result = {"error": "Malformed search query."}
+                else:
+                    found = select_evidence(query, source_ids, sorted(set(projects) | set(attachment_projects)), revision_ids=revision_ids, limit=getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8))
+                    result = {"results": [{"text": passage.text[:1600], "source_document_id": passage.source_document_id, "revision_id": passage.processed_revision_id, "page": passage.page.page_number if passage.page else None} for _, passage, _ in found]}
+                    for _, passage, reason in found:
+                        marker = f"S{len(items) + 1}"
+                        evidence = EvidenceItem.objects.create(run=run, marker=marker, source_document=passage.source_document, processed_revision=passage.processed_revision, processing_job=passage.processing_job, page=passage.page, page_region=passage.page_region, passage=passage, text=passage.text[:1600], retrieval_method="native-tool", selection_reason="search-tool/" + reason, ordinal=len(items) + 1)
+                        items.append(evidence)
+                    record_run_event(run, "tool_call", metadata={"query": query, "result_count": len(found), "tool_call_number": tool_call_count})
+                tool_results.append({"role": "tool", "tool_call_id": call.get("id", f"tool-{tool_call_count}"), "content": json.dumps(result)})
+                if tool_call_count >= getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3):
+                    break
+            provider_messages.extend(tool_results)
+            if tool_call_count >= getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3):
+                record_run_event(run, "tool_call_limit", metadata={"max_tool_calls": tool_call_count})
+                break
+            response = requests.post(f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {}, json={**request_payload, "messages": provider_messages}, timeout=settings.DSW_CHAT_TIMEOUT)
+            response.raise_for_status()
+            payload = response.json()
+            choice = payload["choices"][0]
+            provider_message = choice.get("message", {})
+            tool_calls = provider_message.get("tool_calls") or []
         answer = provider_message.get("content", "") or ""
         reasoning = provider_message.get("reasoning_content")
         usage = payload.get("usage") or {}

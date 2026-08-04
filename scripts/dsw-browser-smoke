@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Generic browser acceptance scenario. Credentials are read only from the
+# environment and never written to the result file.
+base_url="${DSW_BROWSER_BASE_URL:-http://127.0.0.1:8000}"
+username="${DSW_BROWSER_USERNAME:-}"
+password="${DSW_BROWSER_PASSWORD:-}"
+question="${DSW_BROWSER_QUESTION:-What does the selected document discuss?}"
+output_dir="${DSW_BROWSER_OUTPUT_DIR:-/tmp/dsw-browser-smoke-$(date +%Y%m%d-%H%M%S)}"
+project_id="${DSW_BROWSER_PROJECT_ID:-}"
+source_ids="${DSW_BROWSER_SOURCE_IDS:-}"
+allow_remote="${DSW_BROWSER_ALLOW_REMOTE:-0}"
+browser="$(dirname "$0")/agent-browser-dsw"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/dsw-browser-smoke [options]
+
+Runs the generic login -> chat -> answer -> citation -> return acceptance flow.
+Documents are discovered dynamically by default. For deployed servers, pin a
+dedicated fixture and explicitly allow remote execution.
+
+Options:
+  -h, --help              Show this help.
+  --base-url URL          Application URL (or DSW_BROWSER_BASE_URL).
+  --username NAME         Browser test username (or DSW_BROWSER_USERNAME).
+  --password PASSWORD     Convenience only; prefer DSW_BROWSER_PASSWORD.
+  --project-id ID         Expected fixture project ID.
+  --source-ids IDS        Comma-separated fixture source IDs.
+  --question TEXT         Question to ask.
+  --output-dir PATH       Artifact directory.
+  --allow-remote          Permit non-local BASE_URL (required for staging).
+
+Environment:
+  DSW_BROWSER_BASE_URL, DSW_BROWSER_USERNAME, DSW_BROWSER_PASSWORD,
+  DSW_BROWSER_PROJECT_ID, DSW_BROWSER_SOURCE_IDS, DSW_BROWSER_ALLOW_REMOTE,
+  DSW_BROWSER_OUTPUT_DIR, DSW_BROWSER_WAIT_ATTEMPTS.
+EOF
+}
+while (($#)); do
+  case "$1" in
+    -h|--help) usage; exit 0;;
+    --base-url) base_url="${2:?missing URL}"; shift 2;;
+    --username) username="${2:?missing username}"; shift 2;;
+    --password) password="${2:?missing password}"; shift 2;;
+    --project-id) project_id="${2:?missing project ID}"; shift 2;;
+    --source-ids) source_ids="${2:?missing source IDs}"; shift 2;;
+    --question) question="${2:?missing question}"; shift 2;;
+    --output-dir) output_dir="${2:?missing output directory}"; shift 2;;
+    --allow-remote) allow_remote=1; shift;;
+    *) echo "browser-smoke: unknown option $1" >&2; usage >&2; exit 2;;
+  esac
+done
+
+case "$base_url" in
+  http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*) ;;
+  *) [[ "$allow_remote" == 1 ]] || { echo "browser-smoke: remote URL requires --allow-remote" >&2; exit 2; };;
+esac
+if [[ "$allow_remote" == 1 && -z "$source_ids" ]]; then
+  echo "browser-smoke: remote execution requires --source-ids for fixture safety" >&2
+  exit 2
+fi
+if [[ -n "$project_id" && ! "$project_id" =~ ^[0-9]+$ ]]; then
+  echo "browser-smoke: --project-id must be numeric" >&2
+  exit 2
+fi
+if [[ -n "$source_ids" && ! "$source_ids" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+  echo "browser-smoke: --source-ids must be comma-separated numeric IDs" >&2
+  exit 2
+fi
+mkdir -p "$output_dir"
+steps_file="$output_dir/steps.ndjson"
+: > "$steps_file"
+
+record() {
+  local name="$1" status="$2" detail="${3:-}"
+  python3 -c 'import json,sys; print(json.dumps({"scenario":sys.argv[1],"status":sys.argv[2],"detail":sys.argv[3]}))' "$name" "$status" "$detail" >> "$steps_file"
+}
+step() {
+  local name="$1"; shift
+  if "$@" >"$output_dir/$name.log" 2>&1; then record "$name" pass; return 0; fi
+  record "$name" fail "see $output_dir/$name.log"; return 1
+}
+count() { "$browser" get count "$1" 2>/dev/null | tail -1 | tr -dc '0-9'; }
+snapshot() {
+  local name="$1"
+  if "$browser" snapshot -i -c >"$output_dir/$name.snapshot" 2>&1; then
+    record "snapshot-$name" pass "$output_dir/$name.snapshot"
+  else
+    record "snapshot-$name" fail "$output_dir/$name.snapshot"
+  fi
+}
+write_result() {
+  local release url
+  release="$(curl -fsS "$base_url/api/v1/health/" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("release") or "")' 2>/dev/null || true)"
+  url="$($browser get url 2>/dev/null | tail -1 || true)"
+  python3 -c 'import json,sys; steps=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]; result={"status":"pass" if steps and all(x["status"]=="pass" for x in steps) else "fail","url":sys.argv[2],"release":sys.argv[3],"project_id":sys.argv[4],"source_ids":[x for x in sys.argv[5].split(",") if x],"screenshots":[sys.argv[6]+"/conversation.png",sys.argv[6]+"/cited-document.png",sys.argv[6]+"/returned-chat.png"],"scenarios":steps}; open(sys.argv[6]+"/result.json","w").write(json.dumps(result,indent=2)+"\n"); print(json.dumps(result))' "$steps_file" "$url" "$release" "$project_id" "$source_ids" "$output_dir"
+}
+fail() { echo "browser-smoke: $*" >&2; exit 1; }
+finish() {
+  local status=$?
+  write_result || true
+  "$browser" close --all >/dev/null 2>&1 || true
+  return "$status"
+}
+
+trap finish EXIT
+[[ -n "$username" && -n "$password" ]] || fail "set DSW_BROWSER_USERNAME and DSW_BROWSER_PASSWORD"
+"$browser" close --all >/dev/null 2>&1 || true
+
+step login "$browser" open "$base_url/login/" || fail "login navigation failed"
+step login_fill "$browser" find label Username fill "$username" || fail "username field not found"
+step login_password "$browser" find label Password fill "$password" || fail "password field not found"
+step login_submit "$browser" find role button click --name Login || fail "login submit failed"
+step login_wait "$browser" wait --text 'Home' || fail "login did not reach the authenticated workspace"
+record login pass
+snapshot login
+
+step create_thread_open "$browser" open "$base_url/chat/" || fail "chat workspace did not open"
+snapshot chat-start
+source_count="$(count 'input[name=source]')"
+[[ "${source_count:-0}" -gt 0 ]] || fail "no accessible generic documents were discovered"
+record select-documents pass "discovered $source_count documents"
+if [[ -n "$source_ids" ]]; then
+  encoded_ids="$(python3 -c 'import base64,sys; print(base64.b64encode(sys.argv[1].encode()).decode())' "$source_ids")"
+  js="const ids='${source_ids}'.split(',').map(x=>x.trim()); const matches=[...document.querySelectorAll('input[name=source]')].filter(x=>ids.includes(x.value)); matches.forEach(x=>{if(!x.checked)x.click()}); JSON.stringify({matched:matches.length,selected:matches.filter(x=>x.checked).map(x=>x.value),projects:[...new Set(matches.map(x=>x.dataset.projectId))]});"
+  step select_fixture "$browser" eval -b "$(printf '%s' "$js" | base64 -w0)" || fail "could not select pinned fixture documents"
+  selected_count="$(count 'input[name=source]:checked')"
+  expected_count="$(awk -F, '{print NF}' <<<"$source_ids")"
+  [[ "$selected_count" == "$expected_count" ]] || fail "pinned source IDs were not all present in the UI"
+  if [[ -n "$project_id" ]]; then
+    project_selected_count="$(count "input[name=source]:checked[data-project-id='$project_id']")"
+    [[ "$project_selected_count" == "$expected_count" ]] || fail "pinned sources are not all in the expected project"
+  fi
+else
+  step select_first "$browser" find first 'input[name=source]' check || fail "could not select a document"
+  if [[ "${source_count:-0}" -gt 1 ]]; then
+    step select_second "$browser" find nth 2 'input[name=source]' check || fail "could not select second document"
+  fi
+fi
+step ask_question "$browser" find label Question fill "$question" || fail "question field not found"
+step ask_submit "$browser" find role button click --name 'Start conversation' || fail "conversation submit failed"
+step create_thread_wait "$browser" wait --text 'Documents' || fail "conversation did not open"
+record create-thread pass
+snapshot conversation-start
+
+for attempt in $(seq 1 "${DSW_BROWSER_WAIT_ATTEMPTS:-60}"); do
+  assistants="$(count '.chat-message-assistant')"
+  citations="$(count '.chat-citation')"
+  if [[ "${assistants:-0}" -gt 0 && "${citations:-0}" -gt 0 ]]; then break; fi
+  "$browser" wait 1000 >/dev/null 2>&1 || true
+done
+[[ "${assistants:-0}" -gt 0 ]] || fail "no readable assistant answer appeared"
+[[ "${citations:-0}" -gt 0 ]] || fail "no citation appeared in assistant answer"
+record wait-for-run pass
+record verify-answer pass "assistant=$assistants citations=$citations"
+snapshot conversation-answer
+step conversation-screenshot "$browser" screenshot "$output_dir/conversation.png" || fail "conversation screenshot failed"
+
+evidence_count="$(count '.chat-evidence-list li')"
+[[ "${evidence_count:-0}" -gt 0 ]] || fail "evidence panel is empty"
+record evidence-panel pass "items=$evidence_count"
+step open-citation "$browser" click '.chat-citation' || fail "citation could not be opened"
+step citation-wait "$browser" wait --load domcontentloaded || fail "citation page did not load"
+citation_url="$($browser get url 2>/dev/null | tail -1 || true)"
+[[ "$citation_url" == */documents/* ]] || fail "citation did not navigate to document workspace"
+snapshot cited-document
+step cited-document-screenshot "$browser" screenshot "$output_dir/cited-document.png" || fail "cited document screenshot failed"
+record open-citation pass
+step return-to-chat "$browser" back || fail "could not return to chat"
+step return-wait "$browser" wait --text 'Documents' || fail "return did not reach chat"
+snapshot returned-chat
+step return-screenshot "$browser" screenshot "$output_dir/returned-chat.png" || fail "return screenshot failed"
+record return-to-chat pass

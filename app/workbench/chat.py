@@ -9,10 +9,24 @@ from django.urls import reverse
 from django.utils.html import conditional_escape, format_html
 from django.utils.safestring import mark_safe
 
-from .models import ChatMessage, ChatRun, EvidenceItem, SearchPassage
+from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, SearchPassage
 from .search import normalize_text
 
 logger = logging.getLogger(__name__)
+
+
+class ChatProviderError(RuntimeError):
+    def __init__(self, message, code="provider_protocol_error"):
+        super().__init__(message)
+        self.code = code
+
+
+def record_run_event(run, name, *, metadata=None, error_code="", duration_ms=None):
+    """Persist only deliberately selected provider/run metadata."""
+    return ChatRunEvent.objects.create(
+        run=run, name=name, worker_id=run.worker_id or "",
+        duration_ms=duration_ms, metadata=metadata or {}, error_code=error_code,
+    )
 
 
 def build_direct_context(source_ids, projects, limit=32):
@@ -76,8 +90,10 @@ def create_chat_run(thread, question):
         message = ChatMessage.objects.create(thread=thread, role="user", text=question, ordinal=ordinal)
         run = ChatRun.objects.create(
             thread=thread, user_message=message, retrieval_query=question,
+            token_budget=getattr(settings, "DSW_CHAT_MAX_TOKENS", 16384),
             status_message="Waiting for an evidence worker.",
         )
+        record_run_event(run, "queued")
         thread.updated_at = timezone.now()
         thread.save(update_fields=["updated_at"])
         return run
@@ -102,6 +118,7 @@ def process_chat_run(run, worker_id="chat-worker"):
     source_ids = list(thread.selected_sources.values_list("id", flat=True))
     projects = [thread.project]
     revision_ids = thread.selected_revisions or None
+    record_run_event(run, "retrieving")
     selected = select_evidence(run.retrieval_query, source_ids, projects, revision_ids=revision_ids)
     EvidenceItem.objects.filter(run=run).delete()
     items = []
@@ -114,6 +131,7 @@ def process_chat_run(run, worker_id="chat-worker"):
             score=score, ordinal=index,
         ))
     EvidenceItem.objects.bulk_create(items)
+    record_run_event(run, "evidence_selected", metadata={"count": len(items)})
     ChatRun.objects.filter(pk=run.pk).update(state="assembling", status_message=f"Selected {len(items)} evidence passages.", source_tokens=sum(len(item.text.split()) for item in items))
     context = assemble_run_context(run)
     system = (
@@ -121,6 +139,9 @@ def process_chat_run(run, worker_id="chat-worker"):
         "Answer only from supplied evidence, state uncertainty, and cite claims with supplied markers "
         "such as [S1]. Never invent citations or URLs.\n\nEVIDENCE:\n" + context
     )
+    run.model_metadata = {**(run.model_metadata or {}), "prompt": system}
+    run.save(update_fields=["model_metadata"])
+    record_run_event(run, "assembling", metadata={"source_tokens": sum(len(item.text.split()) for item in items)})
     history_rows = list(thread.messages.exclude(pk=run.user_message_id)
                         .order_by("ordinal").values("role", "text"))[-12:]
     history = [
@@ -128,20 +149,44 @@ def process_chat_run(run, worker_id="chat-worker"):
         for item in history_rows
     ]
     ChatRun.objects.filter(pk=run.pk).update(state="generating", status_message="Asking the configured Qwen model.")
+    record_run_event(run, "provider_request", metadata={"model": settings.DSW_CHAT_MODEL, "token_budget": run.token_budget})
+    request_started = timezone.now()
     try:
+        if not settings.DSW_CHAT_BASE_URL or not settings.DSW_CHAT_MODEL:
+            raise ChatProviderError("Read-only chat is not configured on this deployment.", "provider_unconfigured")
+        provider_messages = ([{"role": "system", "content": system}] + history + [{"role": "user", "content": run.retrieval_query}])
+        run.model_metadata = {**(run.model_metadata or {}), "provider_request": {"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": run.token_budget, "messages": provider_messages}}
+        run.save(update_fields=["model_metadata"])
         response = requests.post(
             f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
             json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": settings.DSW_CHAT_MAX_TOKENS,
-                  "messages": ([{"role": "system", "content": system}] + history +
-                               [{"role": "user", "content": run.retrieval_query}])},
+                  "messages": provider_messages},
             timeout=settings.DSW_CHAT_TIMEOUT,
         )
         response.raise_for_status()
-        payload = response.json()
-        answer = payload["choices"][0]["message"].get("content", "")
+        try:
+            payload = response.json()
+            choice = payload["choices"][0]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise ChatProviderError("The chat provider returned an invalid response.", "provider_protocol_error") from exc
+        provider_message = choice.get("message", {})
+        answer = provider_message.get("content", "") or ""
+        reasoning = provider_message.get("reasoning_content")
+        usage = payload.get("usage") or {}
+        metadata = {
+            "http_status": response.status_code,
+            "model": payload.get("model", settings.DSW_CHAT_MODEL),
+            "finish_reason": choice.get("finish_reason"),
+            "usage": {key: usage[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens") if key in usage},
+            "response_shape": {"has_choices": bool(payload.get("choices")), "has_content": bool(answer), "has_reasoning_content": bool(reasoning)},
+            "reasoning_content": reasoning,
+        }
+        run.model_metadata = {**(run.model_metadata or {}), "provider": metadata, "final_answer": answer}
+        run.save(update_fields=["model_metadata"])
+        record_run_event(run, "provider_response", metadata={key: value for key, value in metadata.items() if key != "reasoning_content"}, duration_ms=int((timezone.now() - request_started).total_seconds() * 1000))
         if not answer:
-            raise RuntimeError("The provider returned reasoning without a final answer.")
+            raise ChatProviderError("The provider returned no final answer.", "provider_no_final_answer")
     except requests.HTTPError as exc:
         detail = ""
         if exc.response is not None:
@@ -149,19 +194,21 @@ def process_chat_run(run, worker_id="chat-worker"):
                 detail = exc.response.json().get("error", {}).get("message", "")
             except ValueError:
                 detail = exc.response.text[:300]
-        raise RuntimeError(
-            "The chat provider rejected the request. " + (detail or "Check the model request format.")
-        ) from exc
+        raise ChatProviderError("The chat provider rejected the request. " + (detail or "Check the model request format."), "provider_rejected") from exc
+    except requests.Timeout as exc:
+        raise ChatProviderError("The chat provider timed out.", "worker_timeout") from exc
     except requests.RequestException as exc:
-        raise RuntimeError("The configured chat provider is unreachable.") from exc
+        raise ChatProviderError("The configured chat provider is unreachable.", "provider_unreachable") from exc
     ChatRun.objects.filter(pk=run.pk).update(state="validating", status_message="Validating source citations.")
     valid_markers = {item.marker for item in items}
     cited = {marker for marker in valid_markers if f"[{marker}]" in answer}
+    record_run_event(run, "validating", metadata={"validated_citations": sorted(cited), "citation_count": len(cited)})
     assistant = ChatMessage.objects.create(thread=thread, role="assistant", text=answer, ordinal=thread.messages.count())
     ChatRun.objects.filter(pk=run.pk).update(
         state="completed", status_message=f"Answer ready with {len(cited)} validated citations.",
         assistant_message=assistant, finished_at=timezone.now(), worker_id="",
     )
+    record_run_event(run, "completed", metadata={"validated_citations": sorted(cited)})
     return assistant
 
 

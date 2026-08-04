@@ -15,6 +15,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import json
 from pathlib import Path
 
 from django.conf import settings
@@ -31,6 +32,103 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ChatService:
+    """Shared authorization-aware application boundary for chat workflows."""
+    def __init__(self, *, identity, policy):
+        self.identity = identity
+        self.policy = policy
+
+    def authorize_thread(self, thread):
+        if not thread or not self.policy.can_view(thread.project):
+            raise PermissionError("The conversation is not accessible.")
+        return thread
+
+    def create_run(self, thread, question):
+        from .chat import create_chat_run
+        self.authorize_thread(thread)
+        if not question or not question.strip():
+            raise ValueError("A question is required.")
+        return create_chat_run(thread, question.strip())
+
+
+class ChatRunService:
+    """Common execution boundary used by workers and future agent adapters."""
+    @staticmethod
+    def execute(run, worker_id="chat-worker"):
+        from .chat import process_chat_run
+        return process_chat_run(run, worker_id=worker_id)
+
+
+class DiagnosticsService:
+    """Safe, deliberately small deployment diagnostics; never returns secrets."""
+    @staticmethod
+    def health():
+        from pathlib import Path
+        from django.db import connection
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            database = "ok"
+        except Exception:
+            database = "unreachable"
+        release = None
+        release_path = getattr(settings, "RELEASE_FILE", "")
+        if release_path and Path(release_path).exists():
+            release = Path(release_path).read_text().strip()
+        from .models import ChatRun
+        latest = ChatRun.objects.filter(worker_heartbeat_at__isnull=False).order_by("-worker_heartbeat_at").first()
+        return {"status": "ok" if database == "ok" else "error", "release": release, "database": database,
+                "worker": {"status": "ok" if latest else "unknown", "last_seen": latest.worker_heartbeat_at.isoformat() if latest else None,
+                            "queue_depth": ChatRun.objects.filter(state="queued").count() if database == "ok" else None},
+                "chat_provider": {"configured": bool(getattr(settings, "DSW_CHAT_BASE_URL", "") and getattr(settings, "DSW_CHAT_MODEL", "")),
+                                  "reachable": None, "model_configured": bool(getattr(settings, "DSW_CHAT_MODEL", "")), "model_available": None}}
+
+
+class SupportBundleService:
+    """Build a secret-free reconstruction of one authorized chat run."""
+    @staticmethod
+    def build(run):
+        thread = run.thread
+        provider = (run.model_metadata or {}).get("provider", {})
+        sources = [{"id": source.id, "filename": source.filename, "revision_id": source.active_document_id}
+                   for source in thread.selected_sources.all()]
+        bundle = {
+            "run": {"id": run.id, "state": run.state, "status": run.status_message, "error": run.error_message,
+                    "created_at": run.created_at.isoformat(), "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None, "worker_id": run.worker_id,
+                    "token_budget": run.token_budget, "source_tokens": run.source_tokens},
+            "project": {"id": thread.project_id, "name": thread.project.name},
+            "scope": {"sources": sources, "revision_ids": thread.selected_revisions or []},
+            "question": run.user_message.text,
+            "history": list(thread.messages.exclude(pk=run.user_message_id).order_by("ordinal").values("role", "text")),
+            "evidence": [{"marker": item.marker, "source_document_id": item.source_document_id, "revision_id": item.processed_revision_id,
+                          "page": item.page.page_number if item.page else None, "text": item.text, "score": item.score,
+                          "reason": item.selection_reason} for item in run.evidence_items.select_related("page").order_by("ordinal")],
+            "prompt": (run.model_metadata or {}).get("prompt", ""),
+            "provider_request": (run.model_metadata or {}).get("provider_request", {}),
+            "provider": {key: value for key, value in provider.items() if key != "reasoning_content"},
+            "final_answer": (run.model_metadata or {}).get("final_answer", run.assistant_message.text if run.assistant_message else ""),
+            "reasoning_content": provider.get("reasoning_content"),
+            "events": [{"name": event.name, "worker_id": event.worker_id, "duration_ms": event.duration_ms,
+                         "metadata": event.metadata, "error_code": event.error_code, "created_at": event.created_at.isoformat()}
+                        for event in run.events.all()],
+        }
+        return bundle
+
+    @staticmethod
+    def markdown(bundle):
+        run = bundle["run"]
+        lines = [f"# Chat support bundle — run {run['id']}", "", f"- State: {run['state']}", f"- Project: {bundle['project']['name']} ({bundle['project']['id']})", "", "## Question", bundle["question"], "", "## Final answer", bundle["final_answer"]]
+        if bundle.get("reasoning_content"):
+            lines += ["", "## Provider reasoning content (untrusted diagnostic output)", bundle["reasoning_content"]]
+        lines += ["", "## Evidence"]
+        for item in bundle["evidence"]:
+            lines += [f"### [{item['marker']}] source {item['source_document_id']} page {item['page']}", item["text"], f"Score: {item['score']}; reason: {item['reason']}"]
+        lines += ["", "## Timeline"]
+        lines += [f"- {event['created_at']} — {event['name']} {event['error_code']}" for event in bundle["events"]]
+        return "\n".join(lines) + "\n"
 
 
 class CorrectionError(Exception):

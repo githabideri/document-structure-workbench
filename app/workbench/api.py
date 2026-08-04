@@ -40,6 +40,7 @@ from .models import (
     ProcessingPreset, ProjectMembership, Review, ReviewTask,
     ServiceAccount, SourceDocument, TableCandidate, TableExtraction,
     UserPreferences,
+    ChatThread, ChatRun, ChatMessage,
 )
 from .policy import ProjectAccessPolicy
 
@@ -225,18 +226,21 @@ def api_health(request):
     except Exception:
         pass
 
+    from .models import ChatRun
+    worker = ChatRun.objects.filter(worker_heartbeat_at__isnull=False).order_by("-worker_heartbeat_at").first() if database_ok else None
+    queue_depth = ChatRun.objects.filter(state="queued").count() if database_ok else None
+    provider_configured = bool(getattr(settings, "DSW_CHAT_BASE_URL", "") and getattr(settings, "DSW_CHAT_MODEL", ""))
+    health = {
+        "status": "ok" if database_ok else "error", "release": release_sha,
+        "database": "ok" if database_ok else "unreachable",
+        "worker": {"status": "ok" if worker else "unknown", "last_seen": worker.worker_heartbeat_at.isoformat() if worker else None, "queue_depth": queue_depth},
+        "chat_provider": {"configured": provider_configured, "reachable": None, "model_configured": bool(getattr(settings, "DSW_CHAT_MODEL", "")), "model_available": None},
+    }
     if not release_sha or not database_ok:
         return JsonResponse({
-            "status": "error",
-            "release": release_sha,
-            "database": "ok" if database_ok else "unreachable",
+            **health,
         }, status=500)
-
-    return JsonResponse({
-        "status": "ok",
-        "release": release_sha,
-        "database": "ok",
-    })
+    return JsonResponse(health)
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +591,175 @@ def api_task_detail(request, task_id):
         "review": review,
         "has_review": has_review,
     })
+
+
+def _chat_thread_json(thread):
+    return {"id": thread.id, "project_id": thread.project_id, "title": thread.title,
+            "scope": {"source_ids": list(thread.selected_sources.values_list("id", flat=True)), "revision_ids": thread.selected_revisions or []},
+            "created_at": thread.created_at.isoformat(), "updated_at": thread.updated_at.isoformat()}
+
+
+def _chat_run_json(run, include_evidence=False):
+    answer = run.assistant_message.text if run.assistant_message else None
+    result = {"id": run.id, "thread_id": run.thread_id, "state": run.state, "status": run.status_message,
+              "error": {"code": getattr(run, "error_code", ""), "message": run.error_message} if run.error_message else None,
+              "timestamps": {"created_at": run.created_at.isoformat(), "started_at": run.started_at.isoformat() if run.started_at else None, "finished_at": run.finished_at.isoformat() if run.finished_at else None},
+              "answer": answer, "token_budget": run.token_budget, "model": run.thread.model,
+              "request_id": getattr(run, "request_id", None)}
+    if include_evidence:
+        result["evidence"] = [{"marker": item.marker, "source_document_id": item.source_document_id, "revision_id": item.processed_revision_id,
+                                "page": item.page.page_number if item.page else None, "text": item.text, "score": item.score, "reason": item.selection_reason}
+                               for item in run.evidence_items.select_related("page").order_by("ordinal")]
+    return result
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+@require_scope("chat:read")
+def api_chat_threads(request):
+    if request.method == "POST" and "chat:write" not in set(request._api_token.scopes or []):
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "insufficient_scope", "message": "chat:write is required."}}, status=403)
+    if request.method == "GET":
+        identity = request._api_token.user if request._api_token.user_id else None
+        policy = ProjectAccessPolicy(user=identity, token=request._api_token)
+        threads = ChatThread.objects.filter(project__in=policy.visible_projects()).select_related("project")
+        return JsonResponse({"request_id": request._request_id, "threads": [_chat_thread_json(thread) for thread in threads[:100]]})
+    from .chat import create_chat_run
+    try:
+        data = json.loads(request.body or "{}")
+        project_id = int(data["project_id"])
+        source_ids = [int(value) for value in data.get("source_ids", [])]
+        question = str(data.get("question", "")).strip()
+        if not source_ids or not question:
+            raise ValueError("project_id, source_ids, and question are required")
+        project = get_object_or_404(Collection, pk=project_id)
+        policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
+        if not policy.can_view(project):
+            return JsonResponse({"error": {"code": "forbidden", "message": "Project is not accessible."}, "request_id": request._request_id}, status=403)
+        sources = list(SourceDocument.objects.filter(pk__in=source_ids, collection=project, is_archived=False))
+        if len(sources) != len(set(source_ids)):
+            return JsonResponse({"error": {"code": "forbidden", "message": "One or more sources are not accessible."}, "request_id": request._request_id}, status=403)
+        thread = ChatThread.objects.create(project=project, created_by=request._api_token.user if request._api_token.user_id else None,
+                                            title=data.get("title", question[:120]), model=getattr(settings, "DSW_CHAT_MODEL", ""),
+                                            selected_revisions=[source.active_document_id for source in sources if source.active_document_id])
+        thread.selected_sources.set(sources)
+        run = create_chat_run(thread, question)
+        run.request_id = request._request_id
+        run.save(update_fields=["request_id"])
+        return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread), "run": _chat_run_json(run) }, status=201)
+    except (KeyError, ValueError, json.JSONDecodeError) as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
+
+
+@require_http_methods(["GET"])
+@require_scope("chat:read")
+def api_chat_threads_list(request):
+    identity = request._api_token.user if request._api_token.user_id else None
+    policy = ProjectAccessPolicy(user=identity, token=request._api_token)
+    threads = ChatThread.objects.filter(project__in=policy.visible_projects()).select_related("project")
+    return JsonResponse({"request_id": request._request_id, "threads": [_chat_thread_json(thread) for thread in threads[:100]]})
+
+
+@require_http_methods(["GET"])
+@require_scope("chat:read")
+def api_chat_thread_detail(request, thread_id):
+    thread = get_object_or_404(ChatThread.objects.select_related("project"), pk=thread_id)
+    policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
+    if not policy.can_view(thread.project):
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
+    runs = thread.runs.select_related("assistant_message").order_by("created_at")
+    messages = [{"id": message.id, "role": message.role, "text": message.text, "ordinal": message.ordinal, "created_at": message.created_at.isoformat()} for message in thread.messages.all()]
+    return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread), "messages": messages, "runs": [_chat_run_json(run) for run in runs]})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("chat:write")
+def api_chat_thread_runs(request, thread_id):
+    thread = get_object_or_404(ChatThread.objects.select_related("project"), pk=thread_id)
+    policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
+    if not policy.can_view(thread.project):
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
+    try:
+        data = json.loads(request.body or "{}")
+        question = str(data.get("question", "")).strip()
+        if not question:
+            raise ValueError("question is required")
+        from .chat import create_chat_run
+        run = create_chat_run(thread, question)
+        run.request_id = request._request_id
+        run.save(update_fields=["request_id"])
+        return JsonResponse({"request_id": request._request_id, "run": _chat_run_json(run)}, status=201)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
+
+
+def _api_chat_run(request, run_id):
+    run = get_object_or_404(ChatRun.objects.select_related("thread", "assistant_message", "thread__project"), pk=run_id)
+    policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
+    if not policy.can_view(run.thread.project):
+        return None
+    return run
+
+
+@require_http_methods(["GET"])
+@require_scope("chat:read")
+def api_chat_run_detail(request, run_id):
+    run = _api_chat_run(request, run_id)
+    if not run:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Run not found."}}, status=404)
+    return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(run.thread), "run": _chat_run_json(run, include_evidence=True)})
+
+
+@require_http_methods(["GET"])
+@require_scope("chat:read")
+def api_chat_run_evidence(request, run_id):
+    run = _api_chat_run(request, run_id)
+    if not run:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Run not found."}}, status=404)
+    return JsonResponse({"request_id": request._request_id, "run_id": run.id, "evidence": _chat_run_json(run, True)["evidence"]})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("chat:retry")
+def api_chat_run_retry(request, run_id):
+    run = _api_chat_run(request, run_id)
+    if not run:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Run not found."}}, status=404)
+    from .chat import create_chat_run
+    retry = create_chat_run(run.thread, run.retrieval_query)
+    return JsonResponse({"request_id": request._request_id, "run": _chat_run_json(retry)}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("support:export")
+def api_chat_support_bundle(request, run_id):
+    run = _api_chat_run(request, run_id)
+    if not run:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Run not found."}}, status=404)
+    from .services import SupportBundleService
+    bundle = SupportBundleService.build(run)
+    export_format = (json.loads(request.body or "{}").get("format", "json") if request.body else "json")
+    AuditEvent.objects.create(actor=request._api_token.user if request._api_token.user_id else None, event_type="chat_support_bundle_exported",
+                              object_type="ChatRun", object_id=str(run.id), after={"format": export_format}, request_id=request._request_id)
+    if export_format == "markdown":
+        from django.http import HttpResponse
+        response = HttpResponse(SupportBundleService.markdown(bundle), content_type="text/markdown")
+        response["Content-Disposition"] = f'attachment; filename="chat-run-{run.id}-support.md"'
+        return response
+    return JsonResponse({"request_id": request._request_id, "bundle": bundle})
+
+
+@require_http_methods(["GET"])
+@require_scope("support:read")
+def api_support_bundle_detail(request, bundle_id):
+    run = _api_chat_run(request, bundle_id)
+    if not run:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Support bundle not found."}}, status=404)
+    from .services import SupportBundleService
+    return JsonResponse({"request_id": request._request_id, "bundle": SupportBundleService.build(run)})
 
 
 @csrf_exempt

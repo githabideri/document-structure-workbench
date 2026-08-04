@@ -388,6 +388,12 @@ class ApiToken(models.Model):
         ("tasks:read", "Read review tasks"),
         ("reviews:write", "Submit reviews"),
         ("statistics:read", "Read statistics"),
+        ("chat:read", "Read chat"),
+        ("chat:write", "Write chat"),
+        ("chat:retry", "Retry chat runs"),
+        ("diagnostics:read", "Read diagnostics"),
+        ("support:read", "Read support bundles"),
+        ("support:export", "Export support bundles"),
     ]
 
     id = models.AutoField(primary_key=True)
@@ -943,6 +949,7 @@ class ChatRun(models.Model):
     state = models.CharField(max_length=20, choices=STATES, default="queued")
     status_message = models.CharField(max_length=500, blank=True)
     error_message = models.TextField(blank=True)
+    error_code = models.CharField(max_length=60, blank=True)
     worker_id = models.CharField(max_length=200, blank=True)
     worker_heartbeat_at = models.DateTimeField(null=True, blank=True)
     lease_expires_at = models.DateTimeField(null=True, blank=True)
@@ -950,12 +957,27 @@ class ChatRun(models.Model):
     token_budget = models.PositiveIntegerField(default=12000)
     source_tokens = models.PositiveIntegerField(default=0)
     model_metadata = JSONField(default=dict, blank=True)
+    request_id = models.CharField(max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class ChatRunEvent(models.Model):
+    """Append-only, sanitized timeline for reconstructing a chat run."""
+    run = models.ForeignKey(ChatRun, on_delete=models.CASCADE, related_name="events")
+    name = models.CharField(max_length=40)
+    worker_id = models.CharField(max_length=200, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    metadata = JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=60, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
 
 
 class EvidenceItem(models.Model):

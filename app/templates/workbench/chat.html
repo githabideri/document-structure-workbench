@@ -72,7 +72,7 @@
         <fieldset>
           <legend>{% trans "Evidence scope" %}</legend>
           {% for source in sources %}
-          <label class="checkbox-row"><input type="checkbox" name="source" value="{{ source.id }}" {% if source.id|stringformat:'s' in selected_ids %}checked{% endif %}> <span>{{ source.filename }}<small>{{ source.collection.name }}</small></span></label>
+          <label class="checkbox-row" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}"><input type="checkbox" name="source" value="{{ source.id }}" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}" {% if source.id|stringformat:'s' in selected_ids %}checked{% endif %}> <span>{{ source.filename }}<small>{{ source.collection.name }}</small></span></label>
           {% empty %}<p>{% trans "No accessible processed documents." %}</p>{% endfor %}
         </fieldset>
         <label for="question">{% trans "Question" %}</label>

@@ -14,7 +14,8 @@ from django.db.models import Q
 from django.utils import timezone
 
 from workbench.models import ChatRun, ProcessingJob, SourceDocument
-from workbench.chat import process_chat_run
+from workbench.chat import record_run_event
+from workbench.services import ChatRunService
 from workbench.processors.docling_serve import (
     DoclingServeProcessor, ProcessorProtocolError, SubmissionRejected,
     SubmissionUncertain,
@@ -72,11 +73,13 @@ class Command(BaseCommand):
                         chat_run = self._claim_next_chat_run()
                         if chat_run:
                             try:
-                                process_chat_run(chat_run, self.worker_id)
+                                ChatRunService.execute(chat_run, self.worker_id)
                             except Exception as exc:
                                 logger.exception("Chat run %d failed: %s", chat_run.pk, exc)
+                                record_run_event(chat_run, "failed", error_code=getattr(exc, "code", "provider_protocol_error"), metadata={"message": str(exc)[:500]})
                                 ChatRun.objects.filter(pk=chat_run.pk).update(
                                     state="failed", error_message=str(exc)[:1000],
+                                    error_code=getattr(exc, "code", "provider_protocol_error"),
                                     status_message="The chat run failed. Retry it from the conversation.",
                                     finished_at=timezone.now(), worker_id="",
                                 )

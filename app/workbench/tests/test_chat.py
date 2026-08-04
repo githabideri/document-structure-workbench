@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -71,6 +72,24 @@ class ChatTests(TestCase):
         self.assertEqual(sent_messages[-2]["content"], "The answer is 1957. [S1]")
         self.assertEqual(sent_messages[-1]["content"], "Can you restate the restoration year?")
         self.assertEqual(second.evidence_items.first().processed_revision_id, self.document.pk)
+
+    @patch("workbench.chat.requests.post")
+    def test_provider_reasoning_is_diagnostic_only_and_support_bundle_is_auditable(self, post):
+        post.return_value = Mock(status_code=200, json=lambda: {"model": "qwen", "choices": [{"finish_reason": "stop", "message": {
+            "content": "The answer is 1957. [S1]", "reasoning_content": "untrusted internal diagnostic text",
+        }}]})
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        thread.selected_sources.set([self.source])
+        from workbench.chat import create_chat_run, process_chat_run
+        from workbench.services import SupportBundleService
+        run = create_chat_run(thread, "restoration 1957")
+        process_chat_run(run)
+        run.refresh_from_db()
+        self.assertNotIn("reasoning_content", run.assistant_message.text)
+        bundle = SupportBundleService.build(run)
+        self.assertEqual(bundle["final_answer"], "The answer is 1957. [S1]")
+        self.assertEqual(bundle["reasoning_content"], "untrusted internal diagnostic text")
+        self.assertNotIn("Authorization", json.dumps(bundle))
 
     def test_run_status_is_an_htmx_fragment_until_complete(self):
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)

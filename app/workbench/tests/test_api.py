@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from workbench.models import (
-    Collection, Document, ExtractionRun, Page, ProcessingJob,
+    AuditEvent, ChatMessage, ChatRun, ChatThread, Collection, Document, ExtractionRun, Page, ProcessingJob,
     ProcessingPreset, ProjectMembership, ReviewTask, SourceDocument,
     TableCandidate, TableExtraction,
 )
@@ -21,11 +21,20 @@ class ApiContractTests(TestCase):
         self.token = ApiToken.objects.create(
             user=self.user, name="test", token_prefix="api-test",
             token_hash=ApiToken.hash_token(self.raw_token),
-            scopes=["projects:read", "documents:read", "documents:upload", "jobs:submit", "jobs:read", "reviews:write"],
+            scopes=["projects:read", "documents:read", "documents:upload", "jobs:submit", "jobs:read", "reviews:write",
+                    "chat:read", "chat:write", "chat:retry", "support:read", "support:export"],
         )
 
     def auth(self):
         return {"HTTP_AUTHORIZATION": f"Bearer {self.raw_token}"}
+
+    def make_source(self):
+        return SourceDocument.objects.create(collection=self.project, filename="source-a.pdf", uploaded_by=self.user)
+
+    def make_thread(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user, title="Generic test thread")
+        thread.selected_sources.set([self.make_source()])
+        return thread
 
     def test_health_is_public_and_versioned(self):
         response = self.client.get(reverse("api_health"))
@@ -71,3 +80,62 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         task.review.refresh_from_db()
         self.assertEqual(task.review.preferred_result, "candidate_x")
+
+    def test_chat_requires_scope_and_returns_request_id(self):
+        self.token.scopes = ["chat:read"]
+        self.token.save(update_fields=["scopes"])
+        response = self.client.get(reverse("api_chat_threads"), **self.auth())
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["request_id"])
+        response = self.client.post(reverse("api_chat_threads"), data="{}", content_type="application/json", **self.auth())
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "insufficient_scope")
+
+    def test_chat_lifecycle_is_project_scoped(self):
+        source = self.make_source()
+        payload = {"project_id": self.project.pk, "source_ids": [source.pk], "question": "What is present?"}
+        created = self.client.post(reverse("api_chat_threads"), data=payload, content_type="application/json", **self.auth())
+        self.assertEqual(created.status_code, 201)
+        body = created.json()
+        self.assertTrue(body["request_id"])
+        self.assertEqual(body["run"]["state"], "queued")
+        thread_id = body["thread"]["id"]
+        run_id = body["run"]["id"]
+
+        detail = self.client.get(reverse("api_chat_thread_detail", args=[thread_id]), **self.auth())
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["thread"]["scope"]["source_ids"], [source.pk])
+        follow_up = self.client.post(reverse("api_chat_thread_runs", args=[thread_id]), data={"question": "Follow up?"}, content_type="application/json", **self.auth())
+        self.assertEqual(follow_up.status_code, 201)
+        self.assertEqual(follow_up.json()["run"]["thread_id"], thread_id)
+        evidence = self.client.get(reverse("api_chat_run_evidence", args=[run_id]), **self.auth())
+        self.assertEqual(evidence.status_code, 200)
+        retry = self.client.post(reverse("api_chat_run_retry", args=[run_id]), data="{}", content_type="application/json", **self.auth())
+        self.assertEqual(retry.status_code, 201)
+
+    def test_chat_and_support_bundle_cannot_cross_projects(self):
+        thread = self.make_thread()
+        other = Collection.objects.create(name="Other archive", created_by=self.user)
+        other_source = SourceDocument.objects.create(collection=other, filename="source-b.pdf", uploaded_by=self.user)
+        other_thread = ChatThread.objects.create(project=other, created_by=self.user)
+        other_thread.selected_sources.set([other_source])
+        message = ChatMessage.objects.create(thread=other_thread, role="user", text="private?", ordinal=0)
+        run = ChatRun.objects.create(thread=other_thread, user_message=message)
+        self.assertEqual(self.client.get(reverse("api_chat_thread_detail", args=[other_thread.pk]), **self.auth()).status_code, 404)
+        self.assertEqual(self.client.get(reverse("api_support_bundle_detail", args=[run.pk]), **self.auth()).status_code, 404)
+        self.assertEqual(AuditEvent.objects.filter(object_id=str(run.pk)).count(), 0)
+
+    def test_support_bundle_export_is_scoped_and_audited(self):
+        thread = self.make_thread()
+        message = ChatMessage.objects.create(thread=thread, role="user", text="diagnostic question", ordinal=0)
+        run = ChatRun.objects.create(thread=thread, user_message=message, state="completed", model_metadata={"final_answer": "safe answer"})
+        response = self.client.post(reverse("api_chat_support_bundle", args=[run.pk]), data={"format": "json"}, content_type="application/json", **self.auth())
+        self.assertEqual(response.status_code, 200)
+        bundle = response.json()["bundle"]
+        self.assertEqual(bundle["final_answer"], "safe answer")
+        self.assertNotIn("Authorization", response.content.decode())
+        audit = AuditEvent.objects.get(object_id=str(run.pk), event_type="chat_support_bundle_exported")
+        self.assertEqual(audit.after["format"], "json")
+        markdown_response = self.client.post(reverse("api_chat_support_bundle", args=[run.pk]), data={"format": "markdown"}, content_type="application/json", **self.auth())
+        self.assertEqual(markdown_response.status_code, 200)
+        self.assertEqual(markdown_response["Content-Type"], "text/markdown")

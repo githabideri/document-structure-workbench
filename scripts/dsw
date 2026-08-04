@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+base="${DSW_API_BASE_URL:-http://127.0.0.1:8000/api/v1}"
+token="${DSW_API_TOKEN:-}"
+json_out=0
+for arg in "$@"; do [[ "$arg" == "--json" ]] && json_out=1; done
+request() {
+  local method="$1" path="$2" body="${3:-}"
+  local args=(-fsS -X "$method" -H "Accept: application/json" -H "Authorization: Bearer $token")
+  [[ -n "$body" ]] && args+=(-H "Content-Type: application/json" --data "$body")
+  curl "${args[@]}" "$base$path"
+}
+die() { echo "dsw: $*" >&2; exit 2; }
+usage() {
+  cat <<'EOF'
+Usage: scripts/dsw COMMAND [OPTIONS]
+
+Commands:
+  doctor [--json]                         Check deployment health.
+  api health                              Fetch the public health document.
+  chat threads                            List accessible conversations.
+  chat ask --project ID --source ID --question TEXT
+                                           Create a conversation/run.
+  chat inspect|evidence|retry --run ID    Inspect or retry a run.
+  support-bundle --run ID [--format FMT]  Export an audited bundle.
+  smoke --fake                            Run real local fake-provider integration.
+  smoke --live --project ID --source ID --question TEXT
+                                           Run explicit live-provider smoke.
+  browser-smoke [OPTIONS]                 Run browser acceptance scenarios.
+  fake-provider [OPTIONS]                 Start a local OpenAI-compatible fake.
+
+Set DSW_API_BASE_URL and DSW_API_TOKEN for HTTP commands. Run
+scripts/dsw-browser-smoke --help for browser fixture and remote-safety options.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then usage; exit 0; fi
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  api)
+    sub="${1:-}"; shift || true
+    [[ "$sub" == health ]] || die "usage: dsw api health"
+    request GET /health/
+    ;;
+  doctor)
+    output=$(request GET /health/)
+    if ((json_out)); then echo "$output"; else echo "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("status:",d.get("status")); print("release:",d.get("release")); print("database:",d.get("database")); print("worker:",d.get("worker",{}).get("status")); print("queue:",d.get("worker",{}).get("queue_depth")); print("chat configured:",d.get("chat_provider",{}).get("configured"))'; fi
+    ;;
+  chat)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      threads) request GET /chat/threads/ ;;
+      inspect) [[ "${1:-}" == --run ]] || die "usage: dsw chat inspect --run RUN_ID"; request GET "/chat/runs/${2:?}/" ;;
+      evidence) [[ "${1:-}" == --run ]] || die "usage: dsw chat evidence --run RUN_ID"; request GET "/chat/runs/${2:?}/evidence/" ;;
+      retry) [[ "${1:-}" == --run ]] || die "usage: dsw chat retry --run RUN_ID"; request POST "/chat/runs/${2:?}/retry/" '{}' ;;
+      ask)
+        project=""; source=""; question=""
+        while (($#)); do case "$1" in --project) project="$2"; shift 2;; --source) source="$2"; shift 2;; --question) question="$2"; shift 2;; *) die "unknown option $1";; esac; done
+        [[ -n "$project" && -n "$source" && -n "$question" ]] || die "project, source, and question are required"
+        request POST /chat/threads/ "$(python3 -c 'import json,sys; print(json.dumps({"project_id":int(sys.argv[1]),"source_ids":[int(sys.argv[2])],"question":sys.argv[3]}))' "$project" "$source" "$question")"
+        ;;
+      *) die "unknown chat command";;
+    esac
+    ;;
+  support-bundle)
+    [[ "${1:-}" == --run ]] || die "usage: dsw support-bundle --run RUN_ID [--format markdown|json]"
+    run="$2"; format="json"; [[ "${3:-}" == --format ]] && format="${4:-json}"
+    request POST "/chat/runs/$run/support-bundle/" "{\"format\":\"$format\"}"
+    ;;
+  smoke)
+    [[ "${1:-}" == --fake ]] && exec "$(dirname "$0")/../.venv/bin/pytest" -q app/workbench/tests/test_fake_provider.py
+    [[ "${1:-}" == --live ]] || die "use --fake or --live"
+    shift; project=""; source=""; question=""
+    while (($#)); do case "$1" in --project) project="$2"; shift 2;; --source) source="$2"; shift 2;; --question) question="$2"; shift 2;; *) die "unknown option $1";; esac; done
+    [[ -n "$project" && -n "$source" && -n "$question" ]] || die "live smoke requires --project PROJECT_ID --source SOURCE_ID --question QUESTION"
+    health=$(request GET /health/)
+    echo "$health" | python3 -c 'import json,sys; d=json.load(sys.stdin); p=d.get("chat_provider",{}); assert p.get("configured"), "chat provider is not configured"; assert p.get("model_configured"), "chat model is not configured"'
+    created=$(request POST /chat/threads/ "$(python3 -c 'import json,sys; print(json.dumps({"project_id":int(sys.argv[1]),"source_ids":[int(sys.argv[2])],"question":sys.argv[3]}))' "$project" "$source" "$question")")
+    run=$(echo "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])')
+    for _ in $(seq 1 "${DSW_SMOKE_ATTEMPTS:-60}"); do
+      result=$(request GET "/chat/runs/$run/")
+      state=$(echo "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["state"])')
+      case "$state" in completed) echo "$result"; exit 0;; failed|cancelled) echo "$result" >&2; exit 1;; esac
+      sleep "${DSW_SMOKE_INTERVAL:-2}"
+    done
+    die "timed out waiting for run $run"
+    ;;
+  browser-smoke)
+    exec "$(dirname "$0")/dsw-browser-smoke"
+    ;;
+  fake-provider)
+    exec "$(dirname "$0")/dsw-fake-provider" "$@"
+    ;;
+  *) die "usage: dsw doctor|api|chat|support-bundle|smoke";;
+esac

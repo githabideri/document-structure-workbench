@@ -85,6 +85,15 @@ urlpatterns = [
     path("api/v1/tasks/<int:task_id>/", api.api_task_detail, name="api_task_detail"),
     path("api/v1/tasks/<int:task_id>/submit/", api.api_task_submit, name="api_task_submit"),
     path("api/v1/statistics/", api.api_statistics, name="api_statistics"),
+    path("api/v1/chat/threads/", api.api_chat_threads, name="api_chat_threads"),
+    path("api/v1/chat/threads/list/", api.api_chat_threads_list, name="api_chat_threads_list"),
+    path("api/v1/chat/threads/<int:thread_id>/", api.api_chat_thread_detail, name="api_chat_thread_detail"),
+    path("api/v1/chat/threads/<int:thread_id>/runs/", api.api_chat_thread_runs, name="api_chat_thread_runs"),
+    path("api/v1/chat/runs/<int:run_id>/", api.api_chat_run_detail, name="api_chat_run_detail"),
+    path("api/v1/chat/runs/<int:run_id>/evidence/", api.api_chat_run_evidence, name="api_chat_run_evidence"),
+    path("api/v1/chat/runs/<int:run_id>/retry/", api.api_chat_run_retry, name="api_chat_run_retry"),
+    path("api/v1/chat/runs/<int:run_id>/support-bundle/", api.api_chat_support_bundle, name="api_chat_support_bundle"),
+    path("api/v1/support-bundles/<int:bundle_id>/", api.api_support_bundle_detail, name="api_support_bundle_detail"),
 
     # Static assets
     # Keep this outside STATIC_URL so Django's development static handler does

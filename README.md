@@ -124,6 +124,13 @@ The application provides a REST API for programmatic access:
 - `GET /api/v1/tasks/<id>/` — Task detail with blinded extractions
 - `POST /api/v1/tasks/<id>/submit/` — Submit a review
 - `GET /api/v1/statistics/` — Review statistics
+- `GET /api/v1/health/` — Safe release, database, worker, queue, and chat configuration status
+- `GET|POST /api/v1/chat/threads/` — List or create evidence-grounded conversations
+- `GET /api/v1/chat/threads/<id>/` — Conversation messages and runs
+- `GET /api/v1/chat/runs/<id>/` — Run status, answer, and evidence
+- `GET /api/v1/chat/runs/<id>/evidence/` — Persisted evidence references
+- `POST /api/v1/chat/runs/<id>/retry/` — Queue a retry
+- `POST /api/v1/chat/runs/<id>/support-bundle/` and `GET /api/v1/support-bundles/<id>/` — Privileged, audited support exports
 
 All endpoints except health use `Authorization: Bearer <token>`. Tokens are
 created from Settings and are project-scoped through membership and scopes.
@@ -132,9 +139,22 @@ created from Settings and are project-scoped through membership and scopes.
 
 See [API Documentation](docs/api.md) for complete reference.
 
+Agent and operator workflows use the thin HTTP client in `scripts/dsw`. Set
+`DSW_API_BASE_URL` and `DSW_API_TOKEN`, then use `scripts/dsw doctor`,
+`scripts/dsw chat ...`, or the deterministic `scripts/dsw smoke --fake` check.
+Live smoke is explicit and data-independent: `scripts/dsw smoke --live
+--project PROJECT_ID --source SOURCE_ID --question "..."`.
+The browser acceptance scenario is also data-independent; provide
+`DSW_BROWSER_BASE_URL`, `DSW_BROWSER_USERNAME`, and `DSW_BROWSER_PASSWORD`,
+then run `scripts/dsw browser-smoke`. It writes `result.json`, step logs, and
+conversation/document screenshots to `DSW_BROWSER_OUTPUT_DIR` or `/tmp`.
+See [Browser smoke and debugging](docs/browser-smoke.md) for local fixture
+seeding, safe staging/deployed runs, and the failure-debugging workflow.
+
 ## Deployment
 
-See [Deployment Guide](docs/deployment.md) for production setup.
+See [Deployment Guide](docs/deployment.md) for deployment, target discovery,
+configuration restart behavior, and post-deployment verification.
 
 Examples are provided in `deployment/examples/`.
 

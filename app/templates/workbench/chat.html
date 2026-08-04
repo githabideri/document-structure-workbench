@@ -101,6 +101,12 @@
         </ul>
       </section>
       {% endif %}
+      {% if is_admin and latest_run %}
+      <section class="chat-maintainer-tools">
+        <h2>{% trans "Maintainer" %}</h2>
+        <a href="{% url 'chat_run_diagnostics' latest_run.id %}">{% trans "Inspect run diagnostics" %}</a>
+      </section>
+      {% endif %}
     </aside>
   </div>
 </div>

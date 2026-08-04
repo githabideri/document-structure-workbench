@@ -16,11 +16,13 @@ import logging
 import os
 import tempfile
 import json
+import requests
 from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from .models import (
     Collection,
@@ -79,11 +81,44 @@ class DiagnosticsService:
             release = Path(release_path).read_text().strip()
         from .models import ChatRun
         latest = ChatRun.objects.filter(worker_heartbeat_at__isnull=False).order_by("-worker_heartbeat_at").first()
+        worker_seen = latest.worker_heartbeat_at if latest else None
+        worker_age = (timezone.now() - worker_seen).total_seconds() if worker_seen else None
+        worker_ok = worker_age is not None and worker_age <= getattr(settings, "DSW_PROCESSING_STALE_AFTER_SECONDS", 90)
+        provider = DiagnosticsService.provider_status()
         return {"status": "ok" if database == "ok" else "error", "release": release, "database": database,
-                "worker": {"status": "ok" if latest else "unknown", "last_seen": latest.worker_heartbeat_at.isoformat() if latest else None,
+                "worker": {"status": "ok" if worker_ok else "stale", "last_seen": worker_seen.isoformat() if worker_seen else None,
                             "queue_depth": ChatRun.objects.filter(state="queued").count() if database == "ok" else None},
-                "chat_provider": {"configured": bool(getattr(settings, "DSW_CHAT_BASE_URL", "") and getattr(settings, "DSW_CHAT_MODEL", "")),
-                                  "reachable": None, "model_configured": bool(getattr(settings, "DSW_CHAT_MODEL", "")), "model_available": None}}
+                "chat_provider": provider}
+
+    @staticmethod
+    def provider_status():
+        """Probe the OpenAI-compatible models endpoint without exposing secrets."""
+        base_url = getattr(settings, "DSW_CHAT_BASE_URL", "").strip()
+        model = getattr(settings, "DSW_CHAT_MODEL", "").strip()
+        configured = bool(base_url and model)
+        result = {"configured": configured, "reachable": None,
+                  "model_configured": bool(model), "model_available": None}
+        if not configured:
+            return result
+        headers = {"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if getattr(settings, "DSW_CHAT_API_KEY", "") else {}
+        try:
+            response = requests.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers,
+                timeout=min(getattr(settings, "DSW_CHAT_TIMEOUT", 120), 5),
+            )
+            result["reachable"] = True
+            response.raise_for_status()
+            payload = response.json()
+            models = payload.get("data", []) if isinstance(payload, dict) else []
+            identifiers = {str(item.get("id")) for item in models if isinstance(item, dict)}
+            result["model_available"] = model in identifiers
+        except requests.HTTPError:
+            result["model_available"] = False
+        except (requests.RequestException, ValueError, TypeError):
+            result["reachable"] = False
+            result["model_available"] = False
+        return result
 
 
 class SupportBundleService:

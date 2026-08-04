@@ -144,6 +144,11 @@ Agent and operator workflows use the thin HTTP client in `scripts/dsw`. Set
 `scripts/dsw chat ...`, or the deterministic `scripts/dsw smoke --fake` check.
 Live smoke is explicit and data-independent: `scripts/dsw smoke --live
 --project PROJECT_ID --source SOURCE_ID --question "..."`.
+For a deployed acceptance run, `scripts/dsw verify-deployed --project
+PROJECT_ID --source SOURCE_ID --question "..."` combines health, live smoke,
+evidence, and a locally saved support bundle; add `--browser` when the browser
+fixture environment variables are configured. `scripts/dsw support-bundle`
+saves the audited export instead of only printing it.
 The browser acceptance scenario is also data-independent; provide
 `DSW_BROWSER_BASE_URL`, `DSW_BROWSER_USERNAME`, and `DSW_BROWSER_PASSWORD`,
 then run `scripts/dsw browser-smoke`. It writes `result.json`, step logs, and

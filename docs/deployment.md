@@ -124,6 +124,20 @@ scripts/dsw smoke --live \
   --question "What does the fixture document discuss?"
 ```
 
+For the complete operator check, use the composed workflow. It saves all
+machine-readable artifacts locally and can include the browser scenario:
+
+```bash
+scripts/dsw verify-deployed \
+  --project PROJECT_ID --source SOURCE_ID \
+  --question "What does the fixture document discuss?" \
+  --browser --json
+```
+
+The health response actively checks provider reachability and exact model
+availability through the provider's `/models` endpoint. Generation, evidence,
+and citation validation are still verified by the live run.
+
 Live smoke is not part of ordinary CI and never chooses arbitrary production
 documents.
 

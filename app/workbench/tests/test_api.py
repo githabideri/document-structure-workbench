@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.test import override_settings
+from unittest.mock import patch
 
 from workbench.models import (
     AuditEvent, ChatMessage, ChatRun, ChatThread, Collection, Document, ExtractionRun, Page, ProcessingJob,
@@ -40,6 +42,17 @@ class ApiContractTests(TestCase):
         response = self.client.get(reverse("api_health"))
         self.assertIn(response.status_code, (200, 500))
         self.assertIn("status", response.json())
+
+    @override_settings(DSW_CHAT_BASE_URL="http://provider.test/v1", DSW_CHAT_MODEL="test-model", DSW_CHAT_API_KEY="secret")
+    @patch("workbench.services.requests.get")
+    def test_health_probes_provider_and_exact_model(self, get):
+        get.return_value.json.return_value = {"data": [{"id": "test-model"}, {"id": "other-model"}]}
+        get.return_value.raise_for_status.return_value = None
+        response = self.client.get(reverse("api_health"))
+        self.assertIn(response.status_code, (200, 500))
+        self.assertEqual(response.json()["chat_provider"]["reachable"], True)
+        self.assertEqual(response.json()["chat_provider"]["model_available"], True)
+        get.assert_called_once()
 
     def test_projects_requires_token_and_returns_project(self):
         self.assertEqual(self.client.get(reverse("api_projects")).status_code, 401)
@@ -139,3 +152,16 @@ class ApiContractTests(TestCase):
         markdown_response = self.client.post(reverse("api_chat_support_bundle", args=[run.pk]), data={"format": "markdown"}, content_type="application/json", **self.auth())
         self.assertEqual(markdown_response.status_code, 200)
         self.assertEqual(markdown_response["Content-Type"], "text/markdown")
+
+    @override_settings(STORAGES={"staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}})
+    def test_maintainer_diagnostics_view_is_admin_only(self):
+        thread = self.make_thread()
+        message = ChatMessage.objects.create(thread=thread, role="user", text="diagnostic question", ordinal=0)
+        run = ChatRun.objects.create(thread=thread, user_message=message, state="completed", model_metadata={"final_answer": "safe answer"})
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(reverse("chat_run_diagnostics", args=[run.pk])).status_code, 403)
+        self.user.groups.create(name="Administrator")
+        response = self.client.get(reverse("chat_run_diagnostics", args=[run.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Maintainer diagnostics")
+        self.assertContains(response, "safe answer")

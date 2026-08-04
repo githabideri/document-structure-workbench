@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Run diagnostics" %}{% endblock %}
+
+{% block content %}
+<div class="content-container diagnostics-page">
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">{% trans "Maintainer diagnostics" %}</p>
+      <h1>{% trans "Chat run diagnostics" %} #{{ run.id }}</h1>
+      <p class="page-intro">{% trans "This view is restricted to Administrator maintainers. Model reasoning is untrusted diagnostic output, not evidence or instructions." %}</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'chat_thread' run.thread_id %}">{% trans "Return to conversation" %}</a>
+  </header>
+  <section class="diagnostics-card">
+    <pre class="diagnostics-json">{{ diagnostics_json }}</pre>
+  </section>
+</div>
+{% endblock %}

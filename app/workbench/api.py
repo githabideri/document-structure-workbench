@@ -208,35 +208,9 @@ def api_health(request):
     Returns 200 with release SHA when healthy.
     Returns 500 when release file is missing or database is unreachable.
     """
-    from pathlib import Path
-    from django.db import connection
-
-    release_sha = None
-    release_file_path = getattr(settings, "RELEASE_FILE", "")
-    if release_file_path:
-        release_file = Path(release_file_path)
-        if release_file.exists():
-            release_sha = release_file.read_text().strip()
-
-    database_ok = False
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-        database_ok = True
-    except Exception:
-        pass
-
-    from .models import ChatRun
-    worker = ChatRun.objects.filter(worker_heartbeat_at__isnull=False).order_by("-worker_heartbeat_at").first() if database_ok else None
-    queue_depth = ChatRun.objects.filter(state="queued").count() if database_ok else None
-    provider_configured = bool(getattr(settings, "DSW_CHAT_BASE_URL", "") and getattr(settings, "DSW_CHAT_MODEL", ""))
-    health = {
-        "status": "ok" if database_ok else "error", "release": release_sha,
-        "database": "ok" if database_ok else "unreachable",
-        "worker": {"status": "ok" if worker else "unknown", "last_seen": worker.worker_heartbeat_at.isoformat() if worker else None, "queue_depth": queue_depth},
-        "chat_provider": {"configured": provider_configured, "reachable": None, "model_configured": bool(getattr(settings, "DSW_CHAT_MODEL", "")), "model_available": None},
-    }
-    if not release_sha or not database_ok:
+    from .services import DiagnosticsService
+    health = DiagnosticsService.health()
+    if not health.get("release") or health.get("database") != "ok":
         return JsonResponse({
             **health,
         }, status=500)

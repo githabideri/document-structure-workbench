@@ -25,6 +25,7 @@ urlpatterns = [
     path("chat/", views.chat_view, name="chat"),
     path("chat/<int:thread_id>/", views.chat_thread_view, name="chat_thread"),
     path("chat/runs/<int:run_id>/status/", views.chat_run_status, name="chat_run_status"),
+    path("chat/runs/<int:run_id>/diagnostics/", views.chat_run_diagnostics, name="chat_run_diagnostics"),
     path("documents/new/", views.document_new, name="document_new"),
     path("documents/<int:document_id>/", views.document_detail, name="document_detail"),
     path("regions/<int:region_id>/correct-text/", views.correct_region_text, name="correct_region_text"),

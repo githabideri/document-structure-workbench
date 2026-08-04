@@ -23,11 +23,14 @@ Commands:
   chat ask --project ID --source ID --question TEXT
                                            Create a conversation/run.
   chat inspect|evidence|retry --run ID    Inspect or retry a run.
-  support-bundle --run ID [--format FMT]  Export an audited bundle.
+  support-bundle --run ID [--format FMT] [--output PATH]
+                                           Export and save an audited bundle.
   smoke --fake                            Run real local fake-provider integration.
   smoke --live --project ID --source ID --question TEXT
                                            Run explicit live-provider smoke.
   browser-smoke [OPTIONS]                 Run browser acceptance scenarios.
+  verify-deployed --project ID --source ID --question TEXT [--browser]
+                                           Verify a deployed environment end to end.
   fake-provider [OPTIONS]                 Start a local OpenAI-compatible fake.
 
 Set DSW_API_BASE_URL and DSW_API_TOKEN for HTTP commands. Run
@@ -65,9 +68,27 @@ case "$cmd" in
     esac
     ;;
   support-bundle)
-    [[ "${1:-}" == --run ]] || die "usage: dsw support-bundle --run RUN_ID [--format markdown|json]"
-    run="$2"; format="json"; [[ "${3:-}" == --format ]] && format="${4:-json}"
-    request POST "/chat/runs/$run/support-bundle/" "{\"format\":\"$format\"}"
+    [[ "${1:-}" == --run ]] || die "usage: dsw support-bundle --run RUN_ID [--format markdown|json] [--output PATH]"
+    run="$2"; format="json"; output=""
+    shift 2
+    while (($#)); do
+      case "$1" in
+        --format) format="${2:?missing format}"; shift 2;;
+        --output) output="${2:?missing output path}"; shift 2;;
+        *) die "unknown option $1";;
+      esac
+    done
+    [[ "$format" == json || "$format" == markdown ]] || die "format must be json or markdown"
+    output="${output:-./chat-run-${run}-support.${format}}"
+    mkdir -p "$(dirname "$output")"
+    curl_args=(-fsS -X POST -H "Accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data "{\"format\":\"$format\"}" -o "$output" -w '%{http_code}')
+    http_code="$(curl "${curl_args[@]}" "$base/chat/runs/$run/support-bundle/")"
+    [[ "$http_code" == 2* ]] || die "support-bundle request failed with HTTP $http_code"
+    if ((json_out)); then
+      python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); print(json.dumps({"status":"saved","path":p,"request_id":d.get("request_id"),"run_id":d.get("bundle",{}).get("run",{}).get("id")}))' "$output"
+    else
+      echo "support bundle saved: $output"
+    fi
     ;;
   smoke)
     [[ "${1:-}" == --fake ]] && exec "$(dirname "$0")/../.venv/bin/pytest" -q app/workbench/tests/test_fake_provider.py
@@ -86,6 +107,48 @@ case "$cmd" in
       sleep "${DSW_SMOKE_INTERVAL:-2}"
     done
     die "timed out waiting for run $run"
+    ;;
+  verify-deployed)
+    project=""; source=""; question=""; run_output=""; browser_run=0
+    while (($#)); do
+      case "$1" in
+        --project) project="$2"; shift 2;;
+        --source) source="$2"; shift 2;;
+        --question) question="$2"; shift 2;;
+        --output-dir) run_output="$2"; shift 2;;
+        --browser) browser_run=1; shift;;
+        --json) json_out=1; shift;;
+        *) die "unknown option $1";;
+      esac
+    done
+    [[ -n "$project" && -n "$source" && -n "$question" ]] || die "verify-deployed requires --project PROJECT_ID --source SOURCE_ID --question QUESTION"
+    run_output="${run_output:-/tmp/dsw-verify-$(date +%Y%m%d-%H%M%S)}"
+    mkdir -p "$run_output"
+    health=$(request GET /health/)
+    printf '%s\n' "$health" > "$run_output/health.json"
+    live_json=$(DSW_API_BASE_URL="$base" DSW_API_TOKEN="$token" "$0" smoke --live --project "$project" --source "$source" --question "$question")
+    printf '%s\n' "$live_json" > "$run_output/live.json"
+    run_id=$(printf '%s' "$live_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])')
+    evidence=$(request GET "/chat/runs/$run_id/evidence/")
+    printf '%s\n' "$evidence" > "$run_output/evidence.json"
+    evidence_count=$(printf '%s' "$evidence" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("evidence",[])))')
+    [[ "$evidence_count" -gt 0 ]] || die "deployed run $run_id completed without evidence"
+    bundle_path="$run_output/chat-run-$run_id-support.json"
+    DSW_API_BASE_URL="$base" DSW_API_TOKEN="$token" "$0" support-bundle --run "$run_id" --format json --output "$bundle_path" >/dev/null
+    browser_status="skipped"
+    if ((browser_run)); then
+      browser_base="${DSW_BROWSER_BASE_URL:-${base%/api/v1}}"
+      browser_args=(--base-url "$browser_base" --output-dir "$run_output/browser")
+      case "$browser_base" in http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*) ;; *) browser_args+=(--allow-remote);; esac
+      DSW_BROWSER_SOURCE_IDS="${DSW_BROWSER_SOURCE_IDS:-$source}" DSW_BROWSER_PROJECT_ID="${DSW_BROWSER_PROJECT_ID:-$project}" "$0" browser-smoke "${browser_args[@]}"
+      browser_status="pass"
+    fi
+    release=$(printf '%s' "$health" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("release") or "")')
+    if ((json_out)); then
+      python3 -c 'import json,sys; print(json.dumps({"status":"pass","release":sys.argv[1],"run_id":int(sys.argv[2]),"evidence_count":int(sys.argv[3]),"support_bundle":sys.argv[4],"browser":sys.argv[5]}))' "$release" "$run_id" "$evidence_count" "$bundle_path" "$browser_status"
+    else
+      echo "deployed verification passed: release=$release run=$run_id evidence=$evidence_count bundle=$bundle_path browser=$browser_status"
+    fi
     ;;
   browser-smoke)
     exec "$(dirname "$0")/dsw-browser-smoke"

@@ -87,6 +87,20 @@ For a deployed smoke run, do not use `fake-provider`; the target's configured
 provider and worker are what the test is intended to validate. Use
 `scripts/dsw smoke --live` first when provider readiness itself is the question.
 
+The streamlined deployed workflow is:
+
+```bash
+scripts/dsw verify-deployed \
+  --project PROJECT_ID --source SOURCE_ID \
+  --question "What does the fixture document discuss?" \
+  --browser
+```
+
+This writes health, live-run, evidence, support-bundle, and browser artifacts
+under `/tmp/dsw-verify-*`. `--browser` uses the existing
+`DSW_BROWSER_*` variables and still requires `--allow-remote` internally for a
+non-local URL. For CI or agents, add `--json` to receive a stable summary.
+
 ## Debug flow
 
 When a run fails:
@@ -99,8 +113,12 @@ When a run fails:
 6. Export an audited support bundle only when authorized:
 
 ```bash
-scripts/dsw support-bundle --run RUN_ID --format markdown
+scripts/dsw support-bundle --run RUN_ID --format markdown --output ./artifacts/run.md
 ```
+
+The health endpoint actively probes the configured provider's `/models`
+endpoint and reports whether the exact configured model is available. A
+successful live smoke remains the definitive generation test.
 
 For citation failures, inspect the cited URL in the snapshot and verify that
 the immutable revision/page parameters are present. For polling failures,

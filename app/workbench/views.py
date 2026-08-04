@@ -41,7 +41,7 @@ def is_curator(user):
 
 
 def is_admin(user):
-    return user.groups.filter(name="Administrator").exists()
+    return user.is_superuser or user.groups.filter(name="Administrator").exists()
 
 
 # --- Project access decorator ---
@@ -298,7 +298,7 @@ def chat_view(request):
     return render(request, "workbench/chat.html", {
         "sources": sources, "selected_ids": set(selected_ids), "error": error,
         "thread": None, "chat_messages": [], "latest_run": None,
-        "threads": threads,
+        "threads": threads, "is_admin": is_admin(request.user),
     })
 
 
@@ -339,7 +339,7 @@ def chat_thread_view(request, thread_id):
         "thread": thread, "chat_messages": messages, "latest_run": latest_run,
         "evidence_items": evidence_items,
         "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
-        "threads": threads,
+        "threads": threads, "is_admin": is_admin(request.user),
     })
 
 
@@ -352,6 +352,30 @@ def chat_run_status(request, run_id):
         response["HX-Redirect"] = reverse("chat_thread", args=[run.thread_id])
         return response
     return render(request, "workbench/_chat_run_status.html", {"run": run})
+
+
+@login_required
+def chat_run_diagnostics(request, run_id):
+    """Show sensitive run diagnostics only to Administrator maintainers."""
+    if not is_admin(request.user):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    from .models import ChatRun
+    run = get_object_or_404(
+        ChatRun.objects.select_related("thread", "thread__project", "assistant_message", "user_message")
+        .prefetch_related("evidence_items", "events"), pk=run_id,
+    )
+    from .services import SupportBundleService
+    bundle = SupportBundleService.build(run)
+    diagnostics = {
+        "run": bundle["run"], "project": bundle["project"], "scope": bundle["scope"],
+        "question": bundle["question"], "evidence": bundle["evidence"],
+        "provider": bundle["provider"], "final_answer": bundle["final_answer"],
+        "reasoning_content": bundle.get("reasoning_content"), "events": bundle["events"],
+    }
+    return render(request, "workbench/chat_run_diagnostics.html", {
+        "run": run, "diagnostics_json": json.dumps(diagnostics, indent=2, ensure_ascii=False),
+    })
 
 
 @login_required

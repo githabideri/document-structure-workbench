@@ -219,6 +219,22 @@ body {
     margin-bottom: 1.5rem;
 }
 
+/* Maintainer diagnostics */
+.diagnostics-card {
+    background: #111827;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+}
+
+.diagnostics-json {
+    color: #d1fae5;
+    font: 0.82rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin: 0;
+    white-space: pre-wrap;
+}
+
 /* Actions */
 .actions {
     margin: 1.5rem 0;

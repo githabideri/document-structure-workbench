@@ -367,6 +367,8 @@ h4 { margin: 0.75rem 0 0.5rem; font-size: 1rem; }
 .message-role { color: var(--secondary); font-size: .72rem; font-weight: 700; margin-bottom: .3rem; }
 .message-body p { margin: 0 0 .45rem; }
 .message-body p:last-child { margin-bottom: 0; }
+.chat-citation { display: inline-block; margin: 0 .08rem; padding: 0 .22rem; border-radius: 4px; background: #dbeafe; color: #1d4ed8; font-weight: 700; text-decoration: none; }
+.chat-citation:hover, .chat-citation:focus { background: #bfdbfe; text-decoration: underline; }
 .chat-question-form { display: flex; gap: .6rem; align-items: end; padding: .9rem 1rem; border-top: 1px solid var(--border); }
 .chat-question-form textarea, .chat-start-form textarea { flex: 1; width: 100%; resize: vertical; padding: .65rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 .chat-empty-start { padding: 2rem 1.2rem .5rem; }

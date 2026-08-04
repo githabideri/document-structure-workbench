@@ -282,10 +282,15 @@ def chat_view(request):
                 error = _("The selected documents are not accessible.")
             else:
                 project = selected_sources[0].collection
+                revision_ids = [source.active_document_id for source in selected_sources if source.active_document_id]
                 thread = ChatThread.objects.create(
                     project=project, created_by=request.user, title=question[:120],
                     model=getattr(settings, "DSW_CHAT_MODEL", ""),
-                    scope_snapshot={"source_ids": [source.id for source in selected_sources]},
+                    selected_revisions=revision_ids,
+                    scope_snapshot={
+                        "source_ids": [source.id for source in selected_sources],
+                        "revision_ids": revision_ids,
+                    },
                 )
                 thread.selected_sources.set(selected_sources)
                 create_chat_run(thread, question)
@@ -300,7 +305,8 @@ def chat_view(request):
 @login_required
 def chat_thread_view(request, thread_id):
     from .policy import ProjectAccessPolicy
-    from .models import ChatThread, SourceDocument
+    from .models import ChatRun, ChatThread, SourceDocument
+    from .chat import render_message_with_citations
     thread = get_object_or_404(ChatThread.objects.prefetch_related("selected_sources", "messages"), pk=thread_id, created_by=request.user)
     policy = ProjectAccessPolicy(user=request.user)
     if not policy.can_view(thread.project):
@@ -315,11 +321,22 @@ def chat_thread_view(request, thread_id):
     threads = list(ChatThread.objects.filter(
         created_by=request.user, project__in=policy.visible_projects(),
     ).select_related("project").order_by("-updated_at", "-id")[:50])
+    messages = list(thread.messages.all())
+    assistant_runs = {
+        run.assistant_message_id: run
+        for run in ChatRun.objects.filter(
+            assistant_message__in=messages,
+        ).prefetch_related("evidence_items")
+    }
+    for message in messages:
+        message.rendered_text = render_message_with_citations(
+            message, assistant_runs.get(message.id)
+        )
     latest_run = thread.runs.prefetch_related("evidence_items").order_by("-created_at").first()
     evidence_items = list(latest_run.evidence_items.select_related("source_document", "page") if latest_run else [])
     return render(request, "workbench/chat.html", {
         "sources": sources, "selected_ids": {str(source.id) for source in sources},
-        "thread": thread, "chat_messages": thread.messages.all(), "latest_run": latest_run,
+        "thread": thread, "chat_messages": messages, "latest_run": latest_run,
         "evidence_items": evidence_items,
         "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
         "threads": threads,
@@ -330,11 +347,11 @@ def chat_thread_view(request, thread_id):
 def chat_run_status(request, run_id):
     from .models import ChatRun
     run = get_object_or_404(ChatRun.objects.select_related("thread", "assistant_message"), pk=run_id, thread__created_by=request.user)
-    return JsonResponse({
-        "state": run.state, "status_message": run.status_message,
-        "error": run.error_message, "assistant": run.assistant_message.text if run.assistant_message else "",
-        "thread_url": reverse("chat_thread", args=[run.thread_id]),
-    })
+    if run.state in {"completed", "failed", "cancelled"}:
+        response = HttpResponse("")
+        response["HX-Redirect"] = reverse("chat_thread", args=[run.thread_id])
+        return response
+    return render(request, "workbench/_chat_run_status.html", {"run": run})
 
 
 @login_required

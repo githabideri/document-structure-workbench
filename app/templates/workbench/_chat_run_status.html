@@ -1,0 +1,5 @@
+{% load i18n %}
+<div class="chat-run-status" hx-get="{% url 'chat_run_status' run.id %}" hx-trigger="every 2s" hx-swap="outerHTML">
+  <strong>{% trans "Working" %}</strong>
+  <span>{{ run.status_message }}</span>
+</div>

@@ -5,6 +5,9 @@ import re
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
+from django.urls import reverse
+from django.utils.html import conditional_escape, format_html
+from django.utils.safestring import mark_safe
 
 from .models import ChatMessage, ChatRun, EvidenceItem, SearchPassage
 from .search import normalize_text
@@ -30,12 +33,15 @@ def build_direct_context(source_ids, projects, limit=32):
     return "\n\n".join(lines), citations
 
 
-def select_evidence(question, source_ids, projects, limit=24):
+def select_evidence(question, source_ids, projects, revision_ids=None, limit=24):
     """Select passages across the complete scope with deterministic coverage."""
     tokens = [token for token in re.findall(r"[\w-]{3,}", normalize_text(question))]
-    passages = list(SearchPassage.objects.filter(
+    queryset = SearchPassage.objects.filter(
         source_document_id__in=source_ids, project__in=projects,
-    ).select_related("source_document", "processed_revision", "processing_job", "page", "page_region"))
+    )
+    if revision_ids:
+        queryset = queryset.filter(processed_revision_id__in=revision_ids)
+    passages = list(queryset.select_related("source_document", "processed_revision", "processing_job", "page", "page_region"))
     scored = []
     for passage in passages:
         text = passage.normalized_text
@@ -68,10 +74,13 @@ def create_chat_run(thread, question):
     with transaction.atomic():
         ordinal = thread.messages.count()
         message = ChatMessage.objects.create(thread=thread, role="user", text=question, ordinal=ordinal)
-        return ChatRun.objects.create(
+        run = ChatRun.objects.create(
             thread=thread, user_message=message, retrieval_query=question,
             status_message="Waiting for an evidence worker.",
         )
+        thread.updated_at = timezone.now()
+        thread.save(update_fields=["updated_at"])
+        return run
 
 
 def assemble_run_context(run):
@@ -92,7 +101,8 @@ def process_chat_run(run, worker_id="chat-worker"):
     thread = run.thread
     source_ids = list(thread.selected_sources.values_list("id", flat=True))
     projects = [thread.project]
-    selected = select_evidence(run.retrieval_query, source_ids, projects)
+    revision_ids = thread.selected_revisions or None
+    selected = select_evidence(run.retrieval_query, source_ids, projects, revision_ids=revision_ids)
     EvidenceItem.objects.filter(run=run).delete()
     items = []
     for index, (score, passage, reason) in enumerate(selected, 1):
@@ -111,13 +121,17 @@ def process_chat_run(run, worker_id="chat-worker"):
         "Answer only from supplied evidence, state uncertainty, and cite claims with supplied markers "
         "such as [S1]. Never invent citations or URLs.\n\nEVIDENCE:\n" + context
     )
+    history = list(
+        thread.messages.exclude(pk=run.user_message_id).order_by("ordinal").values("role", "text")
+    )[-12:]
     ChatRun.objects.filter(pk=run.pk).update(state="generating", status_message="Asking the configured Qwen model.")
     try:
         response = requests.post(
             f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
             json={"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": 4096,
-                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": run.retrieval_query}]},
+                  "messages": ([{"role": "system", "content": system}] + history +
+                               [{"role": "user", "content": run.retrieval_query}])},
             timeout=settings.DSW_CHAT_TIMEOUT,
         )
         response.raise_for_status()
@@ -136,6 +150,30 @@ def process_chat_run(run, worker_id="chat-worker"):
         assistant_message=assistant, finished_at=timezone.now(), worker_id="",
     )
     return assistant
+
+
+def render_message_with_citations(message, run=None):
+    """Escape a message and link only citations backed by persisted evidence."""
+    text = conditional_escape(message.text or "")
+    if run:
+        for item in run.evidence_items.select_related("source_document", "page").order_by("ordinal"):
+            page_number = item.page.page_number if item.page else 1
+            url = (
+                f"{reverse('document_detail', args=[item.source_document_id])}"
+                f"?revision={item.processed_revision_id}&page={page_number}"
+            )
+            if item.page_region_id:
+                url += f"&region={item.page_region_id}"
+            url += f"&thread={message.thread_id}"
+            marker = f"[{item.marker}]"
+            link = format_html(
+                '<a class="chat-citation" href="{}" title="{}">{}</a>',
+                url,
+                f"{item.source_document.filename}, page {page_number}",
+                marker,
+            )
+            text = text.replace(marker, link)
+    return mark_safe(text.replace("\n", "<br>"))
 
 
 def ask_read_only(question, source_ids, projects):

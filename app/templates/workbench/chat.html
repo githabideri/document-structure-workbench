@@ -46,13 +46,13 @@
         {% for message in chat_messages %}
         <article class="chat-message chat-message-{{ message.role }}">
           <div class="message-role">{% if message.role == 'user' %}{% trans "You" %}{% else %}{% trans "DSW assistant" %}{% endif %}</div>
-          <div class="message-body">{{ message.text|linebreaks }}</div>
+          <div class="message-body">{{ message.rendered_text|safe }}</div>
         </article>
         {% empty %}
         <div class="empty-state"><h2>{% trans "Start a research conversation" %}</h2><p>{% trans "Ask a question about the selected documents." %}</p></div>
         {% endfor %}
         {% if latest_run and latest_run.state != 'completed' and latest_run.state != 'failed' %}
-        <div class="chat-run-status" hx-get="{% url 'chat_run_status' latest_run.id %}" hx-trigger="every 3s" hx-swap="innerHTML"><strong>{% trans "Working" %}</strong><span>{{ latest_run.status_message }}</span></div>
+        <div class="chat-run-status" hx-get="{% url 'chat_run_status' latest_run.id %}" hx-trigger="every 2s" hx-swap="outerHTML"><strong>{% trans "Working" %}</strong><span>{{ latest_run.status_message }}</span></div>
         {% endif %}
       </div>
       {% if thread %}

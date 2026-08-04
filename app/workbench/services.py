@@ -190,6 +190,44 @@ class SupportBundleService:
         lines += [f"- {event['created_at']} — {event['name']} {event['error_code']}" for event in bundle["events"]]
         return "\n".join(lines) + "\n"
 
+    @staticmethod
+    def human_timeline(bundle):
+        """Return a plain-language explanation of the persisted run events."""
+        timeline = []
+        for event in bundle["events"]:
+            name = event["name"]
+            metadata = event.get("metadata") or {}
+            if name == "queued":
+                explanation = "The question was accepted and a durable run was created."
+            elif name == "retrieving":
+                explanation = "The server began retrieving evidence from the frozen scope."
+            elif name == "evidence_selected":
+                explanation = f"The server selected {metadata.get('count', 0)} passages before asking the model."
+            elif name == "assembling":
+                explanation = "The selected passages were assembled into the model's evidence context."
+            elif name == "context_truncated":
+                explanation = f"The evidence context was shortened to the configured {metadata.get('context_token_budget')} token budget."
+            elif name == "provider_request":
+                explanation = "The application sent the question and evidence context to the configured model provider."
+            elif name == "tool_call":
+                explanation = f"The model requested a search; the server returned {metadata.get('result_count', 0)} results for that query."
+            elif name == "tool_fallback":
+                explanation = "The provider rejected native tools, so automatic mode retried with deterministic server-side retrieval."
+            elif name == "tool_call_rejected":
+                explanation = "The server rejected a malformed model tool request and did not execute it."
+            elif name == "tool_call_limit":
+                explanation = f"The configured maximum of {metadata.get('max_tool_calls')} model search calls was reached."
+            elif name == "provider_response":
+                explanation = "The model returned a response containing the answer and/or reasoning content."
+            elif name == "validating":
+                explanation = f"The server validated {metadata.get('citation_count', 0)} citations against persisted evidence."
+            elif name == "completed":
+                explanation = "The answer and its evidence references were persisted successfully."
+            else:
+                explanation = "A persisted run event was recorded."
+            timeline.append({**event, "explanation": explanation})
+        return timeline
+
 
 class CorrectionError(Exception):
     """A correction could not be applied safely."""

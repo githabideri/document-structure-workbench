@@ -389,8 +389,19 @@ def chat_run_diagnostics(request, run_id):
         "provider": bundle["provider"], "final_answer": bundle["final_answer"],
         "reasoning_content": bundle.get("reasoning_content"), "events": bundle["events"],
     }
+    tool_events = [event for event in bundle["events"] if event["name"] in {"tool_call", "tool_fallback", "tool_call_rejected", "tool_call_limit"}]
+    used_model_tools = bool([event for event in bundle["events"] if event["name"] == "tool_call"])
+    retrieval_event = next((event for event in bundle["events"] if event["name"] == "evidence_selected"), {})
+    provider_summary = {
+        "configured_mode": getattr(settings, "DSW_CHAT_TOOL_MODE", "fallback"),
+        "actual_mode": "model-requested search" if used_model_tools else "server-side deterministic retrieval",
+        "tool_events": tool_events,
+        "model": (bundle.get("provider") or {}).get("model", settings.DSW_CHAT_MODEL),
+        "evidence_count": retrieval_event.get("metadata", {}).get("count", len(bundle["evidence"])),
+    }
     return render(request, "workbench/chat_run_diagnostics.html", {
-        "run": run, "diagnostics_json": json.dumps(diagnostics, indent=2, ensure_ascii=False),
+        "run": run, "diagnostics": diagnostics, "timeline": SupportBundleService.human_timeline(bundle),
+        "provider_summary": provider_summary, "diagnostics_json": json.dumps(diagnostics, indent=2, ensure_ascii=False),
     })
 
 

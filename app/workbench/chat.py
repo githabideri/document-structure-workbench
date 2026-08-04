@@ -195,7 +195,11 @@ def process_chat_run(run, worker_id="chat-worker"):
         request_payload = {"model": settings.DSW_CHAT_MODEL, "temperature": 0.1, "max_tokens": settings.DSW_CHAT_MAX_TOKENS, "messages": provider_messages}
         if tool_mode in {"automatic", "native"}:
             request_payload["tools"] = tools
-            request_payload["tool_choice"] = "auto"
+            # This workflow is evidence-first: require the model to ask the
+            # bounded search tool before it can produce a final answer. The
+            # automatic-mode rejection path below remains deterministic.
+            request_payload["tool_choice"] = "required"
+            request_payload["parallel_tool_calls"] = False
         def provider_request(payload):
             remaining = deadline - time.monotonic()
             if remaining <= 0:

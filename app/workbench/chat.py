@@ -267,6 +267,20 @@ def process_chat_run(run, worker_id="chat-worker"):
             provider_messages.extend(tool_results)
             if tool_call_count >= getattr(settings, "DSW_CHAT_MAX_TOOL_CALLS", 3):
                 record_run_event(run, "tool_call_limit", metadata={"max_tool_calls": tool_call_count})
+                # Give the model one final answer turn with tools disabled.
+                # Without this handoff, a model that emits a final tool request
+                # at the boundary would leave the run with no answer.
+                record_run_event(run, "final_answer_request", metadata={"reason": "tool_call_limit"})
+                final_payload = {**request_payload, "messages": provider_messages}
+                final_payload.pop("tools", None)
+                final_payload.pop("tool_choice", None)
+                final_payload.pop("parallel_tool_calls", None)
+                response = provider_request(final_payload)
+                response.raise_for_status()
+                payload = response.json()
+                choice = payload["choices"][0]
+                provider_message = choice.get("message", {})
+                tool_calls = []
                 break
             response = provider_request({**request_payload, "messages": provider_messages})
             response.raise_for_status()

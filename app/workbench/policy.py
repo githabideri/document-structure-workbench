@@ -46,7 +46,7 @@ class ProjectAccessPolicy:
             return self._is_global_admin
 
         if self.user:
-            self._is_global_admin = self.user.groups.filter(
+            self._is_global_admin = self.user.is_superuser or self.user.groups.filter(
                 name="Administrator"
             ).exists()
         elif self.token and self.token.service_account:

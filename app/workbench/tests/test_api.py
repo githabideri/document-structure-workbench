@@ -165,3 +165,6 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Maintainer diagnostics")
         self.assertContains(response, "safe answer")
+        conversation = self.client.get(reverse("chat_thread", args=[thread.pk]))
+        self.assertEqual(conversation.status_code, 200)
+        self.assertContains(conversation, "Inspect run diagnostics")

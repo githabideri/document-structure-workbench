@@ -265,9 +265,10 @@ def chat_view(request):
     policy = ProjectAccessPolicy(user=request.user)
     projects = list(policy.visible_projects())
     sources = list(SourceDocument.objects.filter(collection__in=projects, is_archived=False).select_related("collection", "active_document")[:100])
-    threads = list(ChatThread.objects.filter(
-        created_by=request.user, project__in=projects,
-    ).select_related("project").order_by("-updated_at", "-id")[:50])
+    thread_queryset = ChatThread.objects.filter(project__in=projects)
+    if not is_admin(request.user):
+        thread_queryset = thread_queryset.filter(created_by=request.user)
+    threads = list(thread_queryset.select_related("project").order_by("-updated_at", "-id")[:50])
     error = None
     selected_ids = request.POST.getlist("source") if request.method == "POST" else request.GET.getlist("source")
     if request.method == "POST":
@@ -307,7 +308,10 @@ def chat_thread_view(request, thread_id):
     from .policy import ProjectAccessPolicy
     from .models import ChatRun, ChatThread, SourceDocument
     from .chat import render_message_with_citations
-    thread = get_object_or_404(ChatThread.objects.prefetch_related("selected_sources", "messages"), pk=thread_id, created_by=request.user)
+    thread_queryset = ChatThread.objects.prefetch_related("selected_sources", "messages")
+    if not is_admin(request.user):
+        thread_queryset = thread_queryset.filter(created_by=request.user)
+    thread = get_object_or_404(thread_queryset, pk=thread_id)
     policy = ProjectAccessPolicy(user=request.user)
     if not policy.can_view(thread.project):
         return redirect("chat")
@@ -318,9 +322,10 @@ def chat_thread_view(request, thread_id):
             create_chat_run(thread, question)
         return redirect("chat_thread", thread_id=thread.id)
     sources = list(thread.selected_sources.select_related("collection"))
-    threads = list(ChatThread.objects.filter(
-        created_by=request.user, project__in=policy.visible_projects(),
-    ).select_related("project").order_by("-updated_at", "-id")[:50])
+    thread_queryset = ChatThread.objects.filter(project__in=policy.visible_projects())
+    if not is_admin(request.user):
+        thread_queryset = thread_queryset.filter(created_by=request.user)
+    threads = list(thread_queryset.select_related("project").order_by("-updated_at", "-id")[:50])
     messages = list(thread.messages.all())
     assistant_runs = {
         run.assistant_message_id: run

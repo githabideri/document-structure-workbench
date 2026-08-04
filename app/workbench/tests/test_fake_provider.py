@@ -222,6 +222,7 @@ class FakeProviderIntegrationTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
         self.assertTrue(run.events.filter(name="tool_fallback").exists())
+        self.assertEqual(run.evidence_items.count(), 0)
         self.assertEqual(self.provider.config["request_count"], 2)
 
     def test_native_tool_calls_persist_bounded_search_evidence(self):
@@ -231,6 +232,15 @@ class FakeProviderIntegrationTests(TestCase):
         self.assertEqual(run.state, "completed")
         self.assertEqual(run.evidence_items.count(), 1)
         self.assertTrue(run.events.filter(name="tool_call").exists())
+
+    def test_automatic_mode_allows_direct_answer_when_model_declines_search(self):
+        run, error = self.run_mode("success", tool_mode="automatic")
+        self.assertIsNone(error)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertEqual(run.evidence_items.count(), 0)
+        self.assertEqual(self.provider.config["request"]["tool_choice"], "auto")
+        self.assertFalse(run.events.filter(name="tool_call").exists())
 
     def test_malformed_tool_call_is_untrusted_and_does_not_crash_worker(self):
         run, error = self.run_mode("malformed-tool", tool_mode="native")

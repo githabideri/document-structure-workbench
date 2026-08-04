@@ -151,7 +151,7 @@ case "$cmd" in
     fi
     ;;
   browser-smoke)
-    exec "$(dirname "$0")/dsw-browser-smoke"
+    exec "$(dirname "$0")/dsw-browser-smoke" "$@"
     ;;
   fake-provider)
     exec "$(dirname "$0")/dsw-fake-provider" "$@"

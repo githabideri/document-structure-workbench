@@ -15,9 +15,9 @@ import hashlib
 import logging
 import os
 import tempfile
+from pathlib import Path
 import json
 import requests
-from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -299,6 +299,7 @@ class DocumentIngestionService:
     """Shared upload and ingestion logic."""
 
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+    ALLOWED_UPLOAD_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "tif", "tiff"}
 
     def __init__(self, *, user, policy=None):
         self.user = user
@@ -460,8 +461,9 @@ class DocumentIngestionService:
         if not uploaded_file.name or not uploaded_file.size:
             raise IngestionError("File is empty.")
 
-        if not uploaded_file.name.lower().endswith(".pdf"):
-            raise IngestionError("Only PDF files are supported.")
+        suffix = Path(uploaded_file.name).suffix.lower().lstrip(".")
+        if suffix not in self.ALLOWED_UPLOAD_EXTENSIONS:
+            raise IngestionError("Supported files are PDF, JPG, PNG, and TIFF.")
 
         if uploaded_file.size > self.MAX_FILE_SIZE:
             raise IngestionError(
@@ -472,11 +474,17 @@ class DocumentIngestionService:
         uploaded_file.seek(0)
         header = uploaded_file.read(5)
         uploaded_file.seek(0)
-        if header != b"%PDF-":
-            raise IngestionError(
-                "File does not appear to be a valid PDF "
-                "(missing %PDF- header)."
-            )
+        if suffix == "pdf" and header != b"%PDF-":
+            raise IngestionError("File does not appear to be a valid PDF (missing %PDF- header).")
+        if suffix != "pdf":
+            try:
+                from PIL import Image
+                uploaded_file.seek(0)
+                with Image.open(uploaded_file) as image:
+                    image.verify()
+            except Exception as exc:
+                raise IngestionError("The uploaded image is not a valid JPG, PNG, or TIFF file.") from exc
+        uploaded_file.seek(0)
 
     # ------------------------------------------------------------------
     # Storage — stream to temp, then finalize

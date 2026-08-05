@@ -15,6 +15,7 @@ class ProcessorResult:
     tables_found: int = 0
     page_images: dict = field(default_factory=dict)  # page_num -> {data, format}
     page_texts: dict = field(default_factory=dict)  # page_num -> text
+    ocr_pages: dict = field(default_factory=dict)  # page_num -> Paddle OCR provenance
     layout_json: Optional[str] = None  # relative path to layout JSON
     regions: list = field(default_factory=list)  # list of region dicts
     table_crops: dict = field(default_factory=dict)  # table_id -> relative_path

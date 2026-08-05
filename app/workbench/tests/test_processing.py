@@ -342,7 +342,7 @@ class UploadServiceTest(TestCase):
 
     @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_upload_invalid_file_rejected(self):
-        """Non-PDF files are rejected."""
+        """Unsupported files are rejected."""
         from workbench.services import DocumentIngestionService, IngestionError
 
         bad_file = SimpleUploadedFile("test.txt", b"not a pdf", content_type="text/plain")
@@ -354,6 +354,20 @@ class UploadServiceTest(TestCase):
                 uploaded_file=bad_file,
                 preset_slug=self.preset.slug,
             )
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_upload_accepts_png_image(self):
+        from io import BytesIO
+        from PIL import Image
+        from workbench.services import DocumentIngestionService
+
+        image = BytesIO()
+        Image.new("RGB", (12, 12), "white").save(image, format="PNG")
+        upload = SimpleUploadedFile("scan.png", image.getvalue(), content_type="image/png")
+        job = DocumentIngestionService(user=self.user).create_upload(
+            project=self.collection, uploaded_file=upload, preset_slug=self.preset.slug,
+        )
+        self.assertEqual(job.source_document.filename, "scan.png")
 
     @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_upload_invalid_preset_rejected(self):

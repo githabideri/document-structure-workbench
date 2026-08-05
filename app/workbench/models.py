@@ -743,6 +743,7 @@ class ProcessingArtifact(models.Model):
         ("table_crop", "Table crop image"),
         ("table_extraction", "Table extraction result"),
         ("page_text", "Page text"),
+        ("ocr_page", "Visual OCR page result"),
         ("layout_json", "Layout detection JSON"),
         ("otsl", "OTSL table markup"),
     ]

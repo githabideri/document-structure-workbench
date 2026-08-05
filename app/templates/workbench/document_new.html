@@ -31,8 +31,9 @@
             <div class="step-content">
                 <label for="file-input">{% trans "Document" %}</label>
                 <label class="file-drop" id="file-drop" for="file-input">
-                    <input type="file" name="file" id="file-input" accept=".pdf,application/pdf" required>
+                    <input type="file" name="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,application/pdf,image/jpeg,image/png,image/tiff" required>
                     <strong>{% trans "Choose a PDF or drop it here" %}</strong>
+                    <small>PDF, JPG, PNG, TIFF</small>
                     <span id="file-info">{% trans "Maximum file size: 50 MB" %}</span>
                 </label>
             </div>

@@ -1504,7 +1504,7 @@ def document_new(request, project_id=None):
         if collection is None:
             messages.error(request, _("Choose a project you can edit."))
         elif "file" not in request.FILES:
-            messages.error(request, _("Choose a PDF to upload."))
+            messages.error(request, _("Choose a PDF or image to upload."))
         else:
             uploaded_file = request.FILES["file"]
             service = DocumentIngestionService(user=request.user, policy=policy)

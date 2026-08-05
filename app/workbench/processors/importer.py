@@ -181,7 +181,7 @@ class ResultImporter:
 
         document = Document.objects.create(
             collection=self.collection,
-            external_id=self.source_doc.filename.replace(".pdf", ""),
+            external_id=Path(self.source_doc.filename).stem,
             filename=self.source_doc.filename,
             sha256=self.source_doc.sha256,
             page_count=result.pages_processed or 0,
@@ -296,6 +296,21 @@ class ResultImporter:
                     page_number=page_num,
                     defaults={
                         "data": {"text": text},
+                        "metadata": {
+                            "ocr": result.ocr_pages.get(page_num, {}),
+                        } if page_num in result.ocr_pages else {},
+                    },
+                )
+
+            if page_num in result.ocr_pages:
+                ocr = result.ocr_pages[page_num]
+                ProcessingArtifact.objects.update_or_create(
+                    job=self.job,
+                    artifact_type="ocr_page",
+                    page_number=page_num,
+                    defaults={
+                        "data": {"text": ocr.get("text", ""), "blocks": ocr.get("blocks", [])},
+                        "metadata": {k: v for k, v in ocr.items() if k not in {"text", "blocks"}},
                     },
                 )
 

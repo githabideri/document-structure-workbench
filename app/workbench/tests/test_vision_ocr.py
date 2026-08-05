@@ -7,6 +7,8 @@ from django.test import TestCase, override_settings
 from PIL import Image
 
 from workbench.models import Collection, Document, OcrRequest, Page, PageRegion, ProcessingJob, ProcessingPreset, SourceDocument
+from workbench.processors.base import ProcessorResult
+from workbench.processors.ingestion_ocr import apply_page_ocr
 from workbench.processors.vision_ocr import VisionOcrClient, make_crop
 
 
@@ -54,3 +56,27 @@ class VisionOcrTests(TestCase):
         item = OcrRequest.objects.create(source_document=self.source, document=self.document, page=self.page, region=self.region, prompt="x", candidate_text="new", state="completed")
         self.assertEqual(self.region.text, "old")
         self.assertEqual(item.candidate_text, "new")
+
+    def test_ingestion_ocr_replaces_page_text_and_matches_regions(self):
+        result = ProcessorResult(
+            pages_processed=1,
+            page_images={1: {"data": __import__("base64").b64encode(b"png").decode(), "format": "png"}},
+            page_texts={1: "Docling text"},
+            regions=[{"page_number": 1, "bbox": [0, 0, 100, 40], "text": "Docling region", "metadata": {}}],
+            processor_metadata={"page_dimensions": {1: {"width": 100, "height": 100}}},
+        )
+
+        class FakeClient:
+            provider = "paddleocr-vl"
+            model = "PaddleOCR-VL-0.9B"
+
+            def transcribe(self, image, prompt):
+                return "Paddle page text", {"result": {"layoutParsingResults": [{
+                    "markdown": {"text": "Paddle page text"},
+                    "parsing_res_list": [{"block_bbox": [0, 0, 100, 40], "block_content": "Paddle region"}],
+                }]}}
+
+        apply_page_ocr(result, client=FakeClient())
+        self.assertEqual(result.page_texts[1], "Paddle page text")
+        self.assertEqual(result.regions[0]["text"], "Paddle region")
+        self.assertEqual(result.ocr_pages[1]["provider"], "paddleocr-vl")

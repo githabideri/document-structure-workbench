@@ -97,27 +97,39 @@ class DoclingServeProcessor(DocumentProcessor):
             raise FileNotFoundError(f"Source file not found: {file_path}")
 
         # Build options as individual form fields
+        suffix = Path(source_document.filename).suffix.lower()
+        content_type = {
+            ".pdf": "application/pdf",
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".tif": "image/tiff", ".tiff": "image/tiff",
+        }.get(suffix, "application/octet-stream")
         files = {
-            "files": (source_document.filename, open(file_path, "rb"), "application/pdf"),
+            "files": (source_document.filename, open(file_path, "rb"), content_type),
         }
+        source_format = Path(source_document.filename).suffix.lower().lstrip(".")
+        if source_format in {"jpg", "jpeg", "png", "tif", "tiff"}:
+            source_format = "image"
         data = {
-            "from_formats": "pdf",
+            "from_formats": source_format or "pdf",
             "to_formats": "json",
             "image_export_mode": "embedded",
-            "do_ocr": "true",
+            # PaddleOCR-VL is applied by DSW after Docling has rendered pages
+            # and detected structure. Keeping Docling OCR off prevents a
+            # second, lower-quality CPU OCR pass during normal ingestion.
+            "do_ocr": str(getattr(settings, "DSW_DOCLING_OCR_ENABLED", False)).lower(),
             "do_table_structure": "true",
             "include_page_images": "true",
             "images_scale": str(configuration.get("images_scale", getattr(settings, "DSW_DOCLING_IMAGES_SCALE", 2.0))),
             "table_mode": "accurate",
         }
 
-        # Keep the OCR path explicit. Docling's automatic selection can fall
-        # back to a CPU backend, which is both slow and difficult to diagnose.
-        # These fields are understood by current Docling Serve releases and
-        # are harmless for older compatible servers that ignore them.
-        data["ocr_engine"] = configuration.get("ocr_engine", getattr(settings, "DSW_DOCLING_OCR_ENGINE", "rapidocr"))
-        data["ocr_lang"] = configuration.get("ocr_lang", getattr(settings, "DSW_DOCLING_OCR_LANG", "de,en"))
-        data["ocr_backend"] = configuration.get("ocr_backend", getattr(settings, "DSW_DOCLING_OCR_BACKEND", "torch"))
+        # If the legacy Docling OCR stage is explicitly enabled, use the
+        # current ocr_preset field. Normal ingestion leaves this disabled and
+        # applies PaddleOCR-VL in DSW after page rendering.
+        if data["do_ocr"] == "true":
+            data["ocr_preset"] = configuration.get("ocr_preset", getattr(settings, "DSW_DOCLING_OCR_ENGINE", "rapidocr"))
+            data["ocr_lang"] = configuration.get("ocr_lang", getattr(settings, "DSW_DOCLING_OCR_LANG", "de,en")).split(",")
 
         # Override from configuration if present
         if configuration.get("table_mode"):

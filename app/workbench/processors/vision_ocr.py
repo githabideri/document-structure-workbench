@@ -48,13 +48,13 @@ def make_crop(page, region=None):
 
 
 class VisionOcrClient:
-    def __init__(self, base_url=None, api_key=None, model=None):
+    def __init__(self, base_url=None, api_key=None, model=None, provider=None):
         self.base_url = (base_url or getattr(settings, "DSW_OCR_BASE_URL", "")).rstrip("/")
         self.api_key = api_key if api_key is not None else getattr(settings, "DSW_OCR_API_KEY", "")
         self.model = model or getattr(settings, "DSW_OCR_MODEL", "")
         self.timeout = getattr(settings, "DSW_OCR_TIMEOUT", 300)
         self.max_tokens = getattr(settings, "DSW_OCR_MAX_TOKENS", 4096)
-        self.provider = getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible")
+        self.provider = provider or getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible")
 
     def transcribe(self, image_bytes, prompt):
         if not self.base_url or not self.model:

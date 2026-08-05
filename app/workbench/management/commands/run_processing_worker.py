@@ -22,6 +22,8 @@ from workbench.processors.docling_serve import (
 )
 from workbench.processors.importer import ImportError as ImporterError
 from workbench.processors.importer import ResultImporter
+from workbench.processors.ingestion_ocr import apply_page_ocr
+from workbench.processors.vision_ocr import VisionOcrClient
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ class Command(BaseCommand):
         self.lease_seconds = max(
             configured_lease,
             request_timeout + self.poll_interval + 10,
+            int(getattr(settings, "DSW_OCR_TIMEOUT", 300)) + self.poll_interval + 10,
         )
         self.max_status_errors = getattr(settings, "DSW_PROCESSING_MAX_STATUS_ERRORS", 5)
 
@@ -225,6 +228,19 @@ class Command(BaseCommand):
 
             self._heartbeat(job, "Saving extracted results.")
             result = self.processor.collect_results(job.external_job_id)
+            if getattr(settings, "DSW_INGESTION_OCR_ENABLED", True) and result.page_images:
+                self._heartbeat(job, "PaddleOCR-VL is transcribing page images.")
+                apply_page_ocr(
+                    result,
+                    client=VisionOcrClient(
+                        provider=getattr(settings, "DSW_INGESTION_OCR_PROVIDER", "paddleocr-vl"),
+                        model=getattr(settings, "DSW_INGESTION_OCR_MODEL", "PaddleOCR-VL-0.9B"),
+                    ),
+                    required=getattr(settings, "DSW_INGESTION_OCR_REQUIRED", True),
+                    progress=lambda page, total: self._heartbeat(
+                        job, f"PaddleOCR-VL transcribing page {page} of {total}."
+                    ),
+                )
             self._heartbeat(job, "Importing pages, regions, and tables.")
             counts = ResultImporter(job).import_results(result)
             self._heartbeat(job, "Finalizing processing revision.")

@@ -134,6 +134,7 @@ DSW_DOCLING_JOB_TIMEOUT = int(os.environ.get("DSW_DOCLING_JOB_TIMEOUT", "3600"))
 DSW_DOCLING_OCR_ENGINE = os.environ.get("DSW_DOCLING_OCR_ENGINE", "rapidocr")
 DSW_DOCLING_OCR_BACKEND = os.environ.get("DSW_DOCLING_OCR_BACKEND", "torch")
 DSW_DOCLING_OCR_LANG = os.environ.get("DSW_DOCLING_OCR_LANG", "de,en")
+DSW_DOCLING_OCR_ENABLED = os.environ.get("DSW_DOCLING_OCR_ENABLED", "false").lower() == "true"
 DSW_DOCLING_IMAGES_SCALE = float(os.environ.get("DSW_DOCLING_IMAGES_SCALE", "2.0"))
 DSW_PROCESSING_STALE_AFTER_SECONDS = int(
     os.environ.get("DSW_PROCESSING_STALE_AFTER_SECONDS", "90")
@@ -167,6 +168,10 @@ DSW_OCR_MODEL = os.environ.get("DSW_OCR_MODEL", "PaddleOCR-VL-0.9B")
 DSW_OCR_TIMEOUT = int(os.environ.get("DSW_OCR_TIMEOUT", "300"))
 DSW_OCR_MAX_TOKENS = int(os.environ.get("DSW_OCR_MAX_TOKENS", "4096"))
 DSW_OCR_PROVIDER = os.environ.get("DSW_OCR_PROVIDER", "paddleocr-vl")
+DSW_INGESTION_OCR_ENABLED = os.environ.get("DSW_INGESTION_OCR_ENABLED", "true").lower() == "true"
+DSW_INGESTION_OCR_REQUIRED = os.environ.get("DSW_INGESTION_OCR_REQUIRED", "true").lower() == "true"
+DSW_INGESTION_OCR_PROVIDER = os.environ.get("DSW_INGESTION_OCR_PROVIDER", "paddleocr-vl")
+DSW_INGESTION_OCR_MODEL = os.environ.get("DSW_INGESTION_OCR_MODEL", DSW_OCR_MODEL)
 
 # Fail clearly when API URL is absent in production
 if not DEBUG and not DSW_DOCLING_API_URL:

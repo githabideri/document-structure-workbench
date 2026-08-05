@@ -60,7 +60,7 @@
                         {% for region in page_regions %}
                         <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}">
                             <rect class="region-box region-{{ region.display_region_type }}{% if region.display_is_suppressed %} is-suppressed{% endif %}{% if region.id == selected_region.id %} is-selected{% endif %}"
-                                  x="{{ region.left|unlocalize }}" y="{{ region.top|unlocalize }}" width="{{ region.overlay_width|floatformat:'6'|unlocalize }}" height="{{ region.overlay_height|floatformat:'6'|unlocalize }}"
+                                  x="{{ region.left|unlocalize }}" y="{{ region.top|unlocalize }}" width="{{ region.overlay_width|floatformat:'6u' }}" height="{{ region.overlay_height|floatformat:'6u' }}"
                                   data-region-id="{{ region.id }}" role="button" tabindex="0">
                                 <title>{{ region.display_region_type_label }}{% if region.display_is_suppressed %} · {% trans "suppressed" %}{% endif %}</title>
                             </rect>
@@ -70,7 +70,7 @@
                     <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
                         {% for region in page_regions %}
                         <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" onclick="window.location.assign(this.getAttribute('href')); return false;" class="region-hit region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}"
-                           style="left:{{ region.overlay_left_percent|floatformat:'4'|unlocalize }}%;top:{{ region.overlay_top_percent|floatformat:'4'|unlocalize }}%;width:{{ region.overlay_width_percent|floatformat:'4'|unlocalize }}%;height:{{ region.overlay_height_percent|floatformat:'4'|unlocalize }}%;"
+                           style="left:{{ region.overlay_left_percent|floatformat:'4u' }}%;top:{{ region.overlay_top_percent|floatformat:'4u' }}%;width:{{ region.overlay_width_percent|floatformat:'4u' }}%;height:{{ region.overlay_height_percent|floatformat:'4u' }}%;"
                            aria-label="{{ region.display_region_type_label }}">{{ region.display_region_type_label }}</a>
                         {% endfor %}
                     </div>

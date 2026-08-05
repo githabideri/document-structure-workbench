@@ -56,6 +56,37 @@ class ChatService:
         return create_chat_run(thread, question.strip())
 
 
+class ChatManagementService:
+    """Shared rename/archive transitions for conversation callers."""
+
+    @staticmethod
+    def authorize(thread, policy):
+        if thread.project_id and not policy.can_view(thread.project):
+            raise PermissionError("The conversation is not accessible.")
+        if not thread.project_id:
+            visible = set(policy.visible_projects().values_list("id", flat=True))
+            if not visible.intersection((thread.scope_config or {}).get("project_ids", [])):
+                raise PermissionError("The conversation is not accessible.")
+        return thread
+
+    @staticmethod
+    def rename(thread, title, policy):
+        ChatManagementService.authorize(thread, policy)
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("title is required")
+        thread.title = title[:200]
+        thread.save(update_fields=["title", "updated_at"])
+        return thread
+
+    @staticmethod
+    def archive(thread, policy, archived=True):
+        ChatManagementService.authorize(thread, policy)
+        thread.is_archived = archived
+        thread.save(update_fields=["is_archived", "updated_at"])
+        return thread
+
+
 class ChatRunService:
     """Common execution boundary used by workers and future agent adapters."""
     @staticmethod

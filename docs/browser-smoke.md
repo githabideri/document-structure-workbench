@@ -55,6 +55,12 @@ Artifacts are written to `/tmp/dsw-browser-smoke-*` by default:
 - `*.log` — command output for failed steps;
 - `conversation.png`, `cited-document.png`, `returned-chat.png` — visual evidence.
 
+The runner also saves `console.log`, `errors.log`, `network.har`, and
+`ui-diagnostics.json`. The latter is the browser-side manifest from
+`window.__DSW_UI_DIAGNOSTICS__`; `?debug_ui=1` adds non-interactive labels and
+outlines for the major semantic areas. These artifacts are part of the
+acceptance record rather than merely evidence that a screenshot was taken.
+
 Use `scripts/dsw-browser-smoke --help` for all options. `scripts/dsw --help`
 lists the operator commands.
 

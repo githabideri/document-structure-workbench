@@ -6,6 +6,8 @@ const zoomValue = document.querySelector("[data-zoom-value]");
 let zoom = 1;
 let offsetX = 0;
 let offsetY = 0;
+let pointer = null;
+let dragged = false;
 
 function renderZoom() {
     if (!stage) return;
@@ -29,6 +31,23 @@ viewport?.addEventListener("wheel", event => {
     event.preventDefault();
     setZoom(zoom * (event.deltaY < 0 ? 1.1 : .9));
 }, {passive: false});
+
+viewport?.addEventListener("pointerdown", event => {
+    if (event.target.closest(".region-hit, a")) return;
+    viewport.setPointerCapture(event.pointerId);
+    pointer = {id: event.pointerId, x: event.clientX, y: event.clientY, offsetX, offsetY};
+    dragged = false;
+});
+viewport?.addEventListener("pointermove", event => {
+    if (!pointer || pointer.id !== event.pointerId || zoom <= 1) return;
+    offsetX = pointer.offsetX + event.clientX - pointer.x;
+    offsetY = pointer.offsetY + event.clientY - pointer.y;
+    dragged = Math.abs(event.clientX - pointer.x) + Math.abs(event.clientY - pointer.y) > 4;
+    renderZoom();
+});
+const endPan = event => { if (pointer?.id === event.pointerId) pointer = null; };
+viewport?.addEventListener("pointerup", endPan);
+viewport?.addEventListener("pointercancel", endPan);
 
 const links = [...document.querySelectorAll(".region-hit")];
 const applyFilter = () => {

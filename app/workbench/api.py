@@ -1268,14 +1268,11 @@ def api_chat_thread_detail(request, thread_id):
             return JsonResponse({"request_id": request._request_id, "error": {"code": "insufficient_scope", "message": "chat:manage is required."}}, status=403)
         try:
             data = json.loads(request.body or "{}")
+            from .services import ChatManagementService
             if "title" in data:
-                title = str(data["title"]).strip()
-                if not title:
-                    raise ValueError("title cannot be empty")
-                thread.title = title[:200]
+                ChatManagementService.rename(thread, data["title"], policy)
             if "is_archived" in data:
-                thread.is_archived = bool(data["is_archived"])
-            thread.save(update_fields=["title", "is_archived", "updated_at"])
+                ChatManagementService.archive(thread, policy, archived=bool(data["is_archived"]))
             return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread)})
         except (ValueError, json.JSONDecodeError) as exc:
             return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
@@ -1301,11 +1298,9 @@ def api_chat_thread_rename(request, thread_id):
     if not thread:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
     try:
-        title = str(json.loads(request.body or "{}").get("title", "")).strip()
-        if not title:
-            raise ValueError("title is required")
-        thread.title = title[:200]
-        thread.save(update_fields=["title", "updated_at"])
+        from .services import ChatManagementService
+        title = json.loads(request.body or "{}").get("title", "")
+        ChatManagementService.rename(thread, title, ProjectAccessPolicy(token=request._api_token))
     except (ValueError, json.JSONDecodeError) as exc:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
     return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread)})
@@ -1319,8 +1314,8 @@ def api_chat_thread_archive(request, thread_id):
     if not thread:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
     body = json.loads(request.body or "{}") if request.body else {}
-    thread.is_archived = bool(body.get("archived", True))
-    thread.save(update_fields=["is_archived", "updated_at"])
+    from .services import ChatManagementService
+    ChatManagementService.archive(thread, ProjectAccessPolicy(token=request._api_token), archived=bool(body.get("archived", True)))
     return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread)})
 
 

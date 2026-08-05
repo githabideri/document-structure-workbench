@@ -9,7 +9,7 @@ from unittest.mock import patch
 from workbench.models import (
     AuditEvent, ChatMessage, ChatRun, ChatThread, Collection, Document, ExtractionRun, Page, ProcessingJob,
     ProcessingPreset, ProjectMembership, ReviewTask, SourceDocument,
-    TableCandidate, TableExtraction, PageRegion, RegionCorrection,
+    TableCandidate, TableExtraction, PageRegion, RegionCorrection, SearchPassage,
 )
 
 User = get_user_model()
@@ -113,6 +113,15 @@ class ApiContractTests(TestCase):
         )
         self.assertEqual(stale.status_code, 409)
         self.assertEqual(stale.json()["error"]["code"], "region_state_conflict")
+
+        SearchPassage.objects.create(
+            project=self.project, source_document=source, processed_revision=revision,
+            processing_job=job, page=page, page_region=region, passage_type="region",
+            text="Effective title", normalized_text="effective title",
+        )
+        search = self.client.get(reverse("api_search"), {"q": "effective title", "document": source.pk}, **self.auth())
+        self.assertEqual(search.status_code, 200)
+        self.assertEqual(search.json()["results"][0]["revision_id"], revision.pk)
 
     def test_user_created_scope_set_can_submit_upload(self):
         self.client.force_login(self.user)

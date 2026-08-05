@@ -437,15 +437,12 @@ def chat_thread_rename(request, thread_id):
     from .policy import ProjectAccessPolicy
     queryset = ChatThread.objects.all() if is_admin(request.user) else ChatThread.objects.filter(created_by=request.user)
     thread = get_object_or_404(queryset, pk=thread_id)
-    if thread.project_id and not ProjectAccessPolicy(user=request.user).can_view(thread.project):
-        raise PermissionDenied
-    title = request.POST.get("title", "").strip()
-    if not title:
-        messages.error(request, _("Enter a conversation name."))
-    else:
-        thread.title = title[:200]
-        thread.save(update_fields=["title", "updated_at"])
+    from .services import ChatManagementService
+    try:
+        ChatManagementService.rename(thread, request.POST.get("title", ""), ProjectAccessPolicy(user=request.user))
         messages.success(request, _("Conversation renamed."))
+    except (PermissionError, ValueError) as exc:
+        messages.error(request, _(str(exc)))
     return redirect("chat_thread", thread_id=thread.id)
 
 
@@ -456,10 +453,11 @@ def chat_thread_archive(request, thread_id):
     from .policy import ProjectAccessPolicy
     queryset = ChatThread.objects.all() if is_admin(request.user) else ChatThread.objects.filter(created_by=request.user)
     thread = get_object_or_404(queryset, pk=thread_id)
-    if thread.project_id and not ProjectAccessPolicy(user=request.user).can_view(thread.project):
+    from .services import ChatManagementService
+    try:
+        ChatManagementService.archive(thread, ProjectAccessPolicy(user=request.user), archived=not thread.is_archived)
+    except PermissionError:
         raise PermissionDenied
-    thread.is_archived = not thread.is_archived
-    thread.save(update_fields=["is_archived", "updated_at"])
     messages.success(request, _("Conversation status updated."))
     return redirect("chat")
 

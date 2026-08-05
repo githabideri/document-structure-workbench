@@ -23,14 +23,17 @@ Audit:
 """
 import hashlib
 import json
+import mimetypes
+from pathlib import Path
 import uuid
 from functools import wraps
 
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.db import transaction
 from django.utils import timezone
 
@@ -348,6 +351,25 @@ def api_project_detail(request, project_id):
     return JsonResponse(result)
 
 
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("projects:read", "projects:write")
+def api_project_archive(request, project_id):
+    project = get_object_or_404(Collection, pk=project_id)
+    body = json.loads(request.body or "{}") if request.body else {}
+    archived = bool(body.get("archived", True))
+    from .services import LifecycleError, ProjectLifecycleService
+    try:
+        ProjectLifecycleService.archive_project(project=project, policy=ProjectAccessPolicy(token=request._api_token), archived=archived)
+    except PermissionError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": str(exc)}}, status=403)
+    except LifecycleError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_transition", "message": str(exc)}}, status=409)
+    actor = request._api_token.user if request._api_token.user_id else None
+    AuditEvent.objects.create(actor=actor, event_type="project_archived" if archived else "project_restored", object_type="Collection", object_id=str(project.pk), request_id=request._request_id)
+    return JsonResponse({"request_id": request._request_id, "project": {"id": project.pk, "name": project.name, "is_archived": project.is_archived}})
+
+
 # ---------------------------------------------------------------------------
 # Documents
 # ---------------------------------------------------------------------------
@@ -385,6 +407,417 @@ def api_documents(request, project_id):
         })
 
     return JsonResponse({"documents": docs, "count": len(docs)})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:read", "documents:manage")
+def api_document_archive(request, document_id):
+    source = get_object_or_404(SourceDocument.objects.select_related("collection"), pk=document_id)
+    body = json.loads(request.body or "{}") if request.body else {}
+    archived = bool(body.get("archived", True))
+    from .services import LifecycleError, ProjectLifecycleService
+    try:
+        ProjectLifecycleService.archive_source(source=source, policy=ProjectAccessPolicy(token=request._api_token), archived=archived)
+    except PermissionError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": str(exc)}}, status=403)
+    except LifecycleError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_transition", "message": str(exc)}}, status=409)
+    actor = request._api_token.user if request._api_token.user_id else None
+    AuditEvent.objects.create(actor=actor, event_type="document_archived" if archived else "document_restored", object_type="SourceDocument", object_id=str(source.pk), request_id=request._request_id)
+    return JsonResponse({"request_id": request._request_id, "document": _source_json(source)})
+
+
+# ---------------------------------------------------------------------------
+# Document/revision/page/region inspection
+# ---------------------------------------------------------------------------
+
+def _source_for_revision(revision):
+    """Return the immutable source record owning a processed revision."""
+    job = getattr(revision, "processing_job", None)
+    return job.source_document if job else None
+
+
+def _can_view_source(token, source):
+    return bool(source and source.collection and ProjectAccessPolicy(token=token).can_view(source.collection))
+
+
+def _page_text(page):
+    job = getattr(page.document, "processing_job", None)
+    if not job:
+        return ""
+    artifact = ProcessingArtifact.objects.filter(
+        job=job, artifact_type="page_text", page_number=page.page_number,
+    ).first()
+    if artifact and isinstance(artifact.data, dict):
+        return artifact.data.get("text", "")
+    return ""
+
+
+def _region_json(region):
+    return {
+        "id": region.pk,
+        "page_id": region.page_id,
+        "page_number": region.page_number,
+        "type": region.effective_region_type,
+        "original_type": region.region_type,
+        "text": region.effective_text,
+        "original_text": region.text,
+        "suppressed": region.is_suppressed,
+        "confidence": region.confidence,
+        "normalized_bounds": {
+            "left": region.left, "top": region.top,
+            "width": region.right - region.left,
+            "height": region.bottom - region.top,
+        },
+        "source_bounds": {
+            "left": region.left * region.page_width if region.page_width else None,
+            "top": region.top * region.page_height if region.page_height else None,
+            "right": region.right * region.page_width if region.page_width else None,
+            "bottom": region.bottom * region.page_height if region.page_height else None,
+            "width": region.page_width,
+            "height": region.page_height,
+        },
+        "metadata": region.metadata or {},
+    }
+
+
+def _page_json(request, page, include_regions=True):
+    source = _source_for_revision(page.document)
+    data = {
+        "id": page.pk,
+        "page_number": page.page_number,
+        "image_url": request.build_absolute_uri(reverse("api_page_image", args=[page.pk])) if page.image_path else None,
+        "text": _page_text(page),
+        "width": page.width,
+        "height": page.height,
+        "document_id": page.document_id,
+        "source_document_id": source.pk if source else None,
+    }
+    if include_regions:
+        data["regions"] = [_region_json(item) for item in page.regions.all()]
+        data["tables"] = [
+            {"id": table.pk, "stable_id": table.stable_table_id, "bbox": table.bbox or {}, "metadata": table.metadata or {}}
+            for table in TableCandidate.objects.filter(page=page)
+        ]
+        data["ocr_requests"] = [_ocr_request_json(item) for item in page.ocr_requests.all()]
+    return data
+
+
+def _revision_json(revision):
+    source = _source_for_revision(revision)
+    job = getattr(revision, "processing_job", None)
+    return {
+        "id": revision.pk,
+        "immutable": True,
+        "filename": revision.filename,
+        "external_id": revision.external_id,
+        "page_count": revision.page_count,
+        "created_at": revision.created_at.isoformat(),
+        "source_document_id": source.pk if source else None,
+        "processing_job_id": job.pk if job else None,
+        "processor": job.processor if job else "",
+        "job_state": job.state if job else "",
+        "is_active": bool(source and source.active_document_id == revision.pk),
+    }
+
+
+def _source_json(source, include_revisions=False):
+    data = {
+        "id": source.pk,
+        "type": "source_document",
+        "filename": source.filename,
+        "source_type": source.source_type,
+        "file_size": source.file_size,
+        "page_count": source.page_count,
+        "sha256": source.sha256,
+        "is_archived": source.is_archived,
+        "project_id": source.collection_id,
+        "active_revision_id": source.active_document_id,
+        "created_at": source.created_at.isoformat(),
+    }
+    if include_revisions:
+        data["revisions"] = [
+            _revision_json(job.result_document)
+            for job in source.processing_jobs.select_related("result_document")
+            if job.result_document_id
+        ]
+    return data
+
+
+def _source_or_404(token, document_id):
+    source = get_object_or_404(SourceDocument.objects.select_related("collection", "active_document"), pk=document_id)
+    if not _can_view_source(token, source):
+        # Conceal inaccessible resources consistently with the existing chat API.
+        from django.http import Http404
+        raise Http404
+    return source
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_documents_all(request):
+    token = request._api_token
+    sources = SourceDocument.objects.select_related("collection").filter(is_archived=False)
+    visible_ids = set(ProjectAccessPolicy(token=token).visible_projects().values_list("id", flat=True))
+    sources = sources.filter(collection_id__in=visible_ids)
+    data = [_source_json(source) for source in sources]
+    return JsonResponse({"documents": data, "count": len(data), "request_id": request._request_id})
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_document_detail(request, document_id):
+    source = _source_or_404(request._api_token, document_id)
+    return JsonResponse({"document": _source_json(source, include_revisions=True), "request_id": request._request_id})
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_document_revisions(request, document_id):
+    source = _source_or_404(request._api_token, document_id)
+    revisions = [_revision_json(job.result_document) for job in source.processing_jobs.select_related("result_document") if job.result_document_id]
+    return JsonResponse({"document_id": source.pk, "revisions": revisions, "count": len(revisions), "request_id": request._request_id})
+
+
+def _revision_or_404(token, document_id, revision_id):
+    source = _source_or_404(token, document_id)
+    revision = get_object_or_404(Document.objects.select_related("collection", "processing_job"), pk=revision_id)
+    if _source_for_revision(revision) != source:
+        from django.http import Http404
+        raise Http404
+    return source, revision
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_revision_detail(request, document_id, revision_id):
+    source, revision = _revision_or_404(request._api_token, document_id, revision_id)
+    return JsonResponse({"document": {"id": source.pk, "filename": source.filename}, "revision": _revision_json(revision), "request_id": request._request_id})
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_revision_pages(request, document_id, revision_id):
+    source, revision = _revision_or_404(request._api_token, document_id, revision_id)
+    pages = revision.pages.prefetch_related("regions", "ocr_requests")
+    data = [{"id": page.pk, "page_number": page.page_number, "width": page.width, "height": page.height, "image_url": request.build_absolute_uri(reverse("api_page_image", args=[page.pk])) if page.image_path else None, "region_count": page.regions.count()} for page in pages]
+    return JsonResponse({"document": {"id": source.pk, "filename": source.filename}, "revision": _revision_json(revision), "pages": data, "count": len(data), "request_id": request._request_id})
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_revision_page(request, document_id, revision_id, page_number):
+    source, revision = _revision_or_404(request._api_token, document_id, revision_id)
+    page = get_object_or_404(Page.objects.prefetch_related("regions", "ocr_requests"), document=revision, page_number=page_number)
+    return JsonResponse({"document": {"id": source.pk, "filename": source.filename}, "revision": _revision_json(revision), "page": _page_json(request, page), "request_id": request._request_id})
+
+
+def _page_for_token(token, page_id):
+    page = get_object_or_404(Page.objects.select_related("document__collection", "document__processing_job__source_document"), pk=page_id)
+    source = _source_for_revision(page.document)
+    if not _can_view_source(token, source):
+        from django.http import Http404
+        raise Http404
+    return page
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_page_regions(request, page_id):
+    page = _page_for_token(request._api_token, page_id)
+    regions = list(page.regions.all())
+    return JsonResponse({"page_id": page.pk, "regions": [_region_json(region) for region in regions], "count": len(regions), "request_id": request._request_id})
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_region_detail(request, region_id):
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__processing_job__source_document"), pk=region_id)
+    source = _source_for_revision(region.page.document)
+    if not _can_view_source(request._api_token, source):
+        from django.http import Http404
+        raise Http404
+    return JsonResponse({"region": _region_json(region), "request_id": request._request_id})
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_region_corrections(request, region_id):
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__processing_job__source_document"), pk=region_id)
+    source = _source_for_revision(region.page.document)
+    if not _can_view_source(request._api_token, source):
+        from django.http import Http404
+        raise Http404
+    corrections = region.corrections.select_related("created_by").order_by("-created_at", "-id")
+    data = [{"id": item.pk, "operation": item.operation, "before": item.before, "after": item.after, "reason": item.reason, "status": item.status, "created_by": item.created_by.get_username() if item.created_by else None, "created_at": item.created_at.isoformat(), "reverted_at": item.reverted_at.isoformat() if item.reverted_at else None} for item in corrections]
+    return JsonResponse({"region_id": region.pk, "corrections": data, "count": len(data), "request_id": request._request_id})
+
+
+def _api_edit_region(request, region_id):
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection"), pk=region_id)
+    policy = ProjectAccessPolicy(token=request._api_token)
+    if not policy.can_edit(region.page.document.collection):
+        return region, policy, JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": "Access denied."}}, status=403)
+    return region, policy, None
+
+
+def _correction_json(correction):
+    return {"id": correction.pk, "operation": correction.operation, "before": correction.before, "after": correction.after, "reason": correction.reason, "status": correction.status, "created_at": correction.created_at.isoformat()}
+
+
+def _create_api_correction(request, region_id, operation):
+    region, policy, error = _api_edit_region(request, region_id)
+    if error:
+        return error
+    try:
+        body = json.loads(request.body or "{}")
+        if operation == "text":
+            replacement = str(body.get("replacement_text", ""))
+            if not replacement.strip():
+                raise ValueError("replacement_text is required")
+            expected = body.get("expected_current_text")
+            before, after = {"text": region.effective_text}, {"text": replacement}
+        elif operation == "type":
+            value = str(body.get("region_type", ""))
+            if value not in dict(PageRegion.REGION_TYPES):
+                raise ValueError("region_type is invalid")
+            expected = body.get("expected_current_type")
+            before, after = {"region_type": region.effective_region_type}, {"region_type": value}
+        else:
+            value = bool(body.get("suppressed", True))
+            expected = body.get("expected_suppressed")
+            expected = ("true" if expected else "false") if isinstance(expected, bool) else expected
+            before, after = {"suppressed": region.is_suppressed}, {"suppressed": value}
+        from .services import CorrectionError, CorrectionService
+        correction = CorrectionService.apply(
+            region=region, user=request._api_token.user if request._api_token.user_id else None,
+            policy=policy, operation=operation, before=before, after=after,
+            reason=str(body.get("reason", "")).strip(), expected_current=expected,
+        )
+    except json.JSONDecodeError:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_json", "message": "Request body must be valid JSON."}}, status=400)
+    except ValueError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
+    except CorrectionError as exc:
+        conflict = "changed" in str(exc)
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "region_state_conflict" if conflict else "invalid_request", "message": str(exc)}}, status=409 if conflict else 400)
+    region.refresh_from_db()
+    return JsonResponse({"request_id": request._request_id, "correction": _correction_json(correction), "region": _region_json(region), "history_url": reverse("api_region_corrections", args=[region.pk])}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_region_text_correction(request, region_id):
+    return _create_api_correction(request, region_id, "text")
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_region_type_correction(request, region_id):
+    return _create_api_correction(request, region_id, "type")
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_region_suppression_correction(request, region_id):
+    return _create_api_correction(request, region_id, "suppress")
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_correction_revert(request, correction_id):
+    correction = get_object_or_404(RegionCorrection.objects.select_related("document__collection"), pk=correction_id)
+    policy = ProjectAccessPolicy(token=request._api_token)
+    if not policy.can_edit(correction.document.collection):
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": "Access denied."}}, status=403)
+    if correction.status == "active":
+        correction.status = "reverted"
+        correction.reverted_at = timezone.now()
+        correction.save(update_fields=["status", "reverted_at"])
+    correction.region.refresh_from_db()
+    return JsonResponse({"request_id": request._request_id, "correction": _correction_json(correction), "region": _region_json(correction.region)})
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_page_image(request, page_id):
+    page = _page_for_token(request._api_token, page_id)
+    base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts")).resolve()
+    path = (base / page.image_path).resolve()
+    if not page.image_path or not path.is_relative_to(base) or not path.is_file():
+        from django.http import Http404
+        raise Http404
+    return FileResponse(open(path, "rb"), content_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_search(request):
+    from .search import search_project
+    query = request.GET.get("q", "").strip()
+    if not query:
+        return JsonResponse({"request_id": request._request_id, "results": [], "count": 0})
+    token = request._api_token
+    visible_ids = set(ProjectAccessPolicy(token=token).visible_projects().values_list("id", flat=True))
+    project_ids = visible_ids
+    source_ids = None
+    extra_filters = {}
+    for key, field in (("project", "project_id"), ("document", "source_document_id"), ("revision", "processed_revision_id"), ("page", "page_id")):
+        if request.GET.get(key):
+            try:
+                value = int(request.GET[key])
+            except ValueError:
+                return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": f"{key} must be an integer."}}, status=400)
+            if key == "project":
+                project_ids = project_ids & {value}
+            elif key == "document":
+                source_ids = [value]
+            else:
+                extra_filters[field] = value
+    results = search_project(Collection.objects.filter(id__in=project_ids), query, source_ids=source_ids, limit=50)
+    if extra_filters:
+        results = [item for item in results if all(getattr(item, field) == value for field, value in extra_filters.items())]
+    data = [{"document_id": item.source_document_id, "revision_id": item.processed_revision_id, "page_id": item.page_id, "page_number": item.page.page_number if item.page else None, "region_id": item.page_region_id, "passage": item.text, "score": getattr(item, "score", None)} for item in results]
+    return JsonResponse({"request_id": request._request_id, "results": data, "count": len(data)})
+
+
+@require_http_methods(["GET"])
+@require_scope("diagnostics:read")
+def api_ui_diagnostics(request):
+    """Return a bounded, machine-readable server-side UI state manifest.
+
+    DOM bounds/focus are supplied by the optional browser diagnostics module;
+    this endpoint deliberately contains identifiers and state, never text,
+    credentials, filesystem paths, or model reasoning.
+    """
+    token = request._api_token
+    manifest = {
+        "schema_version": 1,
+        "workspace": request.GET.get("workspace", "document"),
+        "url_state": {key: request.GET.get(key) for key in ("thread", "run", "evidence", "document", "revision", "page", "region", "mode") if request.GET.get(key) is not None},
+        "focus": {"id": None},
+        "async_operations": [],
+        "regions": [],
+    }
+    document_id = request.GET.get("document")
+    revision_id = request.GET.get("revision")
+    if document_id and revision_id:
+        try:
+            source, revision = _revision_or_404(token, int(document_id), int(revision_id))
+            pending = OcrRequest.objects.filter(document=revision, state__in={"queued", "processing"}).select_related("region")[:20]
+            manifest["async_operations"] = [{"kind": "visual_ocr", "id": item.pk, "state": item.state, "target": f"region-{item.region_id}" if item.region_id else f"page-{item.page_id}", "provider": item.provider} for item in pending]
+            page_number = int(request.GET.get("page", 1))
+            page = revision.pages.filter(page_number=page_number).first()
+            if page:
+                manifest["regions"] = [{"id": f"region-{region.pk}", "semantic_role": "link", "visible": not region.is_suppressed, "selected": str(region.pk) == request.GET.get("region"), "focusable": not region.is_suppressed} for region in page.regions.all()]
+        except (TypeError, ValueError):
+            return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": "document and revision must be integers."}}, status=400)
+    return JsonResponse({"request_id": request._request_id, "manifest": manifest})
 
 
 # ---------------------------------------------------------------------------
@@ -540,30 +973,28 @@ def _ocr_request_json(item):
 
 def _create_ocr_request(request, page, region=None):
     token = request._api_token
-    if not ProjectAccessPolicy(token=token).can_edit(page.document.collection):
-        return JsonResponse({"error": "Access denied"}, status=403)
     try:
         body = json.loads(request.body or "{}")
     except json.JSONDecodeError:
         body = {}
     provider = str(body.get("provider") or getattr(settings, "DSW_OCR_PROVIDER", "qwen")).strip()
-    from .processors.vision_ocr import OCR_PROVIDERS
-    if provider not in OCR_PROVIDERS:
-        return JsonResponse({"error": f"Unsupported visual OCR provider: {provider}"}, status=400)
+    from .services import OcrService
     prompt = str(body.get("prompt") or (
         "Transcribe exactly the visible text. Preserve spelling, punctuation and line breaks. "
         "Do not translate, summarize, correct, infer, or add text. Return only the transcription."
     )).strip()
-    item = OcrRequest.objects.create(
-        source_document=page.document.processing_job.source_document,
-        document=page.document, page=page, region=region,
-        target="region" if region else "page",
-        provider=provider,
-        model=(str(body.get("model") or "").strip() or (
-            getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")
-        )), prompt=prompt,
-        created_by=token.user if token.user_id else None,
-    )
+    try:
+        item = OcrService.create(
+            page=page, region=region, provider=provider,
+            model=(str(body.get("model") or "").strip() or (
+                getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")
+            )), prompt=prompt, user=token.user if token.user_id else None,
+            policy=ProjectAccessPolicy(token=token),
+        )
+    except PermissionError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": str(exc)}}, status=403)
+    except ValueError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_provider", "message": str(exc)}}, status=400)
     return JsonResponse(_ocr_request_json(item), status=201)
 
 
@@ -597,20 +1028,23 @@ def api_ocr_request_detail(request, request_id):
 @require_scope("documents:manage")
 def api_ocr_request_accept(request, request_id):
     item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
-    if not ProjectAccessPolicy(token=request._api_token).can_edit(item.document.collection):
-        return JsonResponse({"error": "Access denied"}, status=403)
-    if item.state != "completed" or not item.region_id:
-        return JsonResponse({"error": "Only completed region OCR candidates can be accepted."}, status=409)
-    if item.accepted_correction_id:
-        return JsonResponse(_ocr_request_json(item))
-    correction = RegionCorrection.objects.create(
-        region=item.region, document=item.document,
-        created_by=request._api_token.user if request._api_token.user_id else None,
-        operation="text", before={"text": item.region.effective_text},
-        after={"text": item.candidate_text}, reason=f"Accepted visual OCR candidate #{item.pk}",
-    )
-    item.accepted_correction = correction
-    item.save(update_fields=["accepted_correction"])
+    from .services import CorrectionError, OcrService
+    token = request._api_token
+    body = json.loads(request.body or "{}") if request.body else {}
+    try:
+        OcrService.accept(
+            item=item, user=token.user if token.user_id else None,
+            policy=ProjectAccessPolicy(token=token),
+            expected_current=body.get("expected_current_text"),
+        )
+    except PermissionError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": str(exc)}}, status=403)
+    except CorrectionError as exc:
+        code = "region_state_conflict" if "changed" in str(exc) else "invalid_request"
+        return JsonResponse({"request_id": request._request_id, "error": {"code": code, "message": str(exc)}}, status=409 if code == "region_state_conflict" else 400)
+    except ValueError as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_transition", "message": str(exc)}}, status=409)
+    item.refresh_from_db()
     return JsonResponse(_ocr_request_json(item))
 
 
@@ -850,6 +1284,46 @@ def api_chat_thread_detail(request, thread_id):
     return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread), "messages": messages, "runs": [_chat_run_json(run) for run in runs]})
 
 
+def _api_chat_thread_for_manage(request, thread_id):
+    thread = get_object_or_404(ChatThread.objects.select_related("project"), pk=thread_id)
+    policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
+    visible_ids = set(policy.visible_projects().values_list("id", flat=True))
+    if (thread.project_id and not policy.can_view(thread.project)) or (not thread.project_id and not visible_ids.intersection((thread.scope_config or {}).get("project_ids", []))):
+        return None
+    return thread
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("chat:manage")
+def api_chat_thread_rename(request, thread_id):
+    thread = _api_chat_thread_for_manage(request, thread_id)
+    if not thread:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
+    try:
+        title = str(json.loads(request.body or "{}").get("title", "")).strip()
+        if not title:
+            raise ValueError("title is required")
+        thread.title = title[:200]
+        thread.save(update_fields=["title", "updated_at"])
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
+    return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread)})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("chat:manage")
+def api_chat_thread_archive(request, thread_id):
+    thread = _api_chat_thread_for_manage(request, thread_id)
+    if not thread:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
+    body = json.loads(request.body or "{}") if request.body else {}
+    thread.is_archived = bool(body.get("archived", True))
+    thread.save(update_fields=["is_archived", "updated_at"])
+    return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread)})
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 @require_scope("chat:write")
@@ -910,6 +1384,24 @@ def api_chat_run_evidence(request, run_id):
     if not run:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Run not found."}}, status=404)
     return JsonResponse({"request_id": request._request_id, "run_id": run.id, "evidence": _chat_run_json(run, True)["evidence"]})
+
+
+@require_http_methods(["GET"])
+@require_scope("chat:read")
+def api_chat_run_diagnostics(request, run_id):
+    run = _api_chat_run(request, run_id)
+    if not run:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Run not found."}}, status=404)
+    metadata = run.model_metadata or {}
+    provider = metadata.get("provider") or {}
+    if isinstance(provider, dict):
+        provider = {key: value for key, value in provider.items() if key not in {"reasoning_content", "prompt", "messages"}}
+    events = [{"name": event.name, "worker_id": event.worker_id, "duration_ms": event.duration_ms, "metadata": event.metadata, "error_code": event.error_code, "created_at": event.created_at.isoformat()} for event in run.events.all()]
+    return JsonResponse({
+        "request_id": request._request_id,
+        "run": _chat_run_json(run, include_evidence=True),
+        "diagnostics": {"provider": provider, "model": run.thread.model, "scope": run.scope_snapshot, "token_budget": run.token_budget, "source_tokens": run.source_tokens, "events": events, "failure_code": run.error_code},
+    })
 
 
 @csrf_exempt

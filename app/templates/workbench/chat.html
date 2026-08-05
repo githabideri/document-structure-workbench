@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n static %}
 
 {% block title %}{% trans "Research conversations" %}{% endblock %}
 
 {% block content %}
-<div class="chat-workspace">
+<div class="chat-workspace" data-ui-id="chat-workspace">
   <header class="page-header chat-page-header">
     <div>
       <p class="eyebrow">{% trans "Evidence workspace" %}</p>
@@ -15,7 +15,7 @@
   </header>
 
   <div class="chat-shell">
-    <aside class="chat-sessions" aria-label="{% trans 'Conversations' %}">
+    <aside class="chat-sessions" aria-label="{% trans 'Conversations' %}" data-ui-id="conversation-navigation">
       <div class="chat-sidebar-heading">
         <h2>{% trans "Conversations" %}</h2>
         <span>{{ threads|length }}</span>
@@ -34,7 +34,7 @@
       </nav>
     </aside>
 
-    <main class="chat-panel" aria-label="{% trans 'Conversation' %}">
+    <main class="chat-panel" aria-label="{% trans 'Conversation' %}" data-ui-id="message-timeline">
       {% if error %}<div class="message message-error">{{ error }}</div>{% endif %}
       {% if thread %}
       <div class="chat-panel-header">
@@ -62,7 +62,7 @@
         {% endif %}
       </div>
       {% if thread %}
-      <form method="post" class="chat-question-form">
+      <form method="post" class="chat-question-form" data-ui-id="composer">
         {% csrf_token %}
         <textarea name="question" rows="3" required placeholder="{% trans 'Ask a follow-up question' %}"></textarea>
         <button class="btn btn-primary" type="submit">{% trans "Ask" %}</button>
@@ -100,7 +100,7 @@
       {% endif %}
     </main>
 
-    <aside class="chat-context" aria-label="{% trans 'Evidence context' %}">
+    <aside class="chat-context" aria-label="{% trans 'Evidence context' %}" data-ui-id="evidence-reader">
       <section>
         <div class="chat-sidebar-heading"><h2>{% trans "Documents" %}</h2><span>{{ sources|length }}</span></div>
         <p class="chat-context-intro">{% trans "The frozen source scope for this conversation." %}</p>
@@ -129,3 +129,5 @@
   </div>
 </div>
 {% endblock %}
+
+{% block extra_scripts %}<script type="module" src="{% static 'js/chat-workspace.js' %}"></script>{% endblock %}

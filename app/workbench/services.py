@@ -29,6 +29,7 @@ from .models import (
     PageRegion,
     ProcessingJob,
     ProcessingPreset,
+    OcrRequest,
     RegionCorrection,
     SourceDocument,
 )
@@ -61,6 +62,36 @@ class ChatRunService:
     def execute(run, worker_id="chat-worker"):
         from .chat import process_chat_run
         return process_chat_run(run, worker_id=worker_id)
+
+
+class LifecycleError(Exception):
+    """A lifecycle operation is not valid for the current resource state."""
+
+
+class ProjectLifecycleService:
+    """Shared archive operations used by HTML and API callers."""
+
+    @staticmethod
+    def archive_project(*, project, policy, archived=True):
+        if not policy.can_edit(project):
+            raise PermissionError("You do not have permission to manage this project.")
+        if project.is_archived == archived:
+            raise LifecycleError("Project is already in the requested archive state.")
+        project.is_archived = archived
+        project.save(update_fields=["is_archived"])
+        return project
+
+    @staticmethod
+    def archive_source(*, source, policy, archived=True):
+        if not source.collection or not policy.can_edit(source.collection):
+            raise PermissionError("You do not have permission to manage this document.")
+        if source.is_archived == archived:
+            raise LifecycleError("Document is already in the requested archive state.")
+        if archived and source.processing_jobs.filter(state__in={"queued", "submitting", "processing", "importing"}).exists():
+            raise LifecycleError("An active processing attempt must finish before archiving.")
+        source.is_archived = archived
+        source.save(update_fields=["is_archived"])
+        return source
 
 
 class DiagnosticsService:
@@ -270,13 +301,22 @@ class CorrectionService:
     """Single application boundary for human corrections."""
 
     @staticmethod
-    def apply(*, region, user, operation, before, after, reason=""):
+    def apply(*, region, user, operation, before, after, reason="", policy=None, expected_current=None):
         from .policy import ProjectAccessPolicy
 
-        if not ProjectAccessPolicy(user=user).can_edit(region.page.document.collection):
+        policy = policy or ProjectAccessPolicy(user=user)
+        if not policy.can_edit(region.page.document.collection):
             raise CorrectionError("You do not have permission to edit this project.")
         if operation not in dict(RegionCorrection.OPERATIONS):
             raise CorrectionError("Unsupported correction operation.")
+        if expected_current is not None:
+            current = {
+                "text": region.effective_text,
+                "type": region.effective_region_type,
+                "suppress": "true" if region.is_suppressed else "false",
+            }.get(operation, "")
+            if current != expected_current:
+                raise CorrectionError("The region changed before this correction was applied.")
         correction = RegionCorrection(
             region=region, document=region.page.document, created_by=user,
             operation=operation, before=before, after=after, reason=reason,
@@ -288,6 +328,58 @@ class CorrectionService:
         except ValidationError as exc:
             raise CorrectionError("The correction is not valid.") from exc
         return correction
+
+
+class OcrService:
+    """Shared lifecycle boundary for visual OCR candidates."""
+
+    DEFAULT_REGION_PROMPT = (
+        "Transcribe exactly the visible text. Preserve spelling, punctuation and line breaks. "
+        "Do not translate, summarize, correct, infer, or add text. Return only the transcription."
+    )
+    DEFAULT_PAGE_PROMPT = (
+        "Transcribe exactly all visible text on this page. Preserve layout with line breaks. "
+        "Do not translate, summarize, correct, infer, or add text. Return only the transcription."
+    )
+
+    @staticmethod
+    def create(*, page, region=None, provider, model="", prompt="", user=None, policy=None):
+        from .policy import ProjectAccessPolicy
+        policy = policy or ProjectAccessPolicy(user=user)
+        if not policy.can_edit(page.document.collection):
+            raise PermissionError("You do not have permission to edit this project.")
+        from .processors.vision_ocr import OCR_PROVIDERS
+        if provider not in OCR_PROVIDERS:
+            raise ValueError(f"Unsupported visual OCR provider: {provider}")
+        return OcrRequest.objects.create(
+            source_document=page.document.processing_job.source_document,
+            document=page.document, page=page, region=region,
+            target="region" if region else "page", provider=provider,
+            model=model, prompt=prompt or (OcrService.DEFAULT_REGION_PROMPT if region else OcrService.DEFAULT_PAGE_PROMPT),
+            created_by=user,
+        )
+
+    @staticmethod
+    def accept(*, item, user=None, policy=None, expected_current=None):
+        from .policy import ProjectAccessPolicy
+        policy = policy or ProjectAccessPolicy(user=user)
+        with transaction.atomic():
+            locked = OcrRequest.objects.select_for_update().select_related("document__collection", "region").get(pk=item.pk)
+            if not policy.can_edit(locked.document.collection):
+                raise PermissionError("You do not have permission to edit this project.")
+            if locked.state != "completed" or not locked.region_id:
+                raise ValueError("Only completed region OCR candidates can be accepted.")
+            if locked.accepted_correction_id:
+                return locked.accepted_correction
+            correction = CorrectionService.apply(
+                region=locked.region, user=user, policy=policy, operation="text",
+                before={"text": locked.region.effective_text}, after={"text": locked.candidate_text},
+                reason=f"Accepted visual OCR candidate #{locked.pk}",
+                expected_current=expected_current,
+            )
+            locked.accepted_correction = correction
+            locked.save(update_fields=["accepted_correction"])
+            return correction
 
 
 class IngestionError(Exception):

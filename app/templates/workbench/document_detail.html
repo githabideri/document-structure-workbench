@@ -3,7 +3,7 @@
 {% block title %}{{ document.filename }}{% endblock %}
 
 {% block content %}
-<div class="workspace" data-document-id="{{ document.id }}">
+<div class="workspace" data-document-id="{{ document.id }}" data-ui-id="document-workspace">
     <header class="workspace-header">
         <div>
             <p class="eyebrow">{% trans "Document workspace" %}</p>
@@ -17,7 +17,7 @@
     </header>
 
     <div class="workspace-grid">
-        <aside class="workspace-pages" aria-label="{% trans 'Document pages' %}">
+        <aside class="workspace-pages" aria-label="{% trans 'Document pages' %}" data-ui-id="page-navigator">
             <div class="workspace-panel-heading">
                 <h2>{% trans "Pages" %}</h2>
                 <span>{{ pages|length }}</span>
@@ -35,7 +35,7 @@
             </nav>
         </aside>
 
-        <section class="workspace-scan" aria-label="{% trans 'Original page scan' %}">
+        <section class="workspace-scan" aria-label="{% trans 'Original page scan' %}" data-ui-id="scan-viewer">
             <div class="workspace-panel-heading">
                 <h2>{% trans "Original scan" %}</h2>
                 {% if selected_page %}
@@ -88,7 +88,7 @@
             {% endif %}
         </section>
 
-        <aside class="workspace-content" aria-label="{% trans 'Extracted content' %}">
+        <aside class="workspace-content" aria-label="{% trans 'Extracted content' %}" data-ui-id="read-panel">
             <div class="workspace-panel-heading">
                 <h2>{% trans "Extracted content" %}</h2>
                 <span>{% trans "Read-only" %}</span>
@@ -175,137 +175,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
-(() => {
-    if (document.querySelector('[data-ocr-pending*="true"]')) {
-        window.setTimeout(() => window.location.reload(), 3000);
-    }
-    const selected = document.querySelector('[data-selected-region]');
-    if (selected) document.getElementById(`region-${selected.dataset.selectedRegion}`)?.scrollIntoView({block: 'nearest'});
-
-    const stage = document.getElementById('scan-stage');
-    const viewport = document.getElementById('scan-viewport');
-    const zoomValue = document.querySelector('[data-zoom-value]');
-    let zoom = 1;
-    let offsetX = 0;
-    let offsetY = 0;
-    const pointers = new Map();
-    let pinchDistance = null;
-    let dragStart = null;
-    let dragged = false;
-    let suppressClick = false;
-    const updateZoom = () => {
-        if (!stage) return;
-        stage.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`;
-        stage.style.transformOrigin = 'top left';
-        zoomValue.textContent = `${Math.round(zoom * 100)}%`;
-    };
-    const setZoom = (next, anchorX, anchorY) => {
-        const previous = zoom;
-        zoom = Math.max(.5, Math.min(4, next));
-        if (anchorX !== undefined && anchorY !== undefined && previous !== zoom) {
-            offsetX = anchorX - (anchorX - offsetX) * (zoom / previous);
-            offsetY = anchorY - (anchorY - offsetY) * (zoom / previous);
-        }
-        if (zoom <= 1) { offsetX = 0; offsetY = 0; }
-        updateZoom();
-    };
-    document.querySelector('[data-zoom-in]')?.addEventListener('click', () => setZoom(zoom + .25));
-    document.querySelector('[data-zoom-out]')?.addEventListener('click', () => setZoom(zoom - .25));
-    document.querySelector('[data-zoom-fit]')?.addEventListener('click', () => { zoom = 1; offsetX = 0; offsetY = 0; updateZoom(); });
-
-    const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-    viewport?.addEventListener('wheel', (event) => {
-        event.preventDefault();
-        const box = viewport.getBoundingClientRect();
-        const factor = event.deltaY < 0 ? 1.1 : .9;
-        setZoom(zoom * factor, event.clientX - box.left, event.clientY - box.top);
-    }, {passive: false});
-    viewport?.addEventListener('pointerdown', (event) => {
-        pointers.set(event.pointerId, event);
-        if (!event.target.closest?.('.region-hit')) viewport.setPointerCapture(event.pointerId);
-        dragged = false;
-        if (pointers.size === 1) dragStart = {x: event.clientX, y: event.clientY, offsetX, offsetY};
-        if (pointers.size === 2) {
-            const [a, b] = pointers.values();
-            pinchDistance = distance(a, b);
-        }
-    });
-    viewport?.addEventListener('pointermove', (event) => {
-        if (!pointers.has(event.pointerId)) return;
-        pointers.set(event.pointerId, event);
-        if (pointers.size === 2) {
-            const [a, b] = pointers.values();
-            const nextDistance = distance(a, b);
-            const box = viewport.getBoundingClientRect();
-            if (pinchDistance) setZoom(zoom * nextDistance / pinchDistance, (a.clientX + b.clientX) / 2 - box.left, (a.clientY + b.clientY) / 2 - box.top);
-            pinchDistance = nextDistance;
-            dragged = true;
-        } else if (pointers.size === 1 && dragStart && zoom > 1) {
-            offsetX = dragStart.offsetX + event.clientX - dragStart.x;
-            offsetY = dragStart.offsetY + event.clientY - dragStart.y;
-            dragged = Math.abs(event.clientX - dragStart.x) + Math.abs(event.clientY - dragStart.y) > 4;
-            updateZoom();
-        }
-    });
-    const endPointer = (event) => {
-        pointers.delete(event.pointerId);
-        if (dragged) suppressClick = true;
-        if (pointers.size < 2) pinchDistance = null;
-        if (!pointers.size) dragStart = null;
-    };
-    viewport?.addEventListener('pointerup', endPointer);
-    viewport?.addEventListener('pointercancel', endPointer);
-
-    const links = [...document.querySelectorAll('.region-hit')];
-    const counts = {};
-    links.forEach((link) => {
-        const box = link.querySelector('.region-box');
-        const type = link.dataset.regionType || [...(box?.classList || [])].find((name) => name.startsWith('region-') && name !== 'region-box')?.replace('region-', '') || 'other';
-        counts[type] = (counts[type] || 0) + 1;
-        link.dataset.regionType = type;
-        const openRegion = (event) => {
-            if (suppressClick) {
-                event.preventDefault();
-                suppressClick = false;
-                return;
-            }
-            // SVG anchors can lose their native navigation when pointer capture
-            // was used; make the deep-link behavior explicit for clean clicks.
-            event.preventDefault();
-            window.location.assign(link.getAttribute('href'));
-        };
-        link.addEventListener('click', openRegion);
-        // SVG anchors do not expose HTMLElement.click() consistently across
-        // browsers, so bind the actual rectangle as well.
-        box?.addEventListener('click', (event) => { event.stopPropagation(); openRegion(event); });
-        if (link.classList.contains('region-hit')) {
-            link.addEventListener('pointerup', (event) => {
-                if (!dragged && !suppressClick) { event.stopPropagation(); openRegion(event); }
-            });
-        }
-    });
-    const uniqueIds = new Set(links.map((link) => link.dataset.regionId));
-    document.querySelector('[data-filter-count="all"]')?.append(`(${uniqueIds.size})`);
-    Object.entries(counts).forEach(([type, count]) => document.querySelector(`[data-filter-count="${type}"]`)?.append(`(${count})`));
-    document.querySelectorAll('[data-region-filter]').forEach((button) => button.addEventListener('click', () => {
-        document.querySelectorAll('[data-region-filter]').forEach((item) => item.classList.toggle('is-active', item === button));
-        const filter = button.dataset.regionFilter;
-        const showSuppressed = document.querySelector('[data-show-suppressed]')?.dataset.showSuppressed === 'true';
-        links.forEach((link) => {
-            const visible = (filter === 'all' || link.dataset.regionType === filter) && (showSuppressed || link.dataset.suppressed !== 'true');
-            link.hidden = !visible;
-            link.style.display = visible ? '' : 'none';
-        });
-    }));
-    document.querySelector('[data-show-suppressed]')?.addEventListener('click', (button) => {
-        const control = button.currentTarget;
-        const visible = control.dataset.showSuppressed === 'true';
-        control.dataset.showSuppressed = visible ? 'false' : 'true';
-        control.classList.toggle('is-active', !visible);
-        document.querySelector('[data-region-filter].is-active')?.click();
-    });
-    document.querySelector('[data-region-filter].is-active')?.click();
-})();
-</script>
+<script type="module" src="{% static 'js/document-workspace.js' %}"></script>
 {% endblock %}

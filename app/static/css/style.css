@@ -24,6 +24,9 @@ body {
     line-height: 1.6;
 }
 
+.debug-ui [data-ui-id] { outline: 2px dashed rgba(156, 39, 176, .7); outline-offset: -2px; position: relative; }
+.debug-ui .ui-debug-label { position: absolute; z-index: 20; top: 0; left: 0; padding: .1rem .3rem; background: #6a1b9a; color: #fff; font: 600 10px/1.2 monospace; pointer-events: none; }
+
 /* Navbar */
 .navbar {
     background: #fff;

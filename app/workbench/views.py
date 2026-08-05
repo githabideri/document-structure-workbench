@@ -215,9 +215,14 @@ def project_create(request):
 def project_archive(request, collection_id):
     if not is_admin(request.user):
         raise PermissionDenied
+    from .policy import ProjectAccessPolicy
     project = get_object_or_404(Collection, pk=collection_id)
-    project.is_archived = not project.is_archived
-    project.save(update_fields=["is_archived"])
+    from .services import LifecycleError, ProjectLifecycleService
+    try:
+        ProjectLifecycleService.archive_project(project=project, policy=ProjectAccessPolicy(user=request.user), archived=not project.is_archived)
+    except (PermissionError, LifecycleError) as exc:
+        messages.error(request, _(str(exc)))
+        return redirect("collection_list")
     log_audit(request, "project_archived" if project.is_archived else "project_restored", "Collection", project.id,
               after={"is_archived": project.is_archived})
     messages.success(request, _("Project status updated."))
@@ -227,17 +232,17 @@ def project_archive(request, collection_id):
 @login_required
 @require_POST
 def source_archive(request, source_id):
-    from .models import ProcessingJob
     from .policy import ProjectAccessPolicy
+    from .services import LifecycleError, ProjectLifecycleService
     source = get_object_or_404(SourceDocument.objects.select_related("collection"), pk=source_id)
     policy = ProjectAccessPolicy(user=request.user)
     if not policy.can_edit(source.collection):
         raise PermissionDenied
-    if source.processing_jobs.filter(state__in=["queued", "submitting", "processing", "importing"]).exists():
-        messages.error(request, _("Stop the active processing attempt before archiving this upload."))
+    try:
+        ProjectLifecycleService.archive_source(source=source, policy=policy, archived=not source.is_archived)
+    except (PermissionError, LifecycleError) as exc:
+        messages.error(request, _(str(exc)))
         return redirect("collection_detail", collection_id=source.collection_id)
-    source.is_archived = not source.is_archived
-    source.save(update_fields=["is_archived"])
     log_audit(request, "source_archived" if source.is_archived else "source_restored", "SourceDocument", source.id,
               after={"is_archived": source.is_archived})
     messages.success(request, _("Upload status updated."))
@@ -722,21 +727,17 @@ def create_ocr_request(request, region_id):
     region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "page__document__processing_job__source_document"), pk=region_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(region.page.document.collection):
         raise PermissionDenied
-    from .processors.vision_ocr import OCR_PROVIDERS
+    from .services import OcrService
     provider = (request.POST.get("provider") or getattr(settings, "DSW_OCR_PROVIDER", "qwen")).strip()
-    if provider not in OCR_PROVIDERS:
-        messages.error(request, _("Unsupported visual OCR provider."))
+    try:
+        OcrService.create(
+            page=region.page, region=region, provider=provider,
+            model=(getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")),
+            prompt=request.POST.get("prompt", ""), user=request.user,
+        )
+    except (PermissionError, ValueError) as exc:
+        messages.error(request, _(str(exc)))
         return _redirect_to_region(request, region)
-    item = OcrRequest.objects.create(
-        source_document=region.page.document.processing_job.source_document,
-        document=region.page.document, page=region.page, region=region,
-        target="region", provider=provider,
-        model=(getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")),
-        prompt=(request.POST.get("prompt") or
-                "Transcribe exactly the visible text. Preserve spelling, punctuation and line breaks. "
-                "Do not translate, summarize, correct, infer, or add text. Return only the transcription."),
-        created_by=request.user,
-    )
     messages.success(request, _("Visual OCR candidate queued. This will not change the current text automatically."))
     return _redirect_to_region(request, region)
 
@@ -749,21 +750,17 @@ def create_page_ocr_request(request, page_id):
     page = get_object_or_404(Page.objects.select_related("document__collection", "document__processing_job__source_document"), pk=page_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(page.document.collection):
         raise PermissionDenied
-    from .processors.vision_ocr import OCR_PROVIDERS
+    from .services import OcrService
     provider = (request.POST.get("provider") or getattr(settings, "DSW_OCR_PROVIDER", "qwen")).strip()
-    if provider not in OCR_PROVIDERS:
-        messages.error(request, _("Unsupported visual OCR provider."))
+    try:
+        OcrService.create(
+            page=page, provider=provider,
+            model=(getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")),
+            prompt=request.POST.get("prompt", ""), user=request.user,
+        )
+    except (PermissionError, ValueError) as exc:
+        messages.error(request, _(str(exc)))
         return redirect(f"{reverse('document_detail', args=[page.document.processing_job.source_document.id])}?revision={page.document_id}&page={page.page_number}")
-    OcrRequest.objects.create(
-        source_document=page.document.processing_job.source_document,
-        document=page.document, page=page, target="page",
-        provider=provider,
-        model=(getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")),
-        prompt=(request.POST.get("prompt") or
-                "Transcribe exactly all visible text on this page. Preserve layout with line breaks. "
-                "Do not translate, summarize, correct, infer, or add text. Return only the transcription."),
-        created_by=request.user,
-    )
     messages.success(request, _("Full-page visual OCR candidate queued."))
     source = page.document.processing_job.source_document
     return redirect(f"{reverse('document_detail', args=[source.id])}?revision={page.document_id}&page={page.page_number}")
@@ -776,18 +773,12 @@ def accept_ocr_request(request, request_id):
     item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(item.document.collection):
         raise PermissionDenied
-    if item.state != "completed" or not item.region_id:
-        messages.error(request, _("Only completed region OCR candidates can be accepted."))
-        return _redirect_to_region(request, item.region)
-    if not item.accepted_correction_id:
-        correction = RegionCorrection.objects.create(
-            region=item.region, document=item.document, created_by=request.user,
-            operation="text", before={"text": item.region.effective_text},
-            after={"text": item.candidate_text}, reason=f"Accepted visual OCR candidate #{item.pk}",
-        )
-        item.accepted_correction = correction
-        item.save(update_fields=["accepted_correction"])
+    from .services import OcrService
+    try:
+        OcrService.accept(item=item, user=request.user)
         messages.success(request, _("Visual OCR text accepted as a reversible correction."))
+    except (PermissionError, ValueError) as exc:
+        messages.error(request, _(str(exc)))
     return _redirect_to_region(request, item.region)
 
 
@@ -1392,7 +1383,7 @@ def user_settings(request):
                             "documents:upload", "jobs:submit", "jobs:read",
                             "reviews:write", "statistics:read",
                             "chat:read", "chat:write", "chat:retry",
-                            "support:read", "support:export"],
+                            "diagnostics:read", "support:read", "support:export"],
                 )
                 from django.contrib import messages
                 messages.success(

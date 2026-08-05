@@ -9,7 +9,7 @@ from unittest.mock import patch
 from workbench.models import (
     AuditEvent, ChatMessage, ChatRun, ChatThread, Collection, Document, ExtractionRun, Page, ProcessingJob,
     ProcessingPreset, ProjectMembership, ReviewTask, SourceDocument,
-    TableCandidate, TableExtraction,
+    TableCandidate, TableExtraction, PageRegion, RegionCorrection,
 )
 
 User = get_user_model()
@@ -26,7 +26,7 @@ class ApiContractTests(TestCase):
             user=self.user, name="test", token_prefix="api-test",
             token_hash=ApiToken.hash_token(self.raw_token),
             scopes=["projects:read", "documents:read", "documents:upload", "jobs:submit", "jobs:read", "reviews:write",
-                    "chat:read", "chat:write", "chat:retry", "support:read", "support:export"],
+            "documents:manage", "chat:read", "chat:write", "chat:retry", "support:read", "support:export"],
         )
 
     def auth(self):
@@ -61,6 +61,58 @@ class ApiContractTests(TestCase):
         response = self.client.get(reverse("api_projects"), **self.auth())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["projects"][0]["name"], "API archive")
+
+    def test_document_revision_page_and_region_reads_are_structured_and_scoped(self):
+        source = self.make_source()
+        preset = ProcessingPreset.objects.create(slug="read-api", name="Read API")
+        job = ProcessingJob.objects.create(source_document=source, preset=preset, state="completed", processor="fixture")
+        revision = Document.objects.create(collection=self.project, external_id="read-api", filename=source.filename, page_count=1)
+        job.result_document = revision
+        job.save(update_fields=["result_document"])
+        source.active_document = revision
+        source.page_count = 1
+        source.save(update_fields=["active_document", "page_count"])
+        page = Page.objects.create(document=revision, page_number=1, width=100, height=200)
+        region = PageRegion.objects.create(
+            source_document=source, job=job, page=page, page_number=1,
+            region_type="title", left=.1, top=.2, right=.8, bottom=.4,
+            page_width=100, page_height=200, confidence=.93, text="Imported title",
+        )
+        RegionCorrection.objects.create(
+            region=region, document=revision, created_by=self.user,
+            operation="text", before={"text": "Imported title"}, after={"text": "Effective title"},
+            reason="fixture correction",
+        )
+
+        detail = self.client.get(reverse("api_document_detail", args=[source.pk]), **self.auth())
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["document"]["active_revision_id"], revision.pk)
+        revisions = self.client.get(reverse("api_document_revisions", args=[source.pk]), **self.auth())
+        self.assertEqual(revisions.status_code, 200)
+        self.assertEqual(revisions.json()["revisions"][0]["immutable"], True)
+        page_response = self.client.get(reverse("api_revision_page", args=[source.pk, revision.pk, 1]), **self.auth())
+        self.assertEqual(page_response.status_code, 200)
+        page_json = page_response.json()["page"]
+        self.assertEqual(page_json["regions"][0]["text"], "Effective title")
+        self.assertAlmostEqual(page_json["regions"][0]["normalized_bounds"]["width"], .7)
+        corrections = self.client.get(reverse("api_region_corrections", args=[region.pk]), **self.auth())
+        self.assertEqual(corrections.status_code, 200)
+        self.assertEqual(corrections.json()["corrections"][0]["after"]["text"], "Effective title")
+
+        mutation = self.client.post(
+            reverse("api_region_text_correction", args=[region.pk]),
+            data=json.dumps({"replacement_text": "New title", "expected_current_text": "Effective title", "reason": "test"}),
+            content_type="application/json", **self.auth(),
+        )
+        self.assertEqual(mutation.status_code, 201)
+        self.assertEqual(mutation.json()["region"]["text"], "New title")
+        stale = self.client.post(
+            reverse("api_region_text_correction", args=[region.pk]),
+            data=json.dumps({"replacement_text": "Stale", "expected_current_text": "Effective title"}),
+            content_type="application/json", **self.auth(),
+        )
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.json()["error"]["code"], "region_state_conflict")
 
     def test_user_created_scope_set_can_submit_upload(self):
         self.client.force_login(self.user)

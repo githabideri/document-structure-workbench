@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n static %}
 {% block title %}{% trans "Add document" %}{% endblock %}
 
 {% block content %}
@@ -85,40 +85,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
-    const dropZone = document.getElementById('file-drop');
-    const fileInput = document.getElementById('file-input');
-    const fileInfo = document.getElementById('file-info');
-    if (dropZone && fileInput) {
-        const showFile = () => {
-            if (fileInput.files.length) {
-                const file = fileInput.files[0];
-                fileInfo.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`;
-            }
-        };
-        fileInput.addEventListener('change', showFile);
-        dropZone.addEventListener('dragover', event => {
-            event.preventDefault();
-            dropZone.classList.add('dragover');
-        });
-        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-        dropZone.addEventListener('drop', event => {
-            event.preventDefault();
-            dropZone.classList.remove('dragover');
-            if (event.dataTransfer.files.length) {
-                const transfer = new DataTransfer();
-                [...event.dataTransfer.files].forEach(file => transfer.items.add(file));
-                fileInput.files = transfer.files;
-                showFile();
-            }
-        });
-    }
-    document.querySelectorAll('.analysis-option input').forEach(input => {
-        input.addEventListener('change', () => {
-            document.querySelectorAll('.analysis-option').forEach(option => option.classList.remove('selected-option'));
-            input.closest('.analysis-option').classList.add('selected-option');
-        });
-        if (input.checked) input.closest('.analysis-option').classList.add('selected-option');
-    });
-</script>
+<script type="module" src="{% static 'js/upload-workspace.js' %}"></script>
 {% endblock %}

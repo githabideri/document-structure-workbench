@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body data-workspace="{{ request.resolver_match.url_name|default:'unknown' }}">
     <nav class="navbar">
         <div class="nav-container">
             <a href="{% url 'dashboard' %}" class="nav-brand">{% trans "Document Structure Workbench" %}</a>
@@ -60,6 +60,7 @@
     </footer>
 
     <script src="{% url 'serve_htmx' %}"></script>
+    <script type="module" src="{% static 'js/core/diagnostics.js' %}"></script>
     {% block extra_scripts %}{% endblock %}
 </body>
 </html>

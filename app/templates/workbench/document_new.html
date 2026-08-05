@@ -6,7 +6,7 @@
 <div class="upload-container">
     <p class="eyebrow">{% trans "New document" %}</p>
     <h1>{% trans "Add a document" %}</h1>
-    <p class="page-intro">{% trans "Choose where this document belongs, then upload the original PDF for analysis." %}</p>
+    <p class="page-intro">{% trans "Choose where this document belongs, then upload the original document for analysis." %}</p>
 
     {% if editable_projects %}
     <form method="post" enctype="multipart/form-data" id="upload-form" class="upload-form">
@@ -106,7 +106,9 @@
             event.preventDefault();
             dropZone.classList.remove('dragover');
             if (event.dataTransfer.files.length) {
-                fileInput.files = event.dataTransfer.files;
+                const transfer = new DataTransfer();
+                [...event.dataTransfer.files].forEach(file => transfer.items.add(file));
+                fileInput.files = transfer.files;
                 showFile();
             }
         });

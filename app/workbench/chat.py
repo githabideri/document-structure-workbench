@@ -311,9 +311,13 @@ def process_chat_run(run, worker_id="chat-worker"):
                         )
                         if revision_ids:
                             attachment_queryset = attachment_queryset.filter(processed_revision_id__in=revision_ids)
+                        fallback_limit = min(
+                            getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8),
+                            remaining_evidence,
+                        )
                         attachment_passages = attachment_queryset.select_related(
                             "source_document", "processed_revision", "processing_job", "page", "page_region",
-                        ).order_by("source_document_id", "page__page_number", "ordinal")[:remaining_evidence]
+                        ).order_by("source_document_id", "page__page_number", "ordinal")[:fallback_limit]
                         found = [(0, passage, "manual-attachment/fallback") for passage in attachment_passages]
                     result_entries = []
                     for _, passage, reason in found:

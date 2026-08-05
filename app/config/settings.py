@@ -163,10 +163,10 @@ DSW_CHAT_CONTEXT_TOKEN_BUDGET = int(os.environ.get("DSW_CHAT_CONTEXT_TOKEN_BUDGE
 # place. The URL is an OpenAI-compatible /v1 endpoint.
 DSW_OCR_BASE_URL = os.environ.get("DSW_OCR_BASE_URL", "")
 DSW_OCR_API_KEY = os.environ.get("DSW_OCR_API_KEY", "")
-DSW_OCR_MODEL = os.environ.get("DSW_OCR_MODEL", "")
+DSW_OCR_MODEL = os.environ.get("DSW_OCR_MODEL", "PaddleOCR-VL-0.9B")
 DSW_OCR_TIMEOUT = int(os.environ.get("DSW_OCR_TIMEOUT", "300"))
 DSW_OCR_MAX_TOKENS = int(os.environ.get("DSW_OCR_MAX_TOKENS", "4096"))
-DSW_OCR_PROVIDER = os.environ.get("DSW_OCR_PROVIDER", "openai-compatible")
+DSW_OCR_PROVIDER = os.environ.get("DSW_OCR_PROVIDER", "paddleocr-vl")
 
 # Fail clearly when API URL is absent in production
 if not DEBUG and not DSW_DOCLING_API_URL:

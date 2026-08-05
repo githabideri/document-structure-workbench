@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static i18n %}
+{% load static i18n l10n %}
 {% block title %}{{ document.filename }}{% endblock %}
 
 {% block content %}
@@ -60,7 +60,7 @@
                         {% for region in page_regions %}
                         <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}">
                             <rect class="region-box region-{{ region.display_region_type }}{% if region.display_is_suppressed %} is-suppressed{% endif %}{% if region.id == selected_region.id %} is-selected{% endif %}"
-                                  x="{{ region.left }}" y="{{ region.top }}" width="{{ region.overlay_width|floatformat:'6' }}" height="{{ region.overlay_height|floatformat:'6' }}"
+                                  x="{{ region.left|unlocalize }}" y="{{ region.top|unlocalize }}" width="{{ region.overlay_width|floatformat:'6'|unlocalize }}" height="{{ region.overlay_height|floatformat:'6'|unlocalize }}"
                                   data-region-id="{{ region.id }}" role="button" tabindex="0">
                                 <title>{{ region.display_region_type_label }}{% if region.display_is_suppressed %} · {% trans "suppressed" %}{% endif %}</title>
                             </rect>
@@ -70,7 +70,7 @@
                     <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
                         {% for region in page_regions %}
                         <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" onclick="window.location.assign(this.getAttribute('href')); return false;" class="region-hit region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}"
-                           style="left:{{ region.overlay_left_percent|floatformat:'4' }}%;top:{{ region.overlay_top_percent|floatformat:'4' }}%;width:{{ region.overlay_width_percent|floatformat:'4' }}%;height:{{ region.overlay_height_percent|floatformat:'4' }}%;"
+                           style="left:{{ region.overlay_left_percent|floatformat:'4'|unlocalize }}%;top:{{ region.overlay_top_percent|floatformat:'4'|unlocalize }}%;width:{{ region.overlay_width_percent|floatformat:'4'|unlocalize }}%;height:{{ region.overlay_height_percent|floatformat:'4'|unlocalize }}%;"
                            aria-label="{{ region.display_region_type_label }}">{{ region.display_region_type_label }}</a>
                         {% endfor %}
                     </div>
@@ -159,7 +159,7 @@
                 <h3>{% trans "Full page text" %}</h3>
                 {% if source_document and can_edit_document and selected_page %}<form method="post" action="{% url 'create_page_ocr_request' selected_page.id %}">{% csrf_token %}<button class="btn btn-secondary" type="submit">{% trans "Re-run full page with visual OCR" %}</button></form>{% endif %}
                 {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
-                {% if page_ocr_requests %}<details class="ocr-history" open><summary>{% trans "Page OCR candidates" %}</summary>{% for candidate in page_ocr_requests %}<div class="history-item"><strong>#{{ candidate.id }} · {{ candidate.state }}</strong>{% if candidate.candidate_text %}<pre>{{ candidate.candidate_text }}</pre>{% endif %}{% if candidate.error_message %}<p class="progress-message error">{{ candidate.error_message }}</p>{% endif %}</div>{% endfor %}</details>{% endif %}
+                {% if page_ocr_requests %}<details class="ocr-history" open data-ocr-pending="{% for candidate in page_ocr_requests %}{% if candidate.state == 'queued' or candidate.state == 'processing' %}true{% endif %}{% endfor %}"><summary>{% trans "Page OCR candidates" %}</summary>{% for candidate in page_ocr_requests %}<div class="history-item"><strong>#{{ candidate.id }} · {{ candidate.state }}</strong>{% if candidate.candidate_text %}<pre>{{ candidate.candidate_text }}</pre>{% endif %}{% if candidate.error_message %}<p class="progress-message error">{{ candidate.error_message }}</p>{% endif %}</div>{% endfor %}</details>{% endif %}
             </section>
             {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.safe_html %}<div class="table-preview">{{ extraction.safe_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
         </aside>
@@ -170,6 +170,9 @@
 {% block extra_scripts %}
 <script>
 (() => {
+    if (document.querySelector('[data-ocr-pending*="true"]')) {
+        window.setTimeout(() => window.location.reload(), 3000);
+    }
     const selected = document.querySelector('[data-selected-region]');
     if (selected) document.getElementById(`region-${selected.dataset.selectedRegion}`)?.scrollIntoView({block: 'nearest'});
 

@@ -21,7 +21,7 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from workbench.models import (
     Collection,
@@ -1162,6 +1162,15 @@ class DocumentWorkspaceTest(TestCase):
         self.assertContains(response, "Full extracted page text.")
         self.assertEqual(response.context["selected_page"], self.page)
         self.assertEqual(response.context["selected_region"], self.region)
+
+    def test_workspace_overlay_coordinates_are_ascii_decimal_in_german(self):
+        self.client.force_login(self.user)
+        with translation.override("de"):
+            response = self.client.get(reverse("document_detail", args=[self.document.pk]), {"page": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'x="0.1"')
+        self.assertNotContains(response, 'x="0,1"')
+        self.assertContains(response, "left:10.0000%;")
 
     def test_workspace_and_image_are_forbidden_to_unrelated_user(self):
         unrelated = User.objects.create_user(username="workspace-unrelated", password="testpass123")

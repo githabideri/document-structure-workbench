@@ -26,7 +26,7 @@ from django.contrib.auth import logout as auth_logout
 from .models import (
     AuditEvent, Collection, Decision, Document, ExtractionRun,
     Page, PageRegion, ProcessingArtifact, RegionCorrection, Review, ReviewTask, SourceDocument, TableCandidate,
-    TableExtraction,
+    TableExtraction, OcrRequest,
 )
 from .models import LANGUAGES
 
@@ -557,7 +557,7 @@ def document_detail(request, document_id):
     regions = list(
         PageRegion.objects.filter(page__document=document)
         .select_related("page", "job")
-        .prefetch_related("corrections")
+        .prefetch_related("corrections", "ocr_requests")
     )
     for region in regions:
         region.display_region_type = region.effective_region_type
@@ -587,6 +587,7 @@ def document_detail(request, document_id):
             selected_region = None
 
     page_text = ""
+    page_ocr_requests = list(OcrRequest.objects.filter(page=page).order_by("-created_at", "-id")[:10]) if page else []
     processing_job = getattr(document, "processing_job", None)
     if processing_job:
         artifact = ProcessingArtifact.objects.filter(
@@ -618,6 +619,7 @@ def document_detail(request, document_id):
         "region_types": PageRegion.REGION_TYPES,
         "selected_region": selected_region,
         "page_text": page_text,
+        "page_ocr_requests": page_ocr_requests,
         "processing_job": processing_job,
         "source_document": source_document,
         "workspace_document_id": source_document.id if source_document else document.id,
@@ -709,6 +711,74 @@ def _redirect_to_region(request, region):
     target = source.id if source else region.page.document_id
     query = f"?revision={region.page.document_id}&page={region.page_number}&region={region.id}" if source else f"?page={region.page_number}&region={region.id}"
     return redirect(f"{reverse('document_detail', args=[target])}{query}")
+
+
+@login_required
+@require_POST
+def create_ocr_request(request, region_id):
+    """Queue a visual OCR candidate for one immutable detected region."""
+    from .policy import ProjectAccessPolicy
+    from .models import PageRegion
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "page__document__processing_job__source_document"), pk=region_id)
+    if not ProjectAccessPolicy(user=request.user).can_edit(region.page.document.collection):
+        raise PermissionDenied
+    item = OcrRequest.objects.create(
+        source_document=region.page.document.processing_job.source_document,
+        document=region.page.document, page=region.page, region=region,
+        target="region", provider=getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible"),
+        model=getattr(settings, "DSW_OCR_MODEL", ""),
+        prompt=(request.POST.get("prompt") or
+                "Transcribe exactly the visible text. Preserve spelling, punctuation and line breaks. "
+                "Do not translate, summarize, correct, infer, or add text. Return only the transcription."),
+        created_by=request.user,
+    )
+    messages.success(request, _("Visual OCR candidate queued. This will not change the current text automatically."))
+    return _redirect_to_region(request, region)
+
+
+@login_required
+@require_POST
+def create_page_ocr_request(request, page_id):
+    """Queue visual OCR for an entire immutable page image."""
+    from .policy import ProjectAccessPolicy
+    page = get_object_or_404(Page.objects.select_related("document__collection", "document__processing_job__source_document"), pk=page_id)
+    if not ProjectAccessPolicy(user=request.user).can_edit(page.document.collection):
+        raise PermissionDenied
+    OcrRequest.objects.create(
+        source_document=page.document.processing_job.source_document,
+        document=page.document, page=page, target="page",
+        provider=getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible"),
+        model=getattr(settings, "DSW_OCR_MODEL", ""),
+        prompt=(request.POST.get("prompt") or
+                "Transcribe exactly all visible text on this page. Preserve layout with line breaks. "
+                "Do not translate, summarize, correct, infer, or add text. Return only the transcription."),
+        created_by=request.user,
+    )
+    messages.success(request, _("Full-page visual OCR candidate queued."))
+    source = page.document.processing_job.source_document
+    return redirect(f"{reverse('document_detail', args=[source.id])}?revision={page.document_id}&page={page.page_number}")
+
+
+@login_required
+@require_POST
+def accept_ocr_request(request, request_id):
+    from .policy import ProjectAccessPolicy
+    item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
+    if not ProjectAccessPolicy(user=request.user).can_edit(item.document.collection):
+        raise PermissionDenied
+    if item.state != "completed" or not item.region_id:
+        messages.error(request, _("Only completed region OCR candidates can be accepted."))
+        return _redirect_to_region(request, item.region)
+    if not item.accepted_correction_id:
+        correction = RegionCorrection.objects.create(
+            region=item.region, document=item.document, created_by=request.user,
+            operation="text", before={"text": item.region.effective_text},
+            after={"text": item.candidate_text}, reason=f"Accepted visual OCR candidate #{item.pk}",
+        )
+        item.accepted_correction = correction
+        item.save(update_fields=["accepted_correction"])
+        messages.success(request, _("Visual OCR text accepted as a reversible correction."))
+    return _redirect_to_region(request, item.region)
 
 
 @login_required

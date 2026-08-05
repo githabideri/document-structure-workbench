@@ -39,7 +39,7 @@ from .models import (
     ExtractionRun, Page, ProcessingArtifact, ProcessingJob,
     ProcessingPreset, ProjectMembership, Review, ReviewTask,
     ServiceAccount, SourceDocument, TableCandidate, TableExtraction,
-    UserPreferences,
+    UserPreferences, OcrRequest, PageRegion, RegionCorrection,
     ChatThread, ChatRun, ChatMessage,
 )
 from .policy import ProjectAccessPolicy
@@ -516,6 +516,96 @@ def api_job_recovery(request, job_id):
     except (ValueError, json.JSONDecodeError) as exc:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
     return JsonResponse({"request_id": request._request_id, "job_id": job.id, "state": job.state, "archived": job.source_document.is_archived})
+
+
+# ---------------------------------------------------------------------------
+# Visual OCR candidates
+# ---------------------------------------------------------------------------
+
+def _ocr_request_json(item):
+    return {
+        "id": item.pk, "state": item.state, "target": item.target,
+        "source_document_id": item.source_document_id, "revision_id": item.document_id,
+        "page_id": item.page_id, "page_number": item.page.page_number,
+        "region_id": item.region_id, "provider": item.provider, "model": item.model,
+        "prompt": item.prompt, "candidate_text": item.candidate_text,
+        "input_sha256": item.input_sha256, "input_metadata": item.input_metadata,
+        "metadata": item.metadata, "error_message": item.error_message,
+        "accepted_correction_id": item.accepted_correction_id,
+        "created_at": item.created_at.isoformat(),
+        "started_at": item.started_at.isoformat() if item.started_at else None,
+        "finished_at": item.finished_at.isoformat() if item.finished_at else None,
+    }
+
+
+def _create_ocr_request(request, page, region=None):
+    token = request._api_token
+    if not ProjectAccessPolicy(token=token).can_edit(page.document.collection):
+        return JsonResponse({"error": "Access denied"}, status=403)
+    try:
+        body = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        body = {}
+    prompt = str(body.get("prompt") or (
+        "Transcribe exactly the visible text. Preserve spelling, punctuation and line breaks. "
+        "Do not translate, summarize, correct, infer, or add text. Return only the transcription."
+    )).strip()
+    item = OcrRequest.objects.create(
+        source_document=page.document.processing_job.source_document,
+        document=page.document, page=page, region=region,
+        target="region" if region else "page",
+        provider=getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible"),
+        model=getattr(settings, "DSW_OCR_MODEL", ""), prompt=prompt,
+        created_by=token.user if token.user_id else None,
+    )
+    return JsonResponse(_ocr_request_json(item), status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_region_ocr(request, region_id):
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "page__document__processing_job__source_document"), pk=region_id)
+    return _create_ocr_request(request, region.page, region)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_page_ocr(request, page_id):
+    page = get_object_or_404(Page.objects.select_related("document__collection", "document__processing_job__source_document"), pk=page_id)
+    return _create_ocr_request(request, page)
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_ocr_request_detail(request, request_id):
+    item = get_object_or_404(OcrRequest.objects.select_related("page", "document__collection"), pk=request_id)
+    if not ProjectAccessPolicy(token=request._api_token).can_view(item.document.collection):
+        return JsonResponse({"error": "Access denied"}, status=403)
+    return JsonResponse(_ocr_request_json(item))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_ocr_request_accept(request, request_id):
+    item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
+    if not ProjectAccessPolicy(token=request._api_token).can_edit(item.document.collection):
+        return JsonResponse({"error": "Access denied"}, status=403)
+    if item.state != "completed" or not item.region_id:
+        return JsonResponse({"error": "Only completed region OCR candidates can be accepted."}, status=409)
+    if item.accepted_correction_id:
+        return JsonResponse(_ocr_request_json(item))
+    correction = RegionCorrection.objects.create(
+        region=item.region, document=item.document,
+        created_by=request._api_token.user if request._api_token.user_id else None,
+        operation="text", before={"text": item.region.effective_text},
+        after={"text": item.candidate_text}, reason=f"Accepted visual OCR candidate #{item.pk}",
+    )
+    item.accepted_correction = correction
+    item.save(update_fields=["accepted_correction"])
+    return JsonResponse(_ocr_request_json(item))
 
 
 # ---------------------------------------------------------------------------

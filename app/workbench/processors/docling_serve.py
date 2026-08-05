@@ -107,9 +107,17 @@ class DoclingServeProcessor(DocumentProcessor):
             "do_ocr": "true",
             "do_table_structure": "true",
             "include_page_images": "true",
-            "images_scale": "2.0",
+            "images_scale": str(configuration.get("images_scale", getattr(settings, "DSW_DOCLING_IMAGES_SCALE", 2.0))),
             "table_mode": "accurate",
         }
+
+        # Keep the OCR path explicit. Docling's automatic selection can fall
+        # back to a CPU backend, which is both slow and difficult to diagnose.
+        # These fields are understood by current Docling Serve releases and
+        # are harmless for older compatible servers that ignore them.
+        data["ocr_engine"] = configuration.get("ocr_engine", getattr(settings, "DSW_DOCLING_OCR_ENGINE", "rapidocr"))
+        data["ocr_lang"] = configuration.get("ocr_lang", getattr(settings, "DSW_DOCLING_OCR_LANG", "de,en"))
+        data["ocr_backend"] = configuration.get("ocr_backend", getattr(settings, "DSW_DOCLING_OCR_BACKEND", "torch"))
 
         # Override from configuration if present
         if configuration.get("table_mode"):

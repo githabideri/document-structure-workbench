@@ -1059,3 +1059,57 @@ class RegionCorrection(models.Model):
 
     def __str__(self):
         return f"{self.get_operation_display()} on region {self.region_id}"
+
+
+class OcrRequest(models.Model):
+    """An immutable visual-OCR candidate for a page or detected region.
+
+    The request and provider response are retained even when a curator rejects
+    the candidate. Acceptance is represented by a normal RegionCorrection so
+    existing correction/revert semantics remain intact.
+    """
+
+    TARGETS = [("region", "Region"), ("page", "Page")]
+    STATES = [
+        ("queued", "Queued"), ("processing", "Processing"),
+        ("completed", "Completed"), ("failed", "Failed"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    source_document = models.ForeignKey(SourceDocument, on_delete=models.CASCADE, related_name="ocr_requests")
+    document = models.ForeignKey(Document, on_delete=models.PROTECT, related_name="ocr_requests")
+    page = models.ForeignKey(Page, on_delete=models.PROTECT, related_name="ocr_requests")
+    region = models.ForeignKey(PageRegion, on_delete=models.PROTECT, null=True, blank=True, related_name="ocr_requests")
+    target = models.CharField(max_length=20, choices=TARGETS, default="region")
+    provider = models.CharField(max_length=80, default="openai-compatible")
+    model = models.CharField(max_length=200, blank=True)
+    prompt = models.TextField()
+    input_sha256 = models.CharField(max_length=64, blank=True)
+    input_metadata = JSONField(default=dict, blank=True)
+    state = models.CharField(max_length=20, choices=STATES, default="queued")
+    candidate_text = models.TextField(blank=True)
+    raw_response = JSONField(default=dict, blank=True)
+    metadata = JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="ocr_requests")
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    accepted_correction = models.OneToOneField("RegionCorrection", on_delete=models.SET_NULL, null=True, blank=True, related_name="ocr_request")
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def clean(self):
+        super().clean()
+        if self.region_id and self.region.page_id != self.page_id:
+            raise ValidationError({"region": "OCR region must belong to the selected page."})
+        if self.document_id and self.page.document_id != self.document_id:
+            raise ValidationError({"page": "OCR page must belong to the selected revision."})
+        if self.source_document_id and self.document.processing_job.source_document_id != self.source_document_id:
+            raise ValidationError({"document": "OCR revision must belong to the selected source document."})
+
+    def __str__(self):
+        target = f"region {self.region_id}" if self.region_id else f"page {self.page_id}"
+        return f"OCR {self.id}: {target} ({self.state})"

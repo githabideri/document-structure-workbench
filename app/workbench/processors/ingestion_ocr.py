@@ -13,7 +13,14 @@ def _blocks_from_response(response):
     pages = response.get("result", {}).get("layoutParsingResults", []) if isinstance(response, dict) else []
     blocks = []
     for page in pages:
-        candidates = page.get("parsing_res_list") or page.get("parsingResList") or []
+        pruned = page.get("prunedResult", {}) if isinstance(page, dict) else {}
+        candidates = (
+            page.get("parsing_res_list")
+            or page.get("parsingResList")
+            or pruned.get("parsing_res_list")
+            or pruned.get("parsingResList")
+            or []
+        )
         if isinstance(candidates, dict):
             candidates = candidates.get("blocks", [])
         for block in candidates:

@@ -73,7 +73,9 @@ class VisionOcrTests(TestCase):
             def transcribe(self, image, prompt):
                 return "Paddle page text", {"result": {"layoutParsingResults": [{
                     "markdown": {"text": "Paddle page text"},
-                    "parsing_res_list": [{"block_bbox": [0, 0, 100, 40], "block_content": "Paddle region"}],
+                    "prunedResult": {"parsing_res_list": [
+                        {"block_bbox": [0, 0, 100, 40], "block_content": "Paddle region"},
+                    ]},
                 }]}}
 
         apply_page_ocr(result, client=FakeClient())

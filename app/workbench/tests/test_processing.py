@@ -1372,6 +1372,66 @@ class EntryJourneyTest(TestCase):
         self.assertContains(upload, "Hochladen und analysieren")
 
 
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class LifecycleManagementTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="lifecycle-user", password="testpass123")
+        self.admin = User.objects.create_superuser(username="lifecycle-admin", password="testpass123", email="admin@example.test")
+        self.project = _create_collection(self.user, "Lifecycle Project")
+        self.preset = _create_preset()
+        self.source = SourceDocument.objects.create(collection=self.project, filename="stuck.pdf", uploaded_by=self.user)
+
+    def test_uncertain_job_can_be_closed_without_500(self):
+        job = ProcessingJob.objects.create(
+            source_document=self.source, preset=self.preset, state="submission_uncertain",
+            status_message="Submission outcome is uncertain.", created_by=self.user,
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("job_recovery_action", args=[job.pk]), {"action": "mark_failed"})
+        self.assertRedirects(response, reverse("job_status", args=[job.pk]))
+        job.refresh_from_db()
+        self.assertEqual(job.state, "failed")
+        self.assertIsNotNone(job.finished_at)
+
+    def test_failed_job_can_queue_a_new_attempt_without_mutating_old_job(self):
+        job = ProcessingJob.objects.create(source_document=self.source, preset=self.preset, state="failed", created_by=self.user)
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("job_recovery_action", args=[job.pk]), {"action": "retry_new"})
+        retry = ProcessingJob.objects.exclude(pk=job.pk).get()
+        self.assertRedirects(response, reverse("job_status", args=[retry.pk]))
+        self.assertEqual(retry.state, "queued")
+        job.refresh_from_db()
+        self.assertEqual(job.state, "failed")
+
+    def test_only_administrator_can_create_and_archive_projects(self):
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(reverse("project_create")).status_code, 403)
+        response = self.client.post(reverse("project_create"), {"name": "New Admin Project", "source_type": "corpus"})
+        self.assertEqual(response.status_code, 403)
+
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("project_create"), {"name": "New Admin Project", "description": "Test", "source_type": "corpus"})
+        project = Collection.objects.get(name="New Admin Project")
+        self.assertRedirects(response, reverse("collection_detail", args=[project.pk]))
+        self.assertTrue(ProjectMembership.objects.filter(project=project, user=self.admin, role="owner").exists())
+        response = self.client.post(reverse("project_archive", args=[project.pk]))
+        self.assertRedirects(response, reverse("collection_list"))
+        project.refresh_from_db()
+        self.assertTrue(project.is_archived)
+
+    def test_editor_can_archive_upload_without_deleting_immutable_rows(self):
+        job = ProcessingJob.objects.create(source_document=self.source, preset=self.preset, state="failed", created_by=self.user)
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("source_archive", args=[self.source.pk]))
+        self.assertRedirects(response, reverse("collection_detail", args=[self.project.pk]))
+        self.source.refresh_from_db()
+        self.assertTrue(self.source.is_archived)
+        self.assertTrue(ProcessingJob.objects.filter(pk=job.pk).exists())
+
+
 class AuthorizationTest(TestCase):
     """Test project access policy."""
 

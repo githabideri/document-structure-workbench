@@ -141,6 +141,19 @@ class ChatTests(TestCase):
         self.assertContains(response, "Conversations")
         self.assertContains(response, "Evidence context")
 
+    def test_owner_can_rename_and_archive_conversation(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user, title="Old title")
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("chat_thread_rename", args=[thread.pk]), {"title": "Research notes"})
+        self.assertRedirects(response, reverse("chat_thread", args=[thread.pk]))
+        thread.refresh_from_db()
+        self.assertEqual(thread.title, "Research notes")
+        response = self.client.post(reverse("chat_thread_archive", args=[thread.pk]))
+        self.assertRedirects(response, reverse("chat"))
+        thread.refresh_from_db()
+        self.assertTrue(thread.is_archived)
+        self.assertNotContains(self.client.get(reverse("chat")), "Research notes")
+
     def test_workspace_citation_offers_return_to_thread(self):
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         self.client.force_login(self.user)

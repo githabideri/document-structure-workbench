@@ -1,3 +1,5 @@
+import json
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -141,6 +143,23 @@ class ApiContractTests(TestCase):
         self.assertEqual(self.client.get(reverse("api_chat_thread_detail", args=[other_thread.pk]), **self.auth()).status_code, 404)
         self.assertEqual(self.client.get(reverse("api_support_bundle_detail", args=[run.pk]), **self.auth()).status_code, 404)
         self.assertEqual(AuditEvent.objects.filter(object_id=str(run.pk)).count(), 0)
+
+    def test_chat_management_requires_scope_and_project_access(self):
+        thread = self.make_thread()
+        response = self.client.patch(
+            reverse("api_chat_thread_detail", args=[thread.pk]),
+            data=json.dumps({"title": "Renamed"}), content_type="application/json", **self.auth(),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.token.scopes = list(self.token.scopes) + ["chat:manage"]
+        self.token.save(update_fields=["scopes"])
+        other = Collection.objects.create(name="Other management archive")
+        other_thread = ChatThread.objects.create(project=other, created_by=self.user, title="Private")
+        response = self.client.patch(
+            reverse("api_chat_thread_detail", args=[other_thread.pk]),
+            data=json.dumps({"title": "Should not change"}), content_type="application/json", **self.auth(),
+        )
+        self.assertEqual(response.status_code, 404)
 
     def test_support_bundle_export_is_scoped_and_audited(self):
         thread = self.make_thread()

@@ -12,6 +12,7 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
 from django.contrib.auth.models import Group
 from django.core.paginator import Paginator
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q, Avg, F
 from django.http import HttpResponse, JsonResponse
@@ -172,13 +173,75 @@ def dashboard(request):
 def collection_list(request):
     from .policy import ProjectAccessPolicy
     policy = ProjectAccessPolicy(user=request.user)
-    collections = list(policy.visible_projects())
+    collections = list(Collection.objects.all() if is_admin(request.user) else policy.visible_projects())
     for collection in collections:
         collection.user_can_edit = policy.can_edit(collection)
     return render(request, "workbench/collection_list.html", {
         "collections": collections,
         "can_add_document": any(project.user_can_edit for project in collections),
+        "is_admin": is_admin(request.user),
     })
+
+
+@login_required
+def project_create(request):
+    if not is_admin(request.user):
+        raise PermissionDenied
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        source_type = request.POST.get("source_type", "corpus")
+        if not name:
+            messages.error(request, _("Enter a project name."))
+        elif Collection.objects.filter(name=name).exists():
+            messages.error(request, _("A project with this name already exists."))
+        elif source_type not in {choice[0] for choice in Collection._meta.get_field("source_type").choices}:
+            messages.error(request, _("Choose a valid project type."))
+        else:
+            project = Collection.objects.create(
+                name=name,
+                description=request.POST.get("description", "").strip(),
+                source_type=source_type,
+                created_by=request.user,
+            )
+            from .models import ProjectMembership
+            ProjectMembership.objects.create(project=project, user=request.user, role="owner")
+            log_audit(request, "project_created", "Collection", project.id)
+            return redirect("collection_detail", collection_id=project.id)
+    return render(request, "workbench/project_form.html", {"project": None})
+
+
+@login_required
+@require_POST
+def project_archive(request, collection_id):
+    if not is_admin(request.user):
+        raise PermissionDenied
+    project = get_object_or_404(Collection, pk=collection_id)
+    project.is_archived = not project.is_archived
+    project.save(update_fields=["is_archived"])
+    log_audit(request, "project_archived" if project.is_archived else "project_restored", "Collection", project.id,
+              after={"is_archived": project.is_archived})
+    messages.success(request, _("Project status updated."))
+    return redirect("collection_list")
+
+
+@login_required
+@require_POST
+def source_archive(request, source_id):
+    from .models import ProcessingJob
+    from .policy import ProjectAccessPolicy
+    source = get_object_or_404(SourceDocument.objects.select_related("collection"), pk=source_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_edit(source.collection):
+        raise PermissionDenied
+    if source.processing_jobs.filter(state__in=["queued", "submitting", "processing", "importing"]).exists():
+        messages.error(request, _("Stop the active processing attempt before archiving this upload."))
+        return redirect("collection_detail", collection_id=source.collection_id)
+    source.is_archived = not source.is_archived
+    source.save(update_fields=["is_archived"])
+    log_audit(request, "source_archived" if source.is_archived else "source_restored", "SourceDocument", source.id,
+              after={"is_archived": source.is_archived})
+    messages.success(request, _("Upload status updated."))
+    return redirect("collection_detail", collection_id=source.collection_id)
 
 
 @login_required
@@ -190,8 +253,9 @@ def collection_detail(request, collection_id):
         messages.error(request, _("You do not have access to this project."))
         return redirect("collection_list")
 
+    show_archived = request.GET.get("archived") == "1" and policy.can_edit(collection)
     source_documents = list(
-        collection.source_documents.filter(is_archived=False).select_related("active_document")
+        collection.source_documents.filter(is_archived=show_archived).select_related("active_document")
     )
     for source in source_documents:
         source.latest_job = source.processing_jobs.first()
@@ -204,6 +268,7 @@ def collection_detail(request, collection_id):
         "can_edit_project": policy.can_edit(collection),
         "total_tables": tables.count(),
         "total_reviews": reviews.count(),
+        "show_archived": show_archived,
     })
 
 
@@ -266,7 +331,8 @@ def chat_view(request):
     projects = list(policy.visible_projects())
     sources = list(SourceDocument.objects.filter(collection__in=projects, is_archived=False).select_related("collection", "active_document")[:100])
     visible_project_ids = {p.id for p in projects}
-    thread_queryset = ChatThread.objects.all()
+    show_archived = request.GET.get("archived") == "1"
+    thread_queryset = ChatThread.objects.filter(is_archived=show_archived)
     thread_queryset = [thread for thread in thread_queryset.select_related("project")
                        if thread.project_id in visible_project_ids or
                        visible_project_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
@@ -304,7 +370,7 @@ def chat_view(request):
         "sources": sources, "projects": projects, "selected_ids": set(selected_ids),
         "selected_mode": selected_mode, "selected_project_id": selected_project_id, "error": error,
         "thread": None, "chat_messages": [], "latest_run": None,
-        "threads": threads, "is_admin": is_admin(request.user),
+        "threads": threads, "is_admin": is_admin(request.user), "show_archived": show_archived,
     })
 
 
@@ -313,7 +379,7 @@ def chat_thread_view(request, thread_id):
     from .policy import ProjectAccessPolicy
     from .models import ChatRun, ChatThread, SourceDocument
     from .chat import render_message_with_citations
-    thread_queryset = ChatThread.objects.prefetch_related("selected_sources", "messages")
+    thread_queryset = ChatThread.objects.filter(is_archived=False).prefetch_related("selected_sources", "messages")
     if not is_admin(request.user):
         thread_queryset = thread_queryset.filter(created_by=request.user)
     thread = get_object_or_404(thread_queryset, pk=thread_id)
@@ -331,7 +397,7 @@ def chat_thread_view(request, thread_id):
     sources = list(thread.selected_sources.select_related("collection"))
     visible_projects = policy.visible_projects()
     visible_project_ids = set(visible_projects.values_list("id", flat=True))
-    thread_queryset = [thread for thread in ChatThread.objects.all().select_related("project")
+    thread_queryset = [thread for thread in ChatThread.objects.filter(is_archived=False).select_related("project")
                        if thread.project_id in visible_project_ids or
                        visible_project_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
     if not is_admin(request.user):
@@ -357,6 +423,40 @@ def chat_thread_view(request, thread_id):
         "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
         "threads": threads, "is_admin": is_admin(request.user),
     })
+
+
+@login_required
+@require_POST
+def chat_thread_rename(request, thread_id):
+    from .models import ChatThread
+    from .policy import ProjectAccessPolicy
+    queryset = ChatThread.objects.all() if is_admin(request.user) else ChatThread.objects.filter(created_by=request.user)
+    thread = get_object_or_404(queryset, pk=thread_id)
+    if thread.project_id and not ProjectAccessPolicy(user=request.user).can_view(thread.project):
+        raise PermissionDenied
+    title = request.POST.get("title", "").strip()
+    if not title:
+        messages.error(request, _("Enter a conversation name."))
+    else:
+        thread.title = title[:200]
+        thread.save(update_fields=["title", "updated_at"])
+        messages.success(request, _("Conversation renamed."))
+    return redirect("chat_thread", thread_id=thread.id)
+
+
+@login_required
+@require_POST
+def chat_thread_archive(request, thread_id):
+    from .models import ChatThread
+    from .policy import ProjectAccessPolicy
+    queryset = ChatThread.objects.all() if is_admin(request.user) else ChatThread.objects.filter(created_by=request.user)
+    thread = get_object_or_404(queryset, pk=thread_id)
+    if thread.project_id and not ProjectAccessPolicy(user=request.user).can_view(thread.project):
+        raise PermissionDenied
+    thread.is_archived = not thread.is_archived
+    thread.save(update_fields=["is_archived", "updated_at"])
+    messages.success(request, _("Conversation status updated."))
+    return redirect("chat")
 
 
 @login_required
@@ -1414,6 +1514,15 @@ def job_recovery_action(request, job_id):
         job.status_message = _("Marked failed. Upload the document again to retry.")
         job.save(update_fields=["error_message", "status_message"])
         messages.warning(request, _("The uncertain job was marked failed."))
+    elif action == "retry_new" and job.state in {"submission_uncertain", "interrupted", "partial", "failed", "cancelled"}:
+        from .services import DocumentIngestionService, IngestionError
+        try:
+            retry = DocumentIngestionService(user=request.user).retry_existing(job=job)
+        except IngestionError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, _("A new processing attempt was queued."))
+            return redirect("job_status", job_id=retry.id)
     elif job.state == "interrupted" and job.external_job_id:
         target = "importing" if action == "retry_import" else "processing"
         job.transition_to(target)

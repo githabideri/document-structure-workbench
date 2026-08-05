@@ -252,11 +252,36 @@ def api_me(request):
 # Projects (Collection)
 # ---------------------------------------------------------------------------
 
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "POST"])
 @require_scope("projects:read")
 def api_projects(request):
     """List projects the token owner can access."""
     token = request._api_token  # noqa: SLF001
+    if request.method == "POST":
+        if "projects:write" not in set(token.scopes or []):
+            return JsonResponse({"error": {"code": "insufficient_scope", "message": "projects:write is required."}}, status=403)
+        user = token.user if token.user_id else None
+        if not user or not (user.is_superuser or user.groups.filter(name="Administrator").exists()):
+            return JsonResponse({"error": {"code": "admin_required", "message": "Only administrators can create projects."}}, status=403)
+        try:
+            data = json.loads(request.body or "{}")
+            name = str(data.get("name", "")).strip()
+            if not name:
+                raise ValueError("name is required")
+            if Collection.objects.filter(name=name).exists():
+                raise ValueError("A project with this name already exists.")
+            source_type = data.get("source_type", "corpus")
+            if source_type not in {choice[0] for choice in Collection._meta.get_field("source_type").choices}:
+                raise ValueError("Invalid source_type")
+            project = Collection.objects.create(
+                name=name, description=str(data.get("description", "")).strip(),
+                source_type=source_type, created_by=user,
+            )
+            ProjectMembership.objects.create(project=project, user=user, role="owner")
+            AuditEvent.objects.create(actor=user, event_type="project_created", object_type="Collection", object_id=str(project.id), request_id=request._request_id)
+            return JsonResponse({"request_id": request._request_id, "project": {"id": project.id, "name": project.name}}, status=201)
+        except (ValueError, json.JSONDecodeError) as exc:
+            return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
     policy = ProjectAccessPolicy(token=token)
     projects_qs = policy.visible_projects()
 
@@ -274,12 +299,28 @@ def api_projects(request):
     return JsonResponse({"projects": projects, "count": len(projects)})
 
 
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "PATCH"])
 @require_scope("projects:read")
 def api_project_detail(request, project_id):
     """Get project detail with membership info."""
     token = request._api_token  # noqa: SLF001
     project = get_object_or_404(Collection, pk=project_id)
+    if request.method == "PATCH":
+        if "projects:write" not in set(token.scopes or []):
+            return JsonResponse({"error": {"code": "insufficient_scope", "message": "projects:write is required."}}, status=403)
+        user = token.user if token.user_id else None
+        if not user or not (user.is_superuser or user.groups.filter(name="Administrator").exists()):
+            return JsonResponse({"error": {"code": "admin_required", "message": "Only administrators can archive projects."}}, status=403)
+        try:
+            data = json.loads(request.body or "{}")
+            if "is_archived" not in data:
+                raise ValueError("is_archived is required")
+            project.is_archived = bool(data["is_archived"])
+            project.save(update_fields=["is_archived"])
+            AuditEvent.objects.create(actor=user, event_type="project_archived" if project.is_archived else "project_restored", object_type="Collection", object_id=str(project.id), request_id=request._request_id)
+            return JsonResponse({"request_id": request._request_id, "id": project.id, "is_archived": project.is_archived})
+        except (ValueError, json.JSONDecodeError) as exc:
+            return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
     policy = ProjectAccessPolicy(token=token)
     if not policy.can_view(project):
         return JsonResponse({"error": "Access denied"}, status=403)
@@ -441,6 +482,42 @@ def api_job_detail(request, job_id):
     return JsonResponse(result)
 
 
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_scope("documents:manage")
+def api_job_recovery(request, job_id):
+    """Close, retry, or archive a failed processing attempt."""
+    job = get_object_or_404(ProcessingJob.objects.select_related("source_document", "source_document__collection"), pk=job_id)
+    token = request._api_token
+    policy = ProjectAccessPolicy(token=token)
+    if not policy.can_edit(job.source_document.collection):
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": "Access denied."}}, status=403)
+    try:
+        action = json.loads(request.body or "{}").get("action", "")
+        if action == "mark_failed" and job.state == "submission_uncertain":
+            job.transition_to("failed")
+            job.error_message = "The uncertain processor submission was closed by an operator."
+            job.status_message = "Marked failed."
+            job.save(update_fields=["error_message", "status_message"])
+        elif action == "retry_new" and job.state in {"submission_uncertain", "interrupted", "partial", "failed", "cancelled"}:
+            from .services import DocumentIngestionService, IngestionError
+            try:
+                retry = DocumentIngestionService(user=token.user if token.user_id else None, policy=policy).retry_existing(job=job)
+            except IngestionError as exc:
+                raise ValueError(str(exc)) from exc
+            return JsonResponse({"request_id": request._request_id, "job_id": retry.id, "state": retry.state}, status=201)
+        elif action == "archive_upload":
+            if job.source_document.processing_jobs.filter(state__in=["queued", "submitting", "processing", "importing"]).exists():
+                raise ValueError("An active processing attempt must finish before archiving.")
+            job.source_document.is_archived = True
+            job.source_document.save(update_fields=["is_archived"])
+        else:
+            raise ValueError("Unsupported recovery action for this job.")
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
+    return JsonResponse({"request_id": request._request_id, "job_id": job.id, "state": job.state, "archived": job.source_document.is_archived})
+
+
 # ---------------------------------------------------------------------------
 # Processing Presets
 # ---------------------------------------------------------------------------
@@ -569,6 +646,7 @@ def api_task_detail(request, task_id):
 
 def _chat_thread_json(thread):
     return {"id": thread.id, "project_id": thread.project_id, "title": thread.title,
+            "is_archived": thread.is_archived,
             "scope": {"mode": thread.scope_mode, "project_id": thread.project_id,
                        "source_ids": list(thread.selected_sources.values_list("id", flat=True)),
                        "revision_ids": thread.selected_revisions or [],
@@ -600,7 +678,7 @@ def api_chat_threads(request):
         identity = request._api_token.user if request._api_token.user_id else None
         policy = ProjectAccessPolicy(user=identity, token=request._api_token)
         visible_ids = set(policy.visible_projects().values_list("id", flat=True))
-        threads = [thread for thread in ChatThread.objects.all().select_related("project")
+        threads = [thread for thread in ChatThread.objects.filter(is_archived=False).select_related("project")
                    if thread.project_id in visible_ids or visible_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
         return JsonResponse({"request_id": request._request_id, "threads": [_chat_thread_json(thread) for thread in threads[:100]]})
     from .chat import create_chat_run
@@ -641,12 +719,12 @@ def api_chat_threads_list(request):
     identity = request._api_token.user if request._api_token.user_id else None
     policy = ProjectAccessPolicy(user=identity, token=request._api_token)
     visible_ids = set(policy.visible_projects().values_list("id", flat=True))
-    threads = [thread for thread in ChatThread.objects.all().select_related("project")
+    threads = [thread for thread in ChatThread.objects.filter(is_archived=False).select_related("project")
                if thread.project_id in visible_ids or visible_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
     return JsonResponse({"request_id": request._request_id, "threads": [_chat_thread_json(thread) for thread in threads[:100]]})
 
 
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "PATCH"])
 @require_scope("chat:read")
 def api_chat_thread_detail(request, thread_id):
     thread = get_object_or_404(ChatThread.objects.select_related("project"), pk=thread_id)
@@ -655,6 +733,22 @@ def api_chat_thread_detail(request, thread_id):
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
     if not thread.project_id and not set((thread.scope_config or {}).get("project_ids", [])) & set(policy.visible_projects().values_list("id", flat=True)):
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Thread not found."}}, status=404)
+    if request.method == "PATCH":
+        if "chat:manage" not in set(request._api_token.scopes or []):
+            return JsonResponse({"request_id": request._request_id, "error": {"code": "insufficient_scope", "message": "chat:manage is required."}}, status=403)
+        try:
+            data = json.loads(request.body or "{}")
+            if "title" in data:
+                title = str(data["title"]).strip()
+                if not title:
+                    raise ValueError("title cannot be empty")
+                thread.title = title[:200]
+            if "is_archived" in data:
+                thread.is_archived = bool(data["is_archived"])
+            thread.save(update_fields=["title", "is_archived", "updated_at"])
+            return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread)})
+        except (ValueError, json.JSONDecodeError) as exc:
+            return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_request", "message": str(exc)}}, status=400)
     runs = thread.runs.select_related("assistant_message").order_by("created_at")
     messages = [{"id": message.id, "role": message.role, "text": message.text, "ordinal": message.ordinal, "created_at": message.created_at.isoformat()} for message in thread.messages.all()]
     return JsonResponse({"request_id": request._request_id, "thread": _chat_thread_json(thread), "messages": messages, "runs": [_chat_run_json(run) for run in runs]})

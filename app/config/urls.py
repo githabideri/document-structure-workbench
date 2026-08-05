@@ -18,12 +18,16 @@ urlpatterns = [
     # Collections (legacy, kept for DP-Bench review)
     path("collections/", views.collection_list, name="collection_list"),
     path("collections/<int:collection_id>/", views.collection_detail, name="collection_detail"),
+    path("collections/new/", views.project_create, name="project_create"),
+    path("collections/<int:collection_id>/archive/", views.project_archive, name="project_archive"),
 
     # Documents
     path("documents/", views.document_list, name="document_list"),
     path("search/", views.search_view, name="search"),
     path("chat/", views.chat_view, name="chat"),
     path("chat/<int:thread_id>/", views.chat_thread_view, name="chat_thread"),
+    path("chat/<int:thread_id>/rename/", views.chat_thread_rename, name="chat_thread_rename"),
+    path("chat/<int:thread_id>/archive/", views.chat_thread_archive, name="chat_thread_archive"),
     path("chat/runs/<int:run_id>/status/", views.chat_run_status, name="chat_run_status"),
     path("chat/runs/<int:run_id>/diagnostics/", views.chat_run_diagnostics, name="chat_run_diagnostics"),
     path("documents/new/", views.document_new, name="document_new"),
@@ -39,6 +43,7 @@ urlpatterns = [
     path("projects/<int:project_id>/process/", views.project_process, name="project_process"),
     path("jobs/<int:job_id>/", views.job_status, name="job_status"),
     path("jobs/<int:job_id>/recovery/", views.job_recovery_action, name="job_recovery_action"),
+    path("uploads/<int:source_id>/archive/", views.source_archive, name="source_archive"),
 
     # Secure artifact serving
     path("pages/<int:page_id>/image/", views.page_image, name="page_image"),
@@ -82,6 +87,7 @@ urlpatterns = [
     path("api/v1/projects/<int:project_id>/upload/", api.api_upload_document, name="api_upload_document"),
     path("api/v1/presets/", api.api_presets, name="api_presets"),
     path("api/v1/jobs/<int:job_id>/", api.api_job_detail, name="api_job_detail"),
+    path("api/v1/jobs/<int:job_id>/recovery/", api.api_job_recovery, name="api_job_recovery"),
     path("api/v1/tasks/", api.api_tasks, name="api_tasks"),
     path("api/v1/tasks/<int:task_id>/", api.api_task_detail, name="api_task_detail"),
     path("api/v1/tasks/<int:task_id>/submit/", api.api_task_submit, name="api_task_submit"),

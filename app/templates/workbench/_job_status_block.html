@@ -42,13 +42,20 @@
     {% endif %}
 
     <div class="job-stats">
-        {% if job.started_at %}<div>{% trans "Elapsed:" %} {{ job.started_at|timesince }}</div>{% endif %}
+    {% if job.started_at %}<div>{% trans "Elapsed:" %} {{ job.started_at|timesince }}</div>{% endif %}
         {% if job.worker_heartbeat_at %}<div>{% trans "Worker heartbeat:" %} {{ job.worker_heartbeat_at|timesince }} {% trans "ago" %}</div>{% endif %}
         {% if job.remote_response_at %}<div>{% trans "Last processor response:" %} {{ job.remote_response_at|timesince }} {% trans "ago" %}</div>{% endif %}
         {% if job.pages_processed %}<div><strong>{{ job.pages_processed }}</strong> {% trans "pages saved" %}</div>{% endif %}
         {% if job.tables_found %}<div><strong>{{ job.tables_found }}</strong> {% trans "tables found" %}</div>{% endif %}
         {% if job.finished_at %}<div>{% trans "Finished:" %} {{ job.finished_at }}</div>{% endif %}
     </div>
+    {% if job.error_message or job.remote_status or job.external_job_id %}
+    <details class="job-details"><summary>{% trans "Technical details" %}</summary>
+      {% if job.error_message %}<p><strong>{% trans "Error:" %}</strong> {{ job.error_message }}</p>{% endif %}
+      {% if job.remote_status %}<p><strong>{% trans "Processor status:" %}</strong> {{ job.remote_status }}</p>{% endif %}
+      {% if job.external_job_id %}<p><strong>{% trans "Processor task:" %}</strong> {{ job.external_job_id }}</p>{% endif %}
+    </details>
+    {% endif %}
 
     {% if job.state == "completed" and job.result_document_id %}
     <div class="job-actions">
@@ -69,7 +76,12 @@
     </div>
     {% elif job.state == "submission_uncertain" %}
     <div class="job-actions">
-        <form method="post" action="{% url 'job_recovery_action' job.id %}">{% csrf_token %}<input type="hidden" name="action" value="mark_failed"><button class="btn btn-secondary" type="submit">{% trans "Mark failed" %}</button></form>
+        <form method="post" action="{% url 'job_recovery_action' job.id %}">{% csrf_token %}<input type="hidden" name="action" value="mark_failed"><button class="btn btn-secondary" type="submit">{% trans "Close as failed" %}</button></form>
+        <form method="post" action="{% url 'job_recovery_action' job.id %}">{% csrf_token %}<input type="hidden" name="action" value="retry_new"><button class="btn btn-primary" type="submit" onclick="return confirm('{% trans "The remote processor may already have received this file. Queue a new attempt anyway?" %}')">{% trans "Retry as new attempt" %}</button></form>
+    </div>
+    {% elif job.state == "partial" or job.state == "failed" or job.state == "cancelled" %}
+    <div class="job-actions">
+        <form method="post" action="{% url 'job_recovery_action' job.id %}">{% csrf_token %}<input type="hidden" name="action" value="retry_new"><button class="btn btn-primary" type="submit">{% trans "Retry processing" %}</button></form>
     </div>
     {% endif %}
 </div>

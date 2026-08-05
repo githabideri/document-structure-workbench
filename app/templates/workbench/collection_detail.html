@@ -24,7 +24,7 @@
         </div>
     </div>
 
-    <h2>{% trans "Documents" %}</h2>
+    <div class="section-heading"><h2>{% if show_archived %}{% trans "Archived uploads" %}{% else %}{% trans "Documents" %}{% endif %}</h2>{% if can_edit_project %}<a href="?{% if not show_archived %}archived=1{% endif %}">{% if show_archived %}{% trans "Show active uploads" %}{% else %}{% trans "Show archived uploads" %}{% endif %}</a>{% endif %}</div>
     <table class="data-table">
         <thead>
             <tr>
@@ -43,6 +43,7 @@
                 <td>
                     {% if doc.active_document %}<a href="{% url 'document_detail' doc.active_document.id %}" class="btn btn-sm">{% trans "Open" %}</a>
                     {% elif doc.latest_job %}<a href="{% url 'job_status' doc.latest_job.id %}" class="btn btn-sm">{% trans "View status" %}</a>{% endif %}
+                    {% if can_edit_project %}<form method="post" action="{% url 'source_archive' doc.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-secondary" type="submit">{% if doc.is_archived %}{% trans "Restore upload" %}{% else %}{% trans "Archive upload" %}{% endif %}</button></form>{% endif %}
                 </td>
             </tr>
             {% empty %}

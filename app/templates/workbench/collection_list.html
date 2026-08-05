@@ -6,6 +6,7 @@
 <div class="collection-list">
     <div class="page-header">
         <div><h1>{% trans "Projects" %}</h1><p class="page-intro">{% trans "Projects keep related source documents and their processing history together." %}</p></div>
+        {% if is_admin %}<a href="{% url 'project_create' %}" class="btn btn-primary">{% trans "New project" %}</a>{% endif %}
         {% if can_add_document %}<a href="{% url 'document_new' %}" class="btn btn-primary">{% trans "Add document" %}</a>{% endif %}
     </div>
     <table class="data-table">
@@ -20,12 +21,13 @@
         <tbody>
             {% for collection in collections %}
             <tr>
-                <td>{{ collection.name }}</td>
+                <td>{{ collection.name }}{% if collection.is_archived %} <span class="status-badge">{% trans "Archived" %}</span>{% endif %}</td>
                 <td>{{ collection.get_source_type_display }}</td>
                 <td>{{ collection.created_at|date:"Y-m-d" }}</td>
                 <td>
                     <a href="{% url 'collection_detail' collection.id %}" class="btn btn-sm">{% trans "View" %}</a>
-                    {% if collection.user_can_edit %}<a href="{% url 'document_new' %}?project={{ collection.id }}" class="btn btn-sm btn-secondary">{% trans "Add document" %}</a>{% endif %}
+                    {% if collection.user_can_edit and not collection.is_archived %}<a href="{% url 'document_new' %}?project={{ collection.id }}" class="btn btn-sm btn-secondary">{% trans "Add document" %}</a>{% endif %}
+                    {% if is_admin %}<form method="post" action="{% url 'project_archive' collection.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-sm btn-secondary" type="submit">{% if collection.is_archived %}{% trans "Restore" %}{% else %}{% trans "Archive" %}{% endif %}</button></form>{% endif %}
                 </td>
             </tr>
             {% empty %}

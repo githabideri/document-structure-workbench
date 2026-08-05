@@ -128,6 +128,7 @@ ARTIFACTS_BASE_DIR = Path(os.environ.get("DSW_ARTIFACTS_DIR", os.environ.get("DS
 # --- Docling Serve integration ---
 DSW_DOCLING_API_URL = os.environ.get("DSW_DOCLING_API_URL", "")
 DSW_DOCLING_API_KEY = os.environ.get("DSW_DOCLING_API_KEY", "")
+DSW_DOCLING_HEALTH_PATH = os.environ.get("DSW_DOCLING_HEALTH_PATH", "/health")
 DSW_DOCLING_REQUEST_TIMEOUT = int(os.environ.get("DSW_DOCLING_REQUEST_TIMEOUT", "60"))
 DSW_DOCLING_JOB_TIMEOUT = int(os.environ.get("DSW_DOCLING_JOB_TIMEOUT", "3600"))
 DSW_PROCESSING_STALE_AFTER_SECONDS = int(

@@ -381,9 +381,11 @@ class ApiToken(models.Model):
     # Canonical scope choices (add as needed)
     SCOPE_CHOICES = [
         ("projects:read", "Read projects"),
+        ("projects:write", "Create and archive projects"),
         ("documents:read", "Read documents"),
         ("documents:upload", "Upload documents"),
         ("jobs:submit", "Submit processing jobs"),
+        ("documents:manage", "Archive and retry documents"),
         ("jobs:read", "Read job status and results"),
         ("tasks:read", "Read review tasks"),
         ("reviews:write", "Submit reviews"),
@@ -391,6 +393,7 @@ class ApiToken(models.Model):
         ("chat:read", "Read chat"),
         ("chat:write", "Write chat"),
         ("chat:retry", "Retry chat runs"),
+        ("chat:manage", "Rename and archive chat"),
         ("diagnostics:read", "Read diagnostics"),
         ("support:read", "Read support bundles"),
         ("support:export", "Export support bundles"),
@@ -665,7 +668,9 @@ class ProcessingJob(models.Model):
         "submitting": ["processing", "submission_uncertain", "interrupted", "failed", "cancelled"],
         "processing": ["importing", "interrupted", "failed", "cancelled"],
         "importing": ["completed", "partial", "interrupted", "failed"],
-        "submission_uncertain": [],
+        # Closing an uncertain submission is an operator decision; it does
+        # not claim that the remote processor never received the file.
+        "submission_uncertain": ["failed", "cancelled"],
         "interrupted": ["processing", "importing", "failed", "cancelled"],
         "completed": [],
         "partial": [],
@@ -916,6 +921,7 @@ class ChatThread(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     selected_sources = models.ManyToManyField(SourceDocument, related_name="chat_threads", blank=True)
+    is_archived = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-updated_at", "-id"]

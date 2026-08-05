@@ -85,10 +85,35 @@ class DiagnosticsService:
         worker_age = (timezone.now() - worker_seen).total_seconds() if worker_seen else None
         worker_ok = worker_age is not None and worker_age <= getattr(settings, "DSW_PROCESSING_STALE_AFTER_SECONDS", 90)
         provider = DiagnosticsService.provider_status()
+        processor = DiagnosticsService.processor_status()
         return {"status": "ok" if database == "ok" else "error", "release": release, "database": database,
                 "worker": {"status": "ok" if worker_ok else "stale", "last_seen": worker_seen.isoformat() if worker_seen else None,
                             "queue_depth": ChatRun.objects.filter(state="queued").count() if database == "ok" else None},
-                "chat_provider": provider}
+                "chat_provider": provider, "document_processor": processor}
+
+    @staticmethod
+    def processor_status():
+        """Probe the configured Docling health endpoint without exposing secrets."""
+        base_url = getattr(settings, "DSW_DOCLING_API_URL", "").strip()
+        configured = bool(base_url)
+        result = {"configured": configured, "reachable": None, "health_path": getattr(settings, "DSW_DOCLING_HEALTH_PATH", "/health")}
+        if not configured:
+            return result
+        path = result["health_path"]
+        if not str(path).startswith("/"):
+            path = "/" + str(path)
+        try:
+            response = requests.get(
+                f"{base_url.rstrip('/')}{path}",
+                headers=({"Authorization": f"Bearer {settings.DSW_DOCLING_API_KEY}"}
+                         if getattr(settings, "DSW_DOCLING_API_KEY", "") else {}),
+                timeout=min(getattr(settings, "DSW_DOCLING_REQUEST_TIMEOUT", 60), 5),
+            )
+            result["reachable"] = response.ok
+            result["http_status"] = response.status_code
+        except (requests.RequestException, ValueError):
+            result["reachable"] = False
+        return result
 
     @staticmethod
     def provider_status():
@@ -404,6 +429,27 @@ class DocumentIngestionService:
             if final_path:
                 self._cleanup_final(final_path)
             raise
+
+    def retry_existing(self, *, job: ProcessingJob) -> ProcessingJob:
+        """Queue a new processing attempt while retaining the old job."""
+        project = job.source_document.collection
+        if not project or not self.policy.can_edit(project):
+            raise IngestionError("You do not have edit access to this project.")
+        if job.source_document.is_archived:
+            raise IngestionError("Archived uploads cannot be retried.")
+        if job.source_document.processing_jobs.filter(
+            state__in=["queued", "submitting", "processing", "importing"]
+        ).exists():
+            raise IngestionError("This upload already has an active processing attempt.")
+        with transaction.atomic():
+            retry = ProcessingJob.objects.create(
+                source_document=job.source_document,
+                preset=job.preset,
+                preset_snapshot=job.preset_snapshot or {},
+                state="queued",
+                created_by=self.user,
+            )
+        return retry
 
     # ------------------------------------------------------------------
     # Validation

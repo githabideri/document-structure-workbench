@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "New project" %}{% endblock %}
+{% block content %}
+<div class="form-page">
+  <div class="page-header"><div><p class="eyebrow">{% trans "Administration" %}</p><h1>{% trans "New project" %}</h1></div></div>
+  <form method="post" class="stacked-form">
+    {% csrf_token %}
+    <label for="name">{% trans "Name" %}</label>
+    <input id="name" name="name" required maxlength="200" autofocus>
+    <label for="description">{% trans "Description" %}</label>
+    <textarea id="description" name="description" rows="4"></textarea>
+    <label for="source_type">{% trans "Project type" %}</label>
+    <select id="source_type" name="source_type">
+      <option value="corpus">{% trans "Real corpus" %}</option>
+      <option value="integration">{% trans "Integration validation" %}</option>
+      <option value="benchmark">{% trans "Benchmark dataset" %}</option>
+    </select>
+    <div class="job-actions"><button class="btn btn-primary" type="submit">{% trans "Create project" %}</button><a class="btn btn-secondary" href="{% url 'collection_list' %}">{% trans "Cancel" %}</a></div>
+  </form>
+</div>
+{% endblock %}

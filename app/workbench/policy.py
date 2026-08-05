@@ -67,19 +67,19 @@ class ProjectAccessPolicy:
         from .models import Collection, ProjectMembership
 
         if self._check_global_admin():
-            return Collection.objects.all()
+            return Collection.objects.filter(is_archived=False)
 
         if self.user:
             return Collection.objects.filter(
-                memberships__user=self.user
+                memberships__user=self.user, is_archived=False
             ).distinct()
         elif self.token:
             if self.token.user_id:
                 return Collection.objects.filter(
-                    memberships__user_id=self.token.user_id,
+                    memberships__user_id=self.token.user_id, is_archived=False
                 ).distinct()
             if self.token.project_id:
-                return Collection.objects.filter(pk=self.token.project_id)
+                return Collection.objects.filter(pk=self.token.project_id, is_archived=False)
             # Unscoped service account: no projects by default
             return Collection.objects.none()
 
@@ -91,6 +91,8 @@ class ProjectAccessPolicy:
 
     def can_view(self, project):
         """Can the identity view this project at all?"""
+        if getattr(project, "is_archived", False):
+            return False
         if self._check_global_admin():
             return True
 
@@ -153,6 +155,8 @@ class ProjectAccessPolicy:
 
     def can_edit(self, project):
         """Can the identity edit this project (upload, modify)?"""
+        if getattr(project, "is_archived", False):
+            return False
         if self._check_global_admin():
             return True
 

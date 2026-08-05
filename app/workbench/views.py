@@ -384,7 +384,7 @@ def chat_thread_view(request, thread_id):
     from .policy import ProjectAccessPolicy
     from .models import ChatRun, ChatThread, SourceDocument
     from .chat import render_message_with_citations
-    thread_queryset = ChatThread.objects.filter(is_archived=False).prefetch_related("selected_sources", "messages")
+    thread_queryset = ChatThread.objects.prefetch_related("selected_sources", "messages")
     if not is_admin(request.user):
         thread_queryset = thread_queryset.filter(created_by=request.user)
     thread = get_object_or_404(thread_queryset, pk=thread_id)
@@ -420,12 +420,14 @@ def chat_thread_view(request, thread_id):
             message, assistant_runs.get(message.id)
         )
     latest_run = thread.runs.prefetch_related("evidence_items").order_by("-created_at").first()
-    evidence_items = list(latest_run.evidence_items.select_related("source_document", "page") if latest_run else [])
+    selected_run = thread.runs.filter(pk=request.GET.get("run", "0")).prefetch_related("evidence_items").first() if request.GET.get("run") else latest_run
+    evidence_items = list(selected_run.evidence_items.select_related("source_document", "page") if selected_run else [])
     return render(request, "workbench/chat.html", {
         "sources": sources, "selected_ids": {str(source.id) for source in sources},
-        "thread": thread, "chat_messages": messages, "latest_run": latest_run,
+        "thread": thread, "chat_messages": messages, "latest_run": latest_run, "selected_run": selected_run,
         "evidence_items": evidence_items,
-        "error": latest_run.error_message if latest_run and latest_run.state == "failed" else None,
+        "selected_evidence_marker": request.GET.get("evidence", ""),
+        "error": selected_run.error_message if selected_run and selected_run.state == "failed" else None,
         "threads": threads, "is_admin": is_admin(request.user),
     })
 
@@ -474,6 +476,35 @@ def chat_run_status(request, run_id):
 
 
 @login_required
+def chat_evidence_detail(request, run_id, marker):
+    """Session-authenticated evidence representation for the contextual reader."""
+    from .models import ChatRun
+    from .policy import ProjectAccessPolicy
+    run = get_object_or_404(ChatRun.objects.select_related("thread", "thread__project"), pk=run_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if run.thread.project_id and not policy.can_view(run.thread.project):
+        raise PermissionDenied
+    if not run.thread.project_id and not set((run.scope_snapshot or {}).get("project_ids", [])) & set(policy.visible_projects().values_list("id", flat=True)):
+        raise PermissionDenied
+    item = get_object_or_404(run.evidence_items.select_related("source_document", "processed_revision", "page", "page_region"), marker=marker)
+    page = item.page
+    region = item.page_region
+    document_url = reverse("document_detail", args=[item.source_document_id]) + f"?revision={item.processed_revision_id}&page={page.page_number if page else 1}"
+    if region:
+        document_url += f"&region={region.id}"
+    return JsonResponse({
+        "run_id": run.id, "marker": item.marker, "filename": item.source_document.filename,
+        "project": item.source_document.collection.name, "revision_id": item.processed_revision_id,
+        "page_id": page.id if page else None, "page_number": page.page_number if page else None,
+        "region_id": region.id if region else None, "region_type": region.effective_region_type if region else None,
+        "image_url": reverse("page_image", args=[page.id]) if page and page.image_path else None,
+        "passage": item.text, "page_text": item.page_text or item.text,
+        "score": item.score, "selection_reason": item.selection_reason,
+        "document_url": document_url, "created_at": run.created_at.isoformat(),
+    })
+
+
+@login_required
 def chat_run_diagnostics(request, run_id):
     """Show sensitive run diagnostics only to Administrator maintainers."""
     if not is_admin(request.user):
@@ -486,6 +517,7 @@ def chat_run_diagnostics(request, run_id):
     )
     from .services import SupportBundleService
     bundle = SupportBundleService.build(run)
+    inspector = SupportBundleService.diagnostics(run)
     diagnostics = {
         "run": bundle["run"], "project": bundle["project"], "scope": bundle["scope"],
         "question": bundle["question"], "evidence": bundle["evidence"],
@@ -503,9 +535,19 @@ def chat_run_diagnostics(request, run_id):
         "evidence_count": retrieval_event.get("metadata", {}).get("count", len(bundle["evidence"])),
     }
     return render(request, "workbench/chat_run_diagnostics.html", {
-        "run": run, "diagnostics": diagnostics, "timeline": SupportBundleService.human_timeline(bundle),
+        "run": run, "diagnostics": diagnostics, "inspector": inspector, "timeline": SupportBundleService.human_timeline(bundle),
         "provider_summary": provider_summary, "diagnostics_json": json.dumps(diagnostics, indent=2, ensure_ascii=False),
     })
+
+
+@login_required
+def chat_run_diagnostics_data(request, run_id):
+    if not is_admin(request.user):
+        raise PermissionDenied
+    from .models import ChatRun
+    from .services import SupportBundleService
+    run = get_object_or_404(ChatRun.objects.select_related("thread", "user_message"), pk=run_id)
+    return JsonResponse(SupportBundleService.diagnostics(run))
 
 
 @login_required

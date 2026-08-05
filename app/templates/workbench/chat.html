@@ -4,127 +4,81 @@
 {% block title %}{% trans "Research conversations" %}{% endblock %}
 
 {% block content %}
-<div class="chat-workspace" data-ui-id="chat-workspace">
-  <header class="page-header chat-page-header">
+<div class="chat-workspace" data-ui-id="chat-workspace" data-thread-id="{% if thread %}{{ thread.id }}{% endif %}" data-selected-run="{% if selected_run %}{{ selected_run.id }}{% endif %}" data-selected-evidence="{{ selected_evidence_marker }}">
+  <header class="page-header chat-page-header" data-ui-id="thread-header">
     <div>
       <p class="eyebrow">{% trans "Evidence workspace" %}</p>
-      <h1>{% trans "Research conversations" %}</h1>
-        <p class="page-intro">{% trans "Ask research questions across an authorized project scope, with optional document attachments." %}</p>
+      <h1>{% if thread %}{{ thread.title|default:_('Untitled conversation') }}{% else %}{% trans "Research conversations" %}{% endif %}</h1>
+      <p class="page-intro">{% trans "Ask, inspect immutable evidence, and continue your research without leaving the conversation." %}</p>
     </div>
     <a class="btn btn-primary" href="{% url 'chat' %}">{% trans "New conversation" %}</a>
   </header>
 
-  <div class="chat-shell">
+  <div class="chat-shell"{% if thread %} data-chat-state="active"{% endif %}>
     <aside class="chat-sessions" aria-label="{% trans 'Conversations' %}" data-ui-id="conversation-navigation">
-      <div class="chat-sidebar-heading">
-        <h2>{% trans "Conversations" %}</h2>
-        <span>{{ threads|length }}</span>
-      </div>
+      <div class="chat-sidebar-heading"><h2>{% trans "Conversations" %}</h2><span>{{ threads|length }}</span></div>
       <p><a href="?{% if not show_archived %}archived=1{% endif %}">{% if show_archived %}{% trans "Show active conversations" %}{% else %}{% trans "Show archived conversations" %}{% endif %}</a></p>
-      <nav class="chat-session-list">
+      <nav class="chat-session-list" aria-label="{% trans 'Conversation list' %}">
         {% for item in threads %}
-        {% if item.is_archived %}<div class="chat-session">{% else %}<a class="chat-session{% if thread and item.id == thread.id %} is-selected{% endif %}" href="{% url 'chat_thread' item.id %}">{% endif %}
-          <strong>{{ item.title|default:_('Untitled conversation') }}</strong>
-          <small>{{ item.project.name }} · {{ item.updated_at|date:"SHORT_DATETIME_FORMAT" }}</small>
+        {% if item.is_archived %}<div class="chat-session">{% else %}<a class="chat-session{% if thread and item.id == thread.id %} is-selected{% endif %}" href="{% url 'chat_thread' item.id %}" data-ui-id="thread-{{ item.id }}">{% endif %}
+          <strong>{{ item.title|default:_('Untitled conversation') }}</strong><small>{{ item.project.name }} · {{ item.updated_at|date:"SHORT_DATETIME_FORMAT" }}</small>
           {% if item.is_archived %}<form method="post" action="{% url 'chat_thread_archive' item.id %}">{% csrf_token %}<button class="btn btn-sm" type="submit">{% trans "Restore" %}</button></form>{% endif %}
         {% if item.is_archived %}</div>{% else %}</a>{% endif %}
-        {% empty %}
-        <p class="empty-state">{% trans "No conversations yet." %}</p>
-        {% endfor %}
+        {% empty %}<p class="empty-state">{% trans "No conversations yet." %}</p>{% endfor %}
       </nav>
     </aside>
 
     <main class="chat-panel" aria-label="{% trans 'Conversation' %}" data-ui-id="message-timeline">
-      {% if error %}<div class="message message-error">{{ error }}</div>{% endif %}
+      {% if error %}<div class="message message-error" role="alert">{{ error }}</div>{% endif %}
       {% if thread %}
       <div class="chat-panel-header">
-        <div>
-          <h2>{{ thread.title|default:_('Untitled conversation') }}</h2>
-          <span>{{ thread.project.name }} · {% trans "Read-only research" %}</span>
-        </div>
+        <div><h2>{{ thread.title|default:_('Untitled conversation') }}</h2><span>{{ thread.project.name }} · {% trans "Scope frozen per run" %}</span></div>
         <span class="chat-status-label">{% trans "Evidence grounded" %}</span>
       </div>
       <div class="job-actions">
         <form method="post" action="{% url 'chat_thread_rename' thread.id %}">{% csrf_token %}<input name="title" value="{{ thread.title }}" maxlength="200" aria-label="{% trans 'Conversation name' %}"><button class="btn btn-secondary" type="submit">{% trans "Rename" %}</button></form>
         <form method="post" action="{% url 'chat_thread_archive' thread.id %}">{% csrf_token %}<button class="btn btn-secondary" type="submit">{% trans "Archive conversation" %}</button></form>
       </div>
-      <div class="chat-messages">
+      <div class="chat-messages" tabindex="0" aria-label="{% trans 'Message timeline' %}">
         {% for message in chat_messages %}
-        <article class="chat-message chat-message-{{ message.role }}">
+        <article class="chat-message chat-message-{{ message.role }}" data-ui-id="message-{{ message.id }}">
           <div class="message-role">{% if message.role == 'user' %}{% trans "You" %}{% else %}{% trans "DSW assistant" %}{% endif %}</div>
           <div class="message-body">{{ message.rendered_text|safe }}</div>
+          {% if message.role == 'assistant' %}{% with run=message.assistant_run %}<div class="message-actions"><button type="button" class="btn btn-sm run-inspector-open" data-run-id="{{ run.id }}" data-ui-id="run-action-{{ run.id }}">{% trans "Inspect run diagnostics" %}</button>{% if run.state == 'failed' %}<span class="run-failure-label">{{ run.error_message }}</span>{% endif %}</div>{% endwith %}{% endif %}
         </article>
-        {% empty %}
-        <div class="empty-state"><h2>{% trans "Start a research conversation" %}</h2><p>{% trans "Ask a question about the selected documents." %}</p></div>
-        {% endfor %}
+        {% empty %}<div class="empty-state"><h2>{% trans "Start a research conversation" %}</h2><p>{% trans "Ask a question about the selected documents." %}</p></div>{% endfor %}
         {% if latest_run and latest_run.state != 'completed' and latest_run.state != 'failed' %}
-        <div class="chat-run-status" hx-get="{% url 'chat_run_status' latest_run.id %}" hx-trigger="every 2s" hx-swap="outerHTML"><strong>{% trans "Working" %}</strong><span>{{ latest_run.status_message }}</span></div>
+        <div class="chat-run-status" role="status" aria-live="polite" hx-get="{% url 'chat_run_status' latest_run.id %}" hx-trigger="every 2s" hx-swap="outerHTML" data-ui-id="run-progress-{{ latest_run.id }}"><strong>{{ latest_run.get_state_display }}</strong><span>{{ latest_run.status_message }}</span></div>
         {% endif %}
       </div>
-      {% if thread %}
       <form method="post" class="chat-question-form" data-ui-id="composer">
-        {% csrf_token %}
-        <textarea name="question" rows="3" required placeholder="{% trans 'Ask a follow-up question' %}"></textarea>
+        {% csrf_token %}<label class="sr-only" for="question">{% trans "Question" %}</label>
+        <div class="composer-main"><textarea id="question" name="question" rows="2" required maxlength="10000" placeholder="{% trans 'Ask a follow-up question' %}"></textarea><small class="scope-summary" data-ui-id="scope-summary">{% trans "Scope for this turn: frozen conversation sources" %}</small></div>
         <button class="btn btn-primary" type="submit">{% trans "Ask" %}</button>
       </form>
-      {% endif %}
       {% else %}
-      <div class="chat-empty-start">
-        <h2>{% trans "Start a research conversation" %}</h2>
-        <p>{% trans "Choose a project or all accessible projects. Attachments are added to the search scope." %}</p>
-      </div>
-      <form method="post" class="chat-form chat-start-form">
-        {% csrf_token %}
-        <fieldset>
-          <legend>{% trans "Search scope" %}</legend>
-          <label for="scope_mode">{% trans "Scope" %}</label>
-          <select id="scope_mode" name="scope_mode">
-            <option value="all"{% if selected_mode == 'all' %} selected{% endif %}>{% trans "All accessible projects" %}</option>
-            <option value="project"{% if selected_mode == 'project' %} selected{% endif %}>{% trans "One project" %}</option>
-          </select>
-          <label for="project_id">{% trans "Project (for project scope)" %}</label>
-          <select id="project_id" name="project_id">
-            <option value="">{% trans "Choose a project" %}</option>
-            {% for project in projects %}<option value="{{ project.id }}"{% if selected_project_id|stringformat:'s' == project.id|stringformat:'s' %} selected{% endif %}>{{ project.name }}</option>{% endfor %}
-          </select>
-          <p class="chat-context-intro">{% trans "The selected scope is frozen for this question. Change it for the next turn." %}</p>
-          <h3>{% trans "Optional attachments" %}</h3>
-          {% for source in sources %}
-          <label class="checkbox-row" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}"><input type="checkbox" name="source" value="{{ source.id }}" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}" {% if source.id|stringformat:'s' in selected_ids %}checked{% endif %}> <span>{{ source.filename }}<small>{{ source.collection.name }}</small></span></label>
-          {% empty %}<p>{% trans "No accessible processed documents." %}</p>{% endfor %}
-        </fieldset>
-        <label for="question">{% trans "Question" %}</label>
-        <textarea id="question" name="question" rows="5" required placeholder="{% trans 'What should I research?' %}"></textarea>
+      <div class="chat-empty-start"><h2>{% trans "Start a research conversation" %}</h2><p>{% trans "Your question comes first. Source configuration is optional and becomes the scope for the first run." %}</p></div>
+      <form method="post" class="chat-form chat-start-form" data-ui-id="composer">
+        {% csrf_token %}<label for="question">{% trans "Question" %}</label><textarea id="question" name="question" rows="4" required placeholder="{% trans 'What should I research?' %}"></textarea>
+        <details class="source-config" open><summary>{% trans "Sources" %}</summary><fieldset><legend>{% trans "Search scope" %}</legend><label for="scope_mode">{% trans "Scope" %}</label><select id="scope_mode" name="scope_mode"><option value="all">{% trans "All accessible projects" %}</option><option value="project">{% trans "One project" %}</option></select><label for="project_id">{% trans "Project" %}</label><select id="project_id" name="project_id"><option value="">{% trans "Choose a project" %}</option>{% for project in projects %}<option value="{{ project.id }}">{{ project.name }}</option>{% endfor %}</select><p class="chat-context-intro">{% trans "The scope is frozen for this question and can be changed for the next turn." %}</p><h3>{% trans "Optional document attachments" %}</h3>{% for source in sources %}<label class="checkbox-row" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}"><input type="checkbox" name="source" value="{{ source.id }}" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}"><span>{{ source.filename }}<small>{{ source.collection.name }}</small></span></label>{% empty %}<p>{% trans "No accessible processed documents." %}</p>{% endfor %}</fieldset></details>
         <button class="btn btn-primary" type="submit">{% trans "Start conversation" %}</button>
       </form>
       {% endif %}
     </main>
 
-    <aside class="chat-context" aria-label="{% trans 'Evidence context' %}" data-ui-id="evidence-reader">
-      <section>
-        <div class="chat-sidebar-heading"><h2>{% trans "Documents" %}</h2><span>{{ sources|length }}</span></div>
-        <p class="chat-context-intro">{% trans "The frozen source scope for this conversation." %}</p>
-        <ul class="chat-document-list">
-          {% for source in sources %}<li><strong>{{ source.filename }}</strong><small>{{ source.collection.name }}{% if source.active_document_id %} · {% trans "active revision" %}{% endif %}</small></li>
-          {% empty %}<li class="empty-state">{% trans "No documents selected." %}</li>{% endfor %}
-        </ul>
+    <aside class="chat-context" aria-label="{% trans 'Evidence context and run context' %}" data-ui-id="evidence-reader"{% if selected_evidence_marker %} data-open="true"{% endif %}>
+      <div class="context-empty" data-ui-id="context-summary"{% if selected_evidence_marker %} hidden{% endif %}><div class="chat-sidebar-heading"><h2>{% trans "Research context" %}</h2><span>{{ sources|length }}</span></div><p class="chat-context-intro">{% trans "Select a citation to inspect its immutable source without leaving this conversation." %}</p><ul class="chat-document-list">{% for source in sources %}<li><strong>{{ source.filename }}</strong><small>{{ source.collection.name }}</small></li>{% empty %}<li class="empty-state">{% trans "No documents selected." %}</li>{% endfor %}</ul></div>
+      <section class="evidence-reader-panel" data-ui-id="evidence-reader-panel"{% if not selected_evidence_marker %} hidden{% endif %} aria-labelledby="evidence-heading">
+        <header class="evidence-reader-header"><div><p class="eyebrow">{% trans "Immutable evidence" %}</p><h2 id="evidence-heading" tabindex="-1" data-ui-id="evidence-heading">{% trans "Loading evidence" %}</h2><p class="evidence-meta" data-evidence-meta></p></div><button class="icon-button evidence-close" type="button" aria-label="{% trans 'Close evidence' %}">×</button></header>
+        <div class="evidence-navigation"><button type="button" class="btn btn-sm evidence-previous">{% trans "Previous" %}</button><span data-evidence-position></span><button type="button" class="btn btn-sm evidence-next">{% trans "Next" %}</button></div>
+        <div class="evidence-tabs" role="tablist" aria-label="{% trans 'Evidence views' %}"><button type="button" role="tab" aria-selected="true" data-evidence-tab="text">{% trans "Text" %}</button><button type="button" role="tab" aria-selected="false" data-evidence-tab="page">{% trans "Page" %}</button><button type="button" role="tab" aria-selected="false" data-evidence-tab="details">{% trans "Details" %}</button></div>
+        <div class="evidence-view" data-evidence-view="text"><p class="matching-label">{% trans "Matching passage" %}</p><blockquote data-evidence-passage></blockquote><details open><summary>{% trans "Full immutable page text" %}</summary><pre data-evidence-page-text></pre></details></div>
+        <div class="evidence-view" data-evidence-view="page" hidden><div class="evidence-page-tools"><button type="button" class="btn btn-sm evidence-fit">{% trans "Fit" %}</button><button type="button" class="btn btn-sm evidence-zoom-out">−</button><button type="button" class="btn btn-sm evidence-zoom-in">+</button></div><div class="evidence-page-viewport"><img data-evidence-image alt="" hidden><p data-evidence-no-image>{% trans "No page image is available for this revision." %}</p></div></div>
+        <div class="evidence-view" data-evidence-view="details" hidden><dl class="evidence-facts"><dt>{% trans "Selection reason" %}</dt><dd data-evidence-reason></dd><dt>{% trans "Revision" %}</dt><dd data-evidence-revision></dd><dt>{% trans "Score" %}</dt><dd data-evidence-score></dd></dl></div>
+        <footer class="evidence-reader-footer"><a class="btn btn-secondary evidence-open-document" href="#">{% trans "Open full document" %}</a></footer>
       </section>
-      {% if latest_run and latest_run.state == 'completed' %}
-      <section class="chat-evidence">
-        <div class="chat-sidebar-heading"><h2>{% trans "Latest evidence" %}</h2><span>{{ evidence_items|length }}</span></div>
-        <ul class="chat-evidence-list">
-          {% for item in evidence_items %}
-          <li><a href="{% url 'document_detail' item.source_document_id %}?revision={{ item.processed_revision_id }}&page={{ item.page.page_number }}{% if item.page_region_id %}&region={{ item.page_region_id }}{% endif %}&thread={{ thread.id }}">[{{ item.marker }}] {{ item.source_document.filename }}</a><small>{% trans "Page" %} {{ item.page.page_number }} · {{ item.selection_reason }}</small></li>
-          {% empty %}<li class="empty-state">{% trans "No matching evidence was found." %}</li>{% endfor %}
-        </ul>
-      </section>
-      {% endif %}
-      {% if is_admin and latest_run %}
-      <section class="chat-maintainer-tools">
-        <h2>{% trans "Maintainer" %}</h2>
-        <a href="{% url 'chat_run_diagnostics' latest_run.id %}">{% trans "Inspect run diagnostics" %}</a>
-      </section>
-      {% endif %}
+      <section class="run-inspector" data-ui-id="run-inspector" hidden aria-labelledby="run-inspector-heading"><header class="evidence-reader-header"><div><p class="eyebrow">{% trans "Maintainer" %}</p><h2 id="run-inspector-heading" tabindex="-1">{% trans "Run inspector" %}</h2></div><button class="icon-button inspector-close" type="button" aria-label="{% trans 'Close run inspector' %}">×</button></header><div class="inspector-body" data-inspector-body><p>{% trans "Loading run diagnostics" %}</p></div></section>
+      {% if is_admin and selected_run %}<a class="sr-only" href="{% url 'chat_run_diagnostics' selected_run.id %}">{% trans "Inspect run diagnostics" %}</a>{% endif %}
     </aside>
   </div>
 </div>

@@ -141,6 +141,43 @@ class ChatTests(TestCase):
         self.assertEqual(run.evidence_items.first().selection_reason, "attached-document/context")
         tool_result = post.call_args_list[1].kwargs["json"]["messages"][-1]["content"]
         self.assertEqual(json.loads(tool_result)["results"], [])
+        self.assertEqual(json.loads(tool_result)["status"], "no_progress")
+        self.assertNotIn("tools", post.call_args_list[1].kwargs["json"])
+        self.assertTrue(run.events.filter(name="tool_no_progress").exists())
+
+    @patch("workbench.chat.requests.post")
+    def test_repeated_search_is_a_synthesis_handoff(self, post):
+        tool_call = {"content": None, "tool_calls": [{
+            "id": "call-1", "function": {"arguments": '{"query":"restoration 1957"}'},
+        }]}
+        post.side_effect = [
+            Mock(status_code=200, json=lambda: {"choices": [{"message": tool_call}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {
+                "content": None,
+                "tool_calls": [{"id": "call-2", "function": {"arguments": '{"query":"restoration 1957"}'}}],
+            }}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {
+                "content": "The evidence establishes restoration in 1957. [S1]",
+            }}]}),
+        ]
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        thread.selected_sources.set([self.source])
+        from workbench.chat import create_chat_run, process_chat_run
+        run = create_chat_run(thread, "When was restoration?", scope={
+            "mode": "project", "project_ids": [self.project.pk],
+            "source_ids": [self.source.pk], "revision_ids": [self.document.pk],
+            "attachment_ids": [], "filters": {},
+        })
+        with self.settings(DSW_CHAT_TOOL_MODE="native"):
+            process_chat_run(run)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertEqual(post.call_count, 3)
+        self.assertNotIn("tools", post.call_args_list[2].kwargs["json"])
+        self.assertEqual(run.assistant_message.text, "The evidence establishes restoration in 1957. [S1]")
+        event = run.events.get(name="tool_no_progress")
+        self.assertEqual(event.metadata["outcome"], "repeated_query")
+        self.assertTrue(run.events.filter(name="final_answer_request", metadata__reason="tool_no_progress").exists())
 
     @patch("workbench.chat.requests.post")
     def test_attached_context_uses_attachment_project_not_selected_search_project(self, post):

@@ -196,5 +196,15 @@ extracted text of that passage's immutable page; the context-token budget
 bounds the combined prompt. In `automatic` mode, a provider rejection of native tools is retried
 once without tools; `native` mode reports the rejection. Neither path runs
 server-side retrieval without an explicit model tool call.
+The search tool is a bounded progress loop, not a retrieval fallback. Its
+response reports whether it added new evidence. An empty result, a result
+containing only evidence already supplied, a repeated normalized query, or a
+malformed request returns a `no_progress` result with an explicit instruction
+to synthesize from the available context or state what is missing. The worker
+then performs one final provider request with tools disabled. This gives the
+model a safe way out without silently retrieving documents the model did not
+request. Run events record a non-sensitive query fingerprint, result count,
+new-evidence count, and outcome so maintainers can distinguish productive
+search from looping.
 These values are also reported by the
 anonymous health diagnostics endpoint without exposing API keys.

@@ -302,7 +302,15 @@ class SupportBundleService:
             elif name == "provider_request":
                 explanation = "The application sent the question and evidence context to the configured model provider."
             elif name == "tool_call":
-                explanation = f"The model requested a search; the server returned {metadata.get('result_count', 0)} results for that query."
+                outcome = metadata.get("outcome")
+                if outcome == "new_evidence":
+                    explanation = f"The model requested a search; the server added {metadata.get('new_evidence_count', 0)} new evidence item(s) from {metadata.get('result_count', 0)} result(s)."
+                elif outcome == "repeated_query":
+                    explanation = "The model repeated an earlier search, so the server stopped retrieval and handed control back for synthesis."
+                else:
+                    explanation = f"The model requested a search; it produced no new evidence ({outcome or 'no_progress'}), so the server handed control back for synthesis."
+            elif name == "tool_no_progress":
+                explanation = "Retrieval made no progress. Further equivalent searches were disabled so the model could answer with the available evidence or explain what was missing."
             elif name == "tool_fallback":
                 explanation = "The provider rejected native tools, so automatic mode retried once without tools; no hidden retrieval was performed."
             elif name == "tool_call_rejected":
@@ -339,6 +347,7 @@ class SupportBundleService:
             "source_document", "processed_revision", "page", "page_region"
         ).order_by("ordinal"))
         tool_events = [event for event in events if event.name == "tool_call"]
+        no_progress_events = [event for event in events if event.name == "tool_no_progress"]
         retrieval_events = [event for event in events if event.name in {"retrieving", "tool_call", "evidence_selected", "context_truncated"}]
         started = run.started_at or run.created_at
         ended = run.finished_at or (events[-1].created_at if events and run.state in {"failed", "cancelled"} else None)
@@ -388,6 +397,8 @@ class SupportBundleService:
             "phases": phases,
             "retrieval": {"path": actual_path, "tool_call_count": len(tool_events),
                           "queries": [event.metadata.get("query") for event in tool_events if event.metadata.get("query")],
+                          "outcomes": [event.metadata.get("outcome") for event in tool_events if event.metadata.get("outcome")],
+                          "no_progress_count": len(no_progress_events),
                           "evidence_count": len(evidence), "source_tokens": run.source_tokens},
             "evidence": [{"marker": item.marker, "filename": item.source_document.filename,
                           "document_id": item.source_document_id, "revision_id": item.processed_revision_id,

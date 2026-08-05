@@ -154,12 +154,19 @@ class FakeProviderIntegrationTests(TestCase):
     def tearDown(self):
         self.provider.stop()
 
-    def run_mode(self, mode, timeout=2, tool_mode="fallback", max_tool_calls=None):
+    def run_mode(self, mode, timeout=2, tool_mode="fallback", max_tool_calls=None, attachment_ids=None):
         self.provider.config["mode"] = mode
         self.provider.config["request_count"] = 0
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         thread.selected_sources.set([self.source])
-        run = create_chat_run(thread, "alpha")
+        scope = None
+        if attachment_ids is not None:
+            scope = {
+                "mode": "project", "project_ids": [self.project.pk],
+                "source_ids": [self.source.pk], "revision_ids": [self.source.active_document_id],
+                "attachment_ids": attachment_ids, "filters": {},
+            }
+        run = create_chat_run(thread, "alpha", scope=scope)
         setting_overrides = {"DSW_CHAT_BASE_URL": self.provider.url, "DSW_CHAT_TIMEOUT": timeout,
                              "DSW_CHAT_FINAL_REQUEST_TIMEOUT": timeout,
                              "DSW_CHAT_TOOL_MODE": tool_mode}
@@ -285,7 +292,7 @@ class FakeProviderIntegrationTests(TestCase):
         self.assertTrue(run.events.filter(error_code="provider_malformed_tool_call").exists())
 
     def test_tool_budget_gets_a_final_synthesis_turn(self):
-        run, error = self.run_mode("limit-tool", tool_mode="native", max_tool_calls=1)
+        run, error = self.run_mode("limit-tool", tool_mode="native", max_tool_calls=1, attachment_ids=[])
         self.assertIsNone(error)
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")

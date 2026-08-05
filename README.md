@@ -76,6 +76,12 @@ DSW_CHAT_CONTEXT_TOKEN_BUDGET=12000
 
 The chat workflow is model-directed for the searchable scope. A conversation freezes its document/revision scope; explicitly attached documents are injected into the initial context with persisted evidence markers, while the model may call the bounded search tool for additional scope retrieval. The final answer can cite only persisted evidence markers.
 Each search result includes both the matching passage and the full extracted text of that immutable page, subject to the configured context-token budget. This gives the model surrounding context without losing the precise passage used for citation.
+Search results also report whether they added new evidence. If a search makes
+no progress or repeats an earlier query, the worker disables tools for one
+final synthesis request; it does not silently perform a server-side retrieval
+fallback. The run timeline records the search outcome and a short query
+fingerprint for diagnosing retrieval loops without exposing additional prompt
+or credential data.
 
 ## Project Structure
 

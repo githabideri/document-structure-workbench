@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from workbench.models import ChatMessage, ChatRun, ChatThread, Collection, Document, Page, ProcessingJob, ProcessingPreset, ProjectMembership, SearchPassage, SourceDocument
+from workbench.models import ChatMessage, ChatRun, ChatThread, Collection, Document, EvidenceItem, Page, ProcessingJob, ProcessingPreset, ProjectMembership, SearchPassage, SourceDocument
 
 User = get_user_model()
 
@@ -159,3 +159,55 @@ class ChatTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse("document_detail", args=[self.document.pk]), {"thread": thread.pk})
         self.assertContains(response, f"/chat/{thread.pk}/")
+
+    def make_evidence(self, *, thread, source=None, marker="S1"):
+        source = source or self.source
+        message = ChatMessage.objects.create(thread=thread, role="user", text="Find the source", ordinal=0)
+        run = ChatRun.objects.create(thread=thread, user_message=message, state="completed")
+        return EvidenceItem.objects.create(
+            run=run, marker=marker, source_document=source, processed_revision=self.document,
+            processing_job=source.processing_jobs.first(), page=self.document.pages.first(),
+            text="A matching passage", page_text="A full page", selection_reason="fixture",
+        )
+
+    def test_evidence_detail_requires_private_thread_owner(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        item = self.make_evidence(thread=thread)
+        other = User.objects.create_user("same-project-reader", password="pass")
+        ProjectMembership.objects.create(project=self.project, user=other, role="viewer")
+        self.client.force_login(other)
+        response = self.client.get(reverse("chat_evidence_detail", args=[item.run_id, item.marker]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_evidence_detail_checks_actual_source_for_multi_project_scope(self):
+        other_project = Collection.objects.create(name="Other archive", created_by=self.user)
+        ProjectMembership.objects.create(project=other_project, user=self.user, role="owner")
+        other_source = SourceDocument.objects.create(collection=other_project, filename="other.pdf", uploaded_by=self.user)
+        other_job = ProcessingJob.objects.create(source_document=other_source, preset=ProcessingPreset.objects.get(slug="chat"), state="completed")
+        other_revision = Document.objects.create(collection=other_project, external_id="other", filename="other.pdf")
+        other_job.result_document = other_revision
+        other_job.save(update_fields=["result_document"])
+        other_page = Page.objects.create(document=other_revision, page_number=1)
+        thread = ChatThread.objects.create(
+            project=None, created_by=self.user, scope_snapshot={"project_ids": [self.project.pk, other_project.pk]},
+        )
+        message = ChatMessage.objects.create(thread=thread, role="user", text="Find the source", ordinal=0)
+        run = ChatRun.objects.create(thread=thread, user_message=message, state="completed", scope_snapshot=thread.scope_snapshot)
+        item = EvidenceItem.objects.create(
+            run=run, marker="S4", source_document=other_source, processed_revision=other_revision,
+            processing_job=other_job, page=other_page, text="Private other project passage", page_text="Private other page",
+        )
+        limited = User.objects.create_user("project-a-reader", password="pass")
+        ProjectMembership.objects.create(project=self.project, user=limited, role="viewer")
+        self.client.force_login(limited)
+        response = self.client.get(reverse("chat_evidence_detail", args=[run.pk, item.marker]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_evidence_detail_allows_owner_and_admin_when_source_is_accessible(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        item = self.make_evidence(thread=thread)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(reverse("chat_evidence_detail", args=[item.run_id, item.marker])).status_code, 200)
+        admin = User.objects.create_superuser("chat-admin", email="admin@example.test", password="pass")
+        self.client.force_login(admin)
+        self.assertEqual(self.client.get(reverse("chat_evidence_detail", args=[item.run_id, item.marker])).status_code, 200)

@@ -481,12 +481,16 @@ def chat_evidence_detail(request, run_id, marker):
     from .models import ChatRun
     from .policy import ProjectAccessPolicy
     run = get_object_or_404(ChatRun.objects.select_related("thread", "thread__project"), pk=run_id)
+    if not is_admin(request.user) and run.thread.created_by_id != request.user.id:
+        raise PermissionDenied
     policy = ProjectAccessPolicy(user=request.user)
     if run.thread.project_id and not policy.can_view(run.thread.project):
         raise PermissionDenied
     if not run.thread.project_id and not set((run.scope_snapshot or {}).get("project_ids", [])) & set(policy.visible_projects().values_list("id", flat=True)):
         raise PermissionDenied
     item = get_object_or_404(run.evidence_items.select_related("source_document", "processed_revision", "page", "page_region"), marker=marker)
+    if not policy.can_view(item.source_document.collection):
+        raise PermissionDenied
     page = item.page
     region = item.page_region
     document_url = reverse("document_detail", args=[item.source_document_id]) + f"?revision={item.processed_revision_id}&page={page.page_number if page else 1}"

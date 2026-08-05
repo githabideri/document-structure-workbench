@@ -64,6 +64,12 @@ acceptance record rather than merely evidence that a screenshot was taken.
 Use `scripts/dsw-browser-smoke --help` for all options. `scripts/dsw --help`
 lists the operator commands.
 
+For an administrator fixture, set `DSW_BROWSER_EXPECT_MAINTAINER=1` to add
+run-inspector regression checks. They verify that closing the inspector
+restores selected evidence and originating focus, and that closing it without
+selected evidence restores the source-scope summary. Ordinary fixture accounts
+skip these maintainer-only checks.
+
 ## Deployed or staging run
 
 Do not let a remote browser smoke test select arbitrary user documents. Create

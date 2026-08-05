@@ -207,6 +207,25 @@ step evidence-focus "$browser" eval 'JSON.stringify({active:document.activeEleme
 snapshot cited-document
 step cited-document-screenshot "$browser" screenshot "$output_dir/cited-document.png" || fail "cited document screenshot failed"
 record open-citation pass
+
+if [[ "${DSW_BROWSER_EXPECT_MAINTAINER:-0}" == 1 ]]; then
+  step inspector-open "$browser" click '.run-inspector-open' || fail "run inspector could not be opened"
+  step inspector-wait "$browser" wait '[data-ui-id="run-inspector"]:not([hidden])' || fail "run inspector did not open"
+  step inspector-close-with-evidence "$browser" eval "document.querySelector('.inspector-close')?.click(); 'closed'" || fail "run inspector could not be closed"
+  step inspector-close-settle "$browser" wait 100 || fail "run inspector close did not settle"
+  step inspector-restores-evidence "$browser" eval "(()=>{const p=document.querySelector('.evidence-reader-panel'); const s=new URL(location.href).searchParams; const active=document.activeElement?.dataset?.uiId||null; const state={panelHidden:p?.hidden||false,run:s.get('run'),evidence:s.get('evidence'),active}; if(state.panelHidden||state.evidence!=='S1'||active!=='run-action-'+state.run) throw new Error('closing inspector did not restore evidence and focus: '+JSON.stringify(state)); return JSON.stringify(state)})()" || fail "inspector close did not restore selected evidence"
+  step close-evidence-for-inspector "$browser" eval "document.querySelector('.evidence-close')?.click(); 'closed'" || fail "evidence could not be closed before context test"
+  step close-evidence-for-inspector-settle "$browser" wait 100 || fail "evidence close did not settle before context test"
+  step close-evidence-for-inspector-verify "$browser" eval "!new URL(location.href).searchParams.get('evidence') ? 'evidence closed' : (()=>{throw new Error('evidence URL remained active')})()" || fail "evidence URL remained active before context test"
+  step inspector-open-without-evidence "$browser" click '.run-inspector-open' || fail "run inspector could not be opened without evidence"
+  step inspector-close-without-evidence "$browser" eval "document.querySelector('.inspector-close')?.click(); 'closed'" || fail "run inspector could not be closed without evidence"
+  step inspector-close-without-evidence-settle "$browser" wait 100 || fail "run inspector close without evidence did not settle"
+  step inspector-restores-summary "$browser" eval "(()=>{const summary=document.querySelector('[data-ui-id=\"context-summary\"]'); if(summary.hidden) throw new Error('context summary remained hidden'); return 'context summary restored'})()" || fail "inspector close did not restore source summary"
+  record inspector-context-restoration pass "evidence and source summary restored after inspector close"
+else
+  record inspector-context-restoration skipped "set DSW_BROWSER_EXPECT_MAINTAINER=1 with an administrator browser fixture"
+fi
+
 step return-to-chat "$browser" back || fail "could not go back in chat history"
 step return-wait "$browser" wait '[data-ui-id="message-timeline"]' || fail "chat timeline did not remain available"
 race_first="S1"

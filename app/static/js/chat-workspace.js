@@ -147,8 +147,24 @@ if (!root) {
         } catch (error) { body.textContent = error.message || "Diagnostics unavailable."; }
     };
     const closeInspector = () => {
+        const current = state();
         inspector.hidden = true;
-        document.querySelector(`[data-ui-id="${CSS.escape(inspector.dataset.invokingId || "")}"]`)?.focus();
+        if (current.run && current.evidence) {
+            const hasCurrentEvidence = evidenceState
+                && String(evidenceState.run_id) === String(current.run)
+                && evidenceState.marker === current.evidence;
+            evidencePanel.hidden = false;
+            contextSummary.hidden = true;
+            if (!hasCurrentEvidence && citationFor(current.run, current.evidence)) {
+                loadEvidence(current.run, current.evidence, {historyMode: "replace", focus: false});
+            }
+        } else {
+            evidenceState = null;
+            evidencePanel.hidden = true;
+            contextSummary.hidden = false;
+        }
+        const invoking = document.querySelector(`[data-ui-id="${CSS.escape(inspector.dataset.invokingId || "")}"]`);
+        setTimeout(() => invoking?.focus(), 0);
         updateDiagnostics();
     };
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));

@@ -35,7 +35,11 @@ class VisionOcrTests(TestCase):
         self.assertEqual(info["height"], 64)
         self.assertTrue(payload.startswith(b"\x89PNG"))
 
-    @override_settings(DSW_OCR_BASE_URL="http://ocr.test/v1", DSW_OCR_MODEL="paddleocr-vl")
+    @override_settings(
+        DSW_OCR_BASE_URL="http://ocr.test/v1",
+        DSW_OCR_MODEL="paddleocr-vl",
+        DSW_OCR_PROVIDER="openai-compatible",
+    )
     def test_client_sends_openai_vision_message_and_extracts_text(self):
         response = type("Response", (), {"raise_for_status": lambda self: None, "json": lambda self: {"choices": [{"message": {"content": "exact text"}}]}})()
         with patch("workbench.processors.vision_ocr.requests.post", return_value=response) as post:

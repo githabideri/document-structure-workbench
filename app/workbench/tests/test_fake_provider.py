@@ -237,11 +237,25 @@ class FakeProviderIntegrationTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
         self.assertTrue(run.events.filter(name="tool_fallback").exists())
-        self.assertEqual(run.evidence_items.count(), 0)
+        self.assertEqual(run.evidence_items.count(), 1)
+        self.assertEqual(run.evidence_items.first().retrieval_method, "direct-attachment")
         self.assertEqual(self.provider.config["request_count"], 2)
 
     def test_native_tool_calls_persist_bounded_search_evidence(self):
-        run, error = self.run_mode("native-tool", tool_mode="native")
+        self.provider.config["mode"] = "native-tool"
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        run = create_chat_run(thread, "alpha", scope={
+            "mode": "project", "project_ids": [self.project.pk],
+            "source_ids": [self.source.pk], "revision_ids": [self.source.active_document_id],
+            "attachment_ids": [], "filters": {},
+        })
+        with self.settings(DSW_CHAT_BASE_URL=self.provider.url, DSW_CHAT_TIMEOUT=2,
+                           DSW_CHAT_FINAL_REQUEST_TIMEOUT=2, DSW_CHAT_TOOL_MODE="native"):
+            try:
+                process_chat_run(run, worker_id="fake-integration-worker")
+                error = None
+            except ChatProviderError as exc:
+                error = exc.code
         self.assertIsNone(error)
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
@@ -258,7 +272,8 @@ class FakeProviderIntegrationTests(TestCase):
         self.assertIsNone(error)
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
-        self.assertEqual(run.evidence_items.count(), 0)
+        self.assertEqual(run.evidence_items.count(), 1)
+        self.assertEqual(run.evidence_items.first().retrieval_method, "direct-attachment")
         self.assertEqual(self.provider.config["request"]["tool_choice"], "auto")
         self.assertFalse(run.events.filter(name="tool_call").exists())
 

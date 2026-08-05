@@ -178,7 +178,9 @@ browser-specific diagnostics.
 Chat runs freeze their resolved authorization scope at submission time. Set
 `DSW_CHAT_TOOL_MODE` to `automatic`, `native`, or `fallback`; `fallback` sends
 ordinary provider requests without search tools and does not perform hidden
-server-side retrieval. The lexical index is used only after the model calls
+server-side retrieval. Explicitly attached documents are injected into the
+initial run context with persisted evidence markers. The lexical index is
+used for additional scope retrieval only after the model calls
 `search_evidence`.
 The `DSW_CHAT_MAX_TOOL_CALLS` setting defaults to 10 and is hard-capped at 20.
 The final answer provider request defaults to 600 seconds. Tool/retrieval

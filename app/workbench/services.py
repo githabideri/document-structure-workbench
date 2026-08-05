@@ -353,7 +353,11 @@ class SupportBundleService:
             "provider_unreachable": "Provider is unreachable",
             "provider_rejected": "Provider rejected the request",
         }
-        actual_path = "model-requested search" if tool_events else "no retrieval call"
+        attachment_ids = (run.scope_snapshot or {}).get("attachment_ids", [])
+        if attachment_ids and evidence:
+            actual_path = "direct attachment context" + (" + model-requested search" if tool_events else "")
+        else:
+            actual_path = "model-requested search" if tool_events else "no retrieval call"
         phases = []
         for event in events:
             phase = event.metadata.get("phase") if isinstance(event.metadata, dict) else None

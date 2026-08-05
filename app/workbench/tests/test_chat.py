@@ -90,10 +90,40 @@ class ChatTests(TestCase):
         self.assertEqual(second.evidence_items.first().processed_revision_id, self.document.pk)
 
     @patch("workbench.chat.requests.post")
-    def test_attached_document_falls_back_to_indexed_content_when_query_misses(self, post):
+    def test_attached_document_is_injected_before_provider_search(self, post):
+        post.return_value = Mock(status_code=200, json=lambda: {"choices": [{"message": {
+            "content": "The attached document says restoration happened in 1957. [S1]",
+        }}]})
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        thread.selected_sources.set([self.source])
+        from workbench.chat import create_chat_run, process_chat_run
+        run = create_chat_run(thread, "What is in notes.pdf?", scope={
+            "mode": "project", "project_ids": [self.project.pk],
+            "source_ids": [self.source.pk], "revision_ids": [self.document.pk],
+            "attachment_ids": [self.source.pk], "filters": {},
+        })
+        with self.settings(DSW_CHAT_TOOL_MODE="native"):
+            process_chat_run(run)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertEqual(run.evidence_items.count(), 1)
+        evidence = run.evidence_items.first()
+        self.assertEqual(evidence.retrieval_method, "direct-attachment")
+        self.assertEqual(evidence.selection_reason, "attached-document/context")
+        self.assertIn("notes.pdf", post.call_args.kwargs["json"]["messages"][0]["content"])
+        self.assertIn("The restoration happened in 1957.", post.call_args.kwargs["json"]["messages"][0]["content"])
+        self.assertEqual(post.call_count, 1)
+
+    @patch("workbench.chat.requests.post")
+    def test_empty_search_does_not_fallback_when_attachment_is_already_context(self, post):
         post.side_effect = [
-            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": None, "tool_calls": [{"id": "call-1", "function": {"arguments": '{"query":"notes.pdf"}'}}]}}]}),
-            Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "The attached document says restoration happened in 1957. [S1]"}}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {
+                "content": None,
+                "tool_calls": [{"id": "call-1", "function": {"arguments": '{"query":"term absent from passage"}'}}],
+            }}]}),
+            Mock(status_code=200, json=lambda: {"choices": [{"message": {
+                "content": "The attached document says restoration happened in 1957. [S1]",
+            }}]}),
         ]
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         thread.selected_sources.set([self.source])
@@ -108,7 +138,9 @@ class ChatTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.state, "completed")
         self.assertEqual(run.evidence_items.count(), 1)
-        self.assertIn("manual-attachment/fallback", run.evidence_items.first().selection_reason)
+        self.assertEqual(run.evidence_items.first().selection_reason, "attached-document/context")
+        tool_result = post.call_args_list[1].kwargs["json"]["messages"][-1]["content"]
+        self.assertEqual(json.loads(tool_result)["results"], [])
 
     @patch("workbench.chat.requests.post")
     def test_provider_reasoning_is_diagnostic_only_and_support_bundle_is_auditable(self, post):

@@ -143,6 +143,37 @@ class ChatTests(TestCase):
         self.assertEqual(json.loads(tool_result)["results"], [])
 
     @patch("workbench.chat.requests.post")
+    def test_attached_context_uses_attachment_project_not_selected_search_project(self, post):
+        other_project = Collection.objects.create(name="Attached archive", created_by=self.user)
+        ProjectMembership.objects.create(project=other_project, user=self.user, role="owner")
+        source = SourceDocument.objects.create(collection=other_project, filename="attached.pdf", uploaded_by=self.user)
+        job = ProcessingJob.objects.create(source_document=source, preset=ProcessingPreset.objects.get(slug="chat"), state="completed")
+        revision = Document.objects.create(collection=other_project, external_id="attached", filename="attached.pdf")
+        job.result_document = revision
+        job.save(update_fields=["result_document"])
+        page = Page.objects.create(document=revision, page_number=1)
+        SearchPassage.objects.create(
+            project=other_project, source_document=source, processed_revision=revision,
+            processing_job=job, page=page, text="The attached archive concerns river restoration.",
+            normalized_text="the attached archive concerns river restoration.",
+        )
+        post.return_value = Mock(status_code=200, json=lambda: {"choices": [{"message": {
+            "content": "The attachment concerns river restoration. [S1]",
+        }}]})
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        from workbench.chat import create_chat_run, process_chat_run
+        run = create_chat_run(thread, "What is the attachment about?", scope={
+            "mode": "project", "project_ids": [self.project.pk],
+            "source_ids": [source.pk], "revision_ids": [revision.pk],
+            "attachment_ids": [source.pk], "filters": {},
+        })
+        process_chat_run(run)
+        run.refresh_from_db()
+        self.assertEqual(run.state, "completed")
+        self.assertEqual(run.evidence_items.count(), 1)
+        self.assertIn("river restoration", post.call_args.kwargs["json"]["messages"][0]["content"])
+
+    @patch("workbench.chat.requests.post")
     def test_provider_reasoning_is_diagnostic_only_and_support_bundle_is_auditable(self, post):
         post.return_value = Mock(status_code=200, json=lambda: {"model": "qwen", "choices": [{"finish_reason": "stop", "message": {
             "content": "The answer is 1957.", "reasoning_content": "untrusted internal diagnostic text",

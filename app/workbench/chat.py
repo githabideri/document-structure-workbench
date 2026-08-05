@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils.html import conditional_escape, format_html
 from django.utils.safestring import mark_safe
 
-from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, ProcessingArtifact, SearchPassage
+from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, ProcessingArtifact, SearchPassage, SourceDocument
 from .policy import ProjectAccessPolicy
 from .search import normalize_text
 
@@ -203,12 +203,16 @@ def process_chat_run(run, worker_id="chat-worker"):
     tool_mode = getattr(settings, "DSW_CHAT_TOOL_MODE", "fallback")
     record_run_event(run, "retrieving")
     attachment_ids = snapshot.get("attachment_ids", [])
+    attachment_projects = list(SourceDocument.objects.filter(
+        pk__in=attachment_ids,
+    ).values_list("collection_id", flat=True).distinct())
+    attachment_context_projects = sorted(set(projects) | set(attachment_projects))
     # Explicit attachments are authoritative initial context.  They are
     # materialized before the provider call; the search tool is not required
     # to discover a document the user already attached.
     selected = select_attached_context(
         attachment_ids,
-        projects,
+        attachment_context_projects,
         revision_ids=revision_ids,
         limit=getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
     )
@@ -343,7 +347,7 @@ def process_chat_run(run, worker_id="chat-worker"):
                     found = select_evidence(
                         query,
                         source_ids,
-                        projects,
+                        attachment_context_projects,
                         revision_ids=revision_ids,
                         limit=min(getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8), remaining_evidence),
                     )

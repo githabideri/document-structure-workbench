@@ -299,6 +299,22 @@ def process_chat_run(run, worker_id="chat-worker"):
                 else:
                     remaining_evidence = max(0, getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24) - len(items))
                     found = select_evidence(query, source_ids, sorted(set(projects) | set(attachment_projects)), revision_ids=revision_ids, limit=min(getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8), remaining_evidence))
+                    if not found and snapshot.get("attachment_ids"):
+                        # An attached document is an explicit user-provided
+                        # source. If the model searches by filename or another
+                        # term absent from the index, still return bounded
+                        # indexed passages from that attachment so its content
+                        # is available for the answer.
+                        attachment_queryset = SearchPassage.objects.filter(
+                            source_document_id__in=snapshot.get("attachment_ids", []),
+                            project__in=sorted(set(projects) | set(attachment_projects)),
+                        )
+                        if revision_ids:
+                            attachment_queryset = attachment_queryset.filter(processed_revision_id__in=revision_ids)
+                        attachment_passages = attachment_queryset.select_related(
+                            "source_document", "processed_revision", "processing_job", "page", "page_region",
+                        ).order_by("source_document_id", "page__page_number", "ordinal")[:remaining_evidence]
+                        found = [(0, passage, "manual-attachment/fallback") for passage in attachment_passages]
                     result_entries = []
                     for _, passage, reason in found:
                         if len(items) >= getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24):

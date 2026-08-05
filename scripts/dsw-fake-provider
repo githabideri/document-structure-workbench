@@ -18,7 +18,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.rstrip("/") != "/v1/chat/completions":
             self.send_error(404)
             return
-        if self.mode == "reasoning-only":
+        messages = request.get("messages") or []
+        has_tool_result = any(item.get("role") == "tool" for item in messages if isinstance(item, dict))
+        offers_tools = bool(request.get("tools"))
+        if offers_tools and not has_tool_result and self.mode == "success":
+            # Keep the fixture deterministic: both seeded passages contain
+            # this phrase, so the tool call always produces persisted S1.
+            query = "archival evidence"
+            message = {"content": None, "tool_calls": [{"id": "fake-search-1", "type": "function", "function": {"name": "search_evidence", "arguments": json.dumps({"query": query})}}]}
+            finish = "tool_calls"
+        elif self.mode == "reasoning-only":
             message, finish = {"content": "", "reasoning_content": "local fake reasoning"}, "stop"
         elif self.mode == "empty-final":
             message, finish = {"content": ""}, "stop"

@@ -107,7 +107,8 @@ finish() {
   "$browser" console >"$output_dir/console.log" 2>&1 || true
   "$browser" errors >"$output_dir/errors.log" 2>&1 || true
   "$browser" network har stop "$output_dir/network.har" >"$output_dir/network-har.log" 2>&1 || true
-  "$browser" eval 'JSON.stringify(window.__DSW_UI_DIAGNOSTICS__ || {})' >"$output_dir/ui-diagnostics.json" 2>&1 || true
+  "$browser" eval 'JSON.stringify(window.__DSW_UI_DIAGNOSTICS__ || {})' >"$output_dir/ui-diagnostics.raw" 2>&1 || true
+  python3 -c 'import json,sys; raw=open(sys.argv[1]).read().strip(); value=json.loads(raw) if raw else {}; value=json.loads(value) if isinstance(value,str) else value; open(sys.argv[2],"w").write(json.dumps(value,indent=2)+"\n")' "$output_dir/ui-diagnostics.raw" "$output_dir/ui-diagnostics.json" 2>/dev/null || echo '{"schema_version":1,"error":"diagnostics unavailable"}' >"$output_dir/ui-diagnostics.json"
   write_result || true
   "$browser" close --all >/dev/null 2>&1 || true
   return "$status"

@@ -13,6 +13,20 @@
     </div>
     <a class="btn btn-secondary" href="{% url 'chat_thread' run.thread_id %}">{% trans "Return to conversation" %}</a>
   </header>
+  <section class="diagnostics-card run-inspector-summary" data-ui-id="run-inspector-summary">
+    <h2>{% trans "Outcome summary" %}</h2>
+    <dl class="diagnostics-facts">
+      <dt>{% trans "Outcome" %}</dt><dd>{{ inspector.outcome.state }}</dd>
+      <dt>{% trans "Stage" %}</dt><dd>{{ inspector.outcome.stage }}</dd>
+      <dt>{% trans "Failure category" %}</dt><dd>{{ inspector.outcome.failure_category|default:_('None') }}</dd>
+      <dt>{% trans "Duration" %}</dt><dd>{{ inspector.outcome.duration_ms|default:_('In progress') }}{% if inspector.outcome.duration_ms %} ms{% endif %}</dd>
+      <dt>{% trans "Model/provider" %}</dt><dd>{{ inspector.provider.model }} / {{ inspector.provider.configured_mode }}</dd>
+      <dt>{% trans "Retrieval" %}</dt><dd>{{ inspector.retrieval.path }} · {{ inspector.retrieval.tool_call_count }} tool calls</dd>
+      <dt>{% trans "Evidence" %}</dt><dd>{{ inspector.retrieval.evidence_count }}</dd>
+      <dt>{% trans "Citation validation" %}</dt><dd>{% if inspector.citations.valid %}{% trans "Valid" %}{% else %}{% trans "Invalid markers" %}{% endif %}</dd>
+      <dt>{% trans "Retry" %}</dt><dd>{% if inspector.retry.eligible %}{% trans "Eligible" %}{% else %}{% trans "Not available" %}{% endif %}</dd>
+    </dl>
+  </section>
   <section class="diagnostics-card diagnostics-explanation">
     <h2>{% trans "What happened" %}</h2>
     <p>{% trans "This is the server's authoritative execution trace. It explains retrieval, model calls, tool calls, and citation validation in the order they occurred." %}</p>

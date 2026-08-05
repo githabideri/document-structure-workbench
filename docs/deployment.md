@@ -181,9 +181,11 @@ ordinary provider requests without search tools and does not perform hidden
 server-side retrieval. The lexical index is used only after the model calls
 `search_evidence`.
 The `DSW_CHAT_MAX_TOOL_CALLS` setting defaults to 10 and is hard-capped at 20.
-The total model/tool orchestration wall-clock budget defaults to 300 seconds,
-and the per-provider-request timeout also defaults to 300 seconds. The overall
-budget still bounds the complete run.
+The final answer provider request defaults to 600 seconds. Tool/retrieval
+requests default to 300 seconds, and the complete model/tool orchestration
+wall-clock budget defaults to 900 seconds. The compatibility
+`DSW_CHAT_TIMEOUT` setting defaults to 600 seconds. The overall budget still
+bounds the complete run.
 The `DSW_CHAT_MAX_RESULTS_PER_CALL`,
 `DSW_CHAT_MAX_EVIDENCE`, `DSW_CHAT_CONTEXT_TOKEN_BUDGET`, and
 `DSW_CHAT_WALL_CLOCK_TIMEOUT` settings bound provider retrieval and context

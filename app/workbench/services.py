@@ -17,6 +17,7 @@ import os
 import tempfile
 from pathlib import Path
 import json
+import re
 import requests
 
 from django.conf import settings
@@ -193,6 +194,8 @@ class DiagnosticsService:
             "context_token_budget": getattr(settings, "DSW_CHAT_CONTEXT_TOKEN_BUDGET", 12000),
             "wall_clock_timeout": getattr(settings, "DSW_CHAT_WALL_CLOCK_TIMEOUT", 300),
             "request_timeout": getattr(settings, "DSW_CHAT_TIMEOUT", 300),
+            "tool_request_timeout": getattr(settings, "DSW_CHAT_TOOL_REQUEST_TIMEOUT", 300),
+            "final_request_timeout": getattr(settings, "DSW_CHAT_FINAL_REQUEST_TIMEOUT", 600),
         }
         if not configured:
             return result
@@ -322,6 +325,83 @@ class SupportBundleService:
                 explanation = "A persisted run event was recorded."
             timeline.append({**event, "explanation": explanation})
         return timeline
+
+    @staticmethod
+    def diagnostics(run):
+        """Return a presentation-neutral, actionable run-inspector record."""
+        events = list(run.events.all())
+        provider = (run.model_metadata or {}).get("provider") or {}
+        if not isinstance(provider, dict):
+            provider = {}
+        provider = {key: value for key, value in provider.items()
+                    if key not in {"reasoning_content", "prompt", "messages"}}
+        evidence = list(run.evidence_items.select_related(
+            "source_document", "processed_revision", "page", "page_region"
+        ).order_by("ordinal"))
+        tool_events = [event for event in events if event.name == "tool_call"]
+        retrieval_events = [event for event in events if event.name in {"retrieving", "tool_call", "evidence_selected", "context_truncated"}]
+        started = run.started_at or run.created_at
+        ended = run.finished_at or (events[-1].created_at if events and run.state in {"failed", "cancelled"} else None)
+        duration_ms = max(0, int((ended - started).total_seconds() * 1000)) if ended else None
+        failure_code = run.error_code or ""
+        failure_labels = {
+            "final_answer_timeout": "Final answer request timed out",
+            "provider_request_timeout": "Provider retrieval request timed out",
+            "run_wall_clock_timeout": "Research run exceeded wall-clock budget",
+            "worker_interrupted": "Worker was interrupted",
+            "provider_connection_error": "Provider connection failed",
+            "provider_unreachable": "Provider is unreachable",
+            "provider_rejected": "Provider rejected the request",
+        }
+        actual_path = "model-requested search" if tool_events else "no retrieval call"
+        phases = []
+        for event in events:
+            phase = event.metadata.get("phase") if isinstance(event.metadata, dict) else None
+            phases.append({
+                "name": event.name, "status": "failed" if event.error_code else "completed",
+                "started_at": event.created_at.isoformat(), "duration_ms": event.duration_ms,
+                "phase": phase, "error_code": event.error_code,
+                "summary": event.metadata.get("query") if isinstance(event.metadata, dict) and event.metadata.get("query") else event.name,
+            })
+        cited = sorted({marker for item in evidence for marker in [item.marker]
+                        if run.assistant_message and f"[{marker}]" in run.assistant_message.text})
+        referenced = sorted(set(re.findall(r"\[(S\d+)\]", run.assistant_message.text if run.assistant_message else "")))
+        return {
+            "run": {"id": run.id, "thread_id": run.thread_id, "state": run.state,
+                     "status": run.status_message, "request_id": run.request_id,
+                     "question": run.user_message.text if run.user_message_id else ""},
+            "outcome": {"state": run.state, "duration_ms": duration_ms,
+                         "stage": run.get_state_display(), "failure_code": failure_code,
+                         "failure_category": failure_labels.get(failure_code, failure_code or None)},
+            "timing": {"created_at": run.created_at.isoformat(),
+                       "started_at": run.started_at.isoformat() if run.started_at else None,
+                       "finished_at": run.finished_at.isoformat() if run.finished_at else None},
+            "limits": {"wall_clock_timeout": getattr(settings, "DSW_CHAT_WALL_CLOCK_TIMEOUT", 900),
+                       "request_timeout": getattr(settings, "DSW_CHAT_TIMEOUT", 600),
+                       "tool_request_timeout": getattr(settings, "DSW_CHAT_TOOL_REQUEST_TIMEOUT", 300),
+                       "final_request_timeout": getattr(settings, "DSW_CHAT_FINAL_REQUEST_TIMEOUT", 600)},
+            "provider": {"model": run.thread.model, "configured_mode": getattr(settings, "DSW_CHAT_TOOL_MODE", "fallback"), **provider},
+            "phases": phases,
+            "retrieval": {"path": actual_path, "tool_call_count": len(tool_events),
+                          "queries": [event.metadata.get("query") for event in tool_events if event.metadata.get("query")],
+                          "evidence_count": len(evidence), "source_tokens": run.source_tokens},
+            "evidence": [{"marker": item.marker, "filename": item.source_document.filename,
+                          "document_id": item.source_document_id, "revision_id": item.processed_revision_id,
+                          "page": item.page.page_number if item.page else None,
+                          "region_id": item.page_region_id, "score": item.score,
+                          "selection_reason": item.selection_reason, "passage": item.text,
+                          "page_text": item.page_text} for item in evidence],
+            "citations": {"referenced": referenced, "persisted": [item.marker for item in evidence],
+                          "validated": cited, "missing": sorted(set(referenced) - {item.marker for item in evidence}),
+                          "unused": sorted({item.marker for item in evidence} - set(referenced)),
+                          "valid": not (set(referenced) - {item.marker for item in evidence})},
+            "failure": {"code": failure_code, "message": run.error_message,
+                         "retry_eligible": run.state == "failed"},
+            "retry": {"eligible": run.state == "failed", "reason": "Retry the durable run after addressing the reported failure." if run.state == "failed" else None},
+            "raw": {"events": [{"name": event.name, "metadata": event.metadata, "error_code": event.error_code,
+                                  "duration_ms": event.duration_ms, "created_at": event.created_at.isoformat()} for event in events],
+                    "reasoning_present": bool(provider.get("reasoning_content"))},
+        }
 
 
 class CorrectionError(Exception):

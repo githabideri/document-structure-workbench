@@ -1387,15 +1387,10 @@ def api_chat_run_diagnostics(request, run_id):
     run = _api_chat_run(request, run_id)
     if not run:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "not_found", "message": "Run not found."}}, status=404)
-    metadata = run.model_metadata or {}
-    provider = metadata.get("provider") or {}
-    if isinstance(provider, dict):
-        provider = {key: value for key, value in provider.items() if key not in {"reasoning_content", "prompt", "messages"}}
-    events = [{"name": event.name, "worker_id": event.worker_id, "duration_ms": event.duration_ms, "metadata": event.metadata, "error_code": event.error_code, "created_at": event.created_at.isoformat()} for event in run.events.all()]
+    from .services import SupportBundleService
     return JsonResponse({
         "request_id": request._request_id,
-        "run": _chat_run_json(run, include_evidence=True),
-        "diagnostics": {"provider": provider, "model": run.thread.model, "scope": run.scope_snapshot, "token_budget": run.token_budget, "source_tokens": run.source_tokens, "events": events, "failure_code": run.error_code},
+        "diagnostics": SupportBundleService.diagnostics(run),
     })
 
 

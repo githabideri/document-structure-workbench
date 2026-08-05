@@ -234,18 +234,31 @@ def process_chat_run(run, worker_id="chat-worker"):
             request_payload["tool_choice"] = "auto"
             request_payload["parallel_tool_calls"] = False
 
-        def provider_request(payload):
+        request_phase = "final_answer"
+
+        def provider_request(payload, *, phase="final_answer"):
+            nonlocal request_phase
+            request_phase = phase
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise requests.Timeout("chat wall-clock budget exhausted")
+                raise ChatProviderError("The research run exceeded its wall-clock budget.", "run_wall_clock_timeout")
+            configured_timeout = (
+                getattr(settings, "DSW_CHAT_TOOL_REQUEST_TIMEOUT", 300)
+                if phase == "tool"
+                else getattr(settings, "DSW_CHAT_FINAL_REQUEST_TIMEOUT", getattr(settings, "DSW_CHAT_TIMEOUT", 600))
+            )
+            record_run_event(run, "provider_request", metadata={
+                "phase": phase, "timeout_seconds": configured_timeout,
+                "remaining_run_seconds": round(remaining, 3),
+            })
             return requests.post(
                 f"{settings.DSW_CHAT_BASE_URL.rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {settings.DSW_CHAT_API_KEY}"} if settings.DSW_CHAT_API_KEY else {},
-                json=payload, timeout=min(settings.DSW_CHAT_TIMEOUT, remaining),
+                json=payload, timeout=min(configured_timeout, remaining),
             )
 
         try:
-            response = provider_request(request_payload)
+            response = provider_request(request_payload, phase="tool" if "tools" in request_payload else "final_answer")
             response.raise_for_status()
         except requests.HTTPError:
             if tool_mode != "automatic" or "tools" not in request_payload:
@@ -257,7 +270,7 @@ def process_chat_run(run, worker_id="chat-worker"):
             request_payload.pop("tools", None)
             request_payload.pop("tool_choice", None)
             request_payload.pop("parallel_tool_calls", None)
-            response = provider_request(request_payload)
+            response = provider_request(request_payload, phase="final_answer")
             response.raise_for_status()
         response.raise_for_status()
         try:
@@ -314,14 +327,14 @@ def process_chat_run(run, worker_id="chat-worker"):
                 final_payload.pop("tools", None)
                 final_payload.pop("tool_choice", None)
                 final_payload.pop("parallel_tool_calls", None)
-                response = provider_request(final_payload)
+                response = provider_request(final_payload, phase="final_answer")
                 response.raise_for_status()
                 payload = response.json()
                 choice = payload["choices"][0]
                 provider_message = choice.get("message", {})
                 tool_calls = []
                 break
-            response = provider_request({**request_payload, "messages": provider_messages})
+            response = provider_request({**request_payload, "messages": provider_messages}, phase="tool")
             response.raise_for_status()
             payload = response.json()
             choice = payload["choices"][0]
@@ -355,7 +368,9 @@ def process_chat_run(run, worker_id="chat-worker"):
                 detail = exc.response.text[:300]
         raise ChatProviderError("The chat provider rejected the request. " + (detail or "Check the model request format."), "provider_rejected") from exc
     except requests.Timeout as exc:
-        raise ChatProviderError("The chat provider timed out.", "worker_timeout") from exc
+        code = "final_answer_timeout" if request_phase == "final_answer" else "provider_request_timeout"
+        message = "The final answer provider request timed out." if request_phase == "final_answer" else "The provider retrieval request timed out."
+        raise ChatProviderError(message, code) from exc
     except requests.RequestException as exc:
         raise ChatProviderError("The configured chat provider is unreachable.", "provider_unreachable") from exc
     ChatRun.objects.filter(pk=run.pk).update(state="validating", status_message="Validating source citations.")
@@ -389,18 +404,17 @@ def render_message_with_citations(message, run=None):
     if run:
         for item in run.evidence_items.select_related("source_document", "page").order_by("ordinal"):
             page_number = item.page.page_number if item.page else 1
-            url = (
-                f"{reverse('document_detail', args=[item.source_document_id])}"
-                f"?revision={item.processed_revision_id}&page={page_number}"
-            )
+            url = f"{reverse('chat_thread', args=[message.thread_id])}?run={run.id}&evidence={item.marker}"
+            document_url = f"{reverse('document_detail', args=[item.source_document_id])}?revision={item.processed_revision_id}&page={page_number}"
             if item.page_region_id:
-                url += f"&region={item.page_region_id}"
-            url += f"&thread={message.thread_id}"
+                document_url += f"&region={item.page_region_id}"
             marker = f"[{item.marker}]"
             link = format_html(
-                '<a class="chat-citation" href="{}" title="{}">{}</a>',
-                url,
+                '<a class="chat-citation" data-ui-id="citation-{}-{}" data-run-id="{}" data-evidence-marker="{}" data-document-href="{}" href="{}" title="{}" aria-label="Evidence {}, {}, page {}">{}</a>',
+                run.id, item.marker, run.id, item.marker,
+                document_url, url,
                 f"{item.source_document.filename}, page {page_number}",
+                item.marker, item.source_document.filename, page_number,
                 marker,
             )
             text = text.replace(marker, link)

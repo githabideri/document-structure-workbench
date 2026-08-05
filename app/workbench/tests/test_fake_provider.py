@@ -161,6 +161,7 @@ class FakeProviderIntegrationTests(TestCase):
         thread.selected_sources.set([self.source])
         run = create_chat_run(thread, "alpha")
         setting_overrides = {"DSW_CHAT_BASE_URL": self.provider.url, "DSW_CHAT_TIMEOUT": timeout,
+                             "DSW_CHAT_FINAL_REQUEST_TIMEOUT": timeout,
                              "DSW_CHAT_TOOL_MODE": tool_mode}
         if max_tool_calls is not None:
             setting_overrides["DSW_CHAT_MAX_TOOL_CALLS"] = max_tool_calls
@@ -286,7 +287,7 @@ class FakeProviderIntegrationTests(TestCase):
 
     def test_timeout_connection_reset_and_malformed_json_are_classified(self):
         _run, error = self.run_mode("timeout", timeout=0.05)
-        self.assertEqual(error, "worker_timeout")
+        self.assertEqual(error, "final_answer_timeout")
         _run, error = self.run_mode("reset")
         self.assertEqual(error, "provider_unreachable")
         _run, error = self.run_mode("malformed-json")

@@ -82,3 +82,31 @@ class VisionOcrTests(TestCase):
         self.assertEqual(result.page_texts[1], "Paddle page text")
         self.assertEqual(result.regions[0]["text"], "Paddle region")
         self.assertEqual(result.ocr_pages[1]["provider"], "paddleocr-vl")
+
+    def test_ingestion_ocr_materializes_regions_for_scanned_image(self):
+        buffer = tempfile.SpooledTemporaryFile()
+        Image.new("RGB", (200, 100), "white").save(buffer, format="PNG")
+        buffer.seek(0)
+        result = ProcessorResult(
+            pages_processed=1,
+            page_images={1: {"data": __import__("base64").b64encode(buffer.read()).decode(), "format": "png"}},
+            page_texts={1: "Docling text"},
+            processor_metadata={"page_dimensions": {1: {"width": 200, "height": 100}}},
+        )
+
+        class FakeClient:
+            provider = "paddleocr-vl"
+            model = "PaddleOCR-VL-0.9B"
+
+            def transcribe(self, image, prompt):
+                return "Scanned text", {"result": {"layoutParsingResults": [{
+                    "markdown": {"text": "Scanned text"},
+                    "prunedResult": {"parsing_res_list": [
+                        {"block_bbox": [20, 10, 180, 40], "block_content": "Scanned text"},
+                    ]},
+                }]}}
+
+        apply_page_ocr(result, client=FakeClient())
+        self.assertEqual(len(result.regions), 1)
+        self.assertEqual(result.regions[0]["text"], "Scanned text")
+        self.assertEqual(result.regions[0]["bbox"], [0.1, 0.1, 0.9, 0.4])

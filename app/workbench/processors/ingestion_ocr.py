@@ -2,6 +2,9 @@
 import base64
 import hashlib
 import logging
+from io import BytesIO
+
+from PIL import Image
 
 from .vision_ocr import VisionOcrClient, VisionOcrError
 
@@ -101,17 +104,57 @@ def apply_page_ocr(result, *, client=None, required=True, progress=None):
         dimensions = result.processor_metadata.get("page_dimensions", {}).get(page_num, {})
         page_width = float(dimensions.get("width") or 0)
         page_height = float(dimensions.get("height") or 0)
-        if not blocks or not page_width or not page_height:
+        try:
+            with Image.open(BytesIO(image_bytes)) as image:
+                image_width, image_height = image.size
+        except Exception:
+            image_width = image_height = 0
+        coordinate_width = image_width or page_width
+        coordinate_height = image_height or page_height
+        if not blocks or not coordinate_width or not coordinate_height:
             continue
+
+        # Docling's layout stage may intentionally have OCR disabled. In that
+        # case a scanned image has page text from Paddle but no structural
+        # regions at all. Materialize Paddle blocks as ordinary PageRegions so
+        # the workspace can draw/select them and corrections remain available.
+        matched_blocks = set()
         for region in result.regions:
             if region.get("page_number") != page_num:
                 continue
             bbox = region.get("bbox", [0, 0, 0, 0])
-            matched = [block for block in blocks if _overlap(bbox, block["bbox"]) >= 0.05]
+            matched = [
+                (index, block) for index, block in enumerate(blocks)
+                if _overlap(bbox, block["bbox"]) >= 0.05
+            ]
             if matched:
-                matched.sort(key=lambda block: (block["bbox"][1], block["bbox"][0]))
-                region["text"] = "\n".join(block["text"] for block in matched)
+                matched.sort(key=lambda item: (item[1]["bbox"][1], item[1]["bbox"][0]))
+                matched_blocks.update(index for index, _ in matched)
+                region["text"] = "\n".join(block["text"] for _, block in matched)
                 region.setdefault("metadata", {})["ocr_provider"] = client.provider
+
+        for index, block in enumerate(blocks):
+            if index in matched_blocks:
+                continue
+            left, top, right, bottom = block["bbox"]
+            result.regions.append({
+                "page_number": page_num,
+                "region_type": "text",
+                "bbox": [
+                    max(0.0, min(1.0, left / coordinate_width)),
+                    max(0.0, min(1.0, top / coordinate_height)),
+                    max(0.0, min(1.0, right / coordinate_width)),
+                    max(0.0, min(1.0, bottom / coordinate_height)),
+                ],
+                "text": block["text"],
+                "confidence": None,
+                "metadata": {
+                    "coord_origin": "TOPLEFT",
+                    "ocr_provider": client.provider,
+                    "ocr_block_index": index,
+                    "ocr_bbox": block["bbox"],
+                },
+            })
 
     result.processor_metadata["ocr"] = {
         "provider": client.provider,

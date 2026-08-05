@@ -1355,6 +1355,10 @@ def api_chat_thread_runs(request, thread_id):
 
 def _api_chat_run(request, run_id):
     run = get_object_or_404(ChatRun.objects.select_related("thread", "assistant_message", "thread__project"), pk=run_id)
+    identity = request._api_token.user if request._api_token.user_id else None
+    is_admin = bool(identity and (identity.is_staff or identity.is_superuser))
+    if not is_admin and run.thread.created_by_id != getattr(identity, "id", None):
+        return None
     policy = ProjectAccessPolicy(user=request._api_token.user if request._api_token.user_id else None, token=request._api_token)
     if run.thread.project_id and not policy.can_view(run.thread.project):
         return None

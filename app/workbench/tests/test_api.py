@@ -205,6 +205,21 @@ class ApiContractTests(TestCase):
         self.assertEqual(self.client.get(reverse("api_support_bundle_detail", args=[run.pk]), **self.auth()).status_code, 404)
         self.assertEqual(AuditEvent.objects.filter(object_id=str(run.pk)).count(), 0)
 
+    def test_chat_run_reads_require_thread_owner_or_admin(self):
+        other_user = User.objects.create_user("other-api-user", password="pass")
+        ProjectMembership.objects.create(project=self.project, user=other_user, role="viewer")
+        thread = ChatThread.objects.create(project=self.project, created_by=other_user, title="Private thread")
+        message = ChatMessage.objects.create(thread=thread, role="user", text="private?", ordinal=0)
+        run = ChatRun.objects.create(thread=thread, user_message=message, state="completed")
+
+        self.assertEqual(self.client.get(reverse("api_chat_thread_detail", args=[thread.pk]), **self.auth()).status_code, 200)
+        self.assertEqual(self.client.get(reverse("api_chat_run_detail", args=[run.pk]), **self.auth()).status_code, 404)
+        self.assertEqual(self.client.get(reverse("api_chat_run_evidence", args=[run.pk]), **self.auth()).status_code, 404)
+
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.assertEqual(self.client.get(reverse("api_chat_run_detail", args=[run.pk]), **self.auth()).status_code, 200)
+
     def test_chat_management_requires_scope_and_project_access(self):
         thread = self.make_thread()
         response = self.client.patch(

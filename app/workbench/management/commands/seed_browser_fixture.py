@@ -67,9 +67,9 @@ class Command(BaseCommand):
                 )
                 document.filename = filename
                 document.sha256 = digest
-                document.page_count = 1
+                document.page_count = 3
                 document.save(update_fields=["filename", "sha256", "page_count"])
-                page, _ = Page.objects.get_or_create(document=document, page_number=1)
+                pages = [Page.objects.get_or_create(document=document, page_number=page_number)[0] for page_number in range(1, 4)]
                 job, _ = ProcessingJob.objects.get_or_create(
                     source_document=source, preset=preset,
                     defaults={"state": "completed", "result_document": document, "created_by": user},
@@ -80,15 +80,13 @@ class Command(BaseCommand):
                     job.save(update_fields=["result_document", "state"])
                 source.active_document = document
                 source.save(update_fields=["active_document"])
-                SearchPassage.objects.update_or_create(
-                    project=project, source_document=source, processed_revision=document,
-                    processing_job=job, page=page, ordinal=0,
-                    defaults={
-                        "passage_type": "paragraph",
-                        "text": f"This generic browser fixture discusses {filename} and shared archival evidence.",
-                        "normalized_text": f"this generic browser fixture discusses {filename.lower()} and shared archival evidence.",
-                    },
-                )
+                for page_number, page in enumerate(pages, 1):
+                    text = f"{filename} page {page_number} records shared archival evidence, provenance, and a realistic research detail."
+                    SearchPassage.objects.update_or_create(
+                        project=project, source_document=source, processed_revision=document,
+                        processing_job=job, page=page, ordinal=0,
+                        defaults={"passage_type": "paragraph", "text": text, "normalized_text": text.lower()},
+                    )
                 sources.append({"id": source.id, "filename": filename, "revision_id": document.id})
 
         result = {"username": user.username, "project_id": project.id, "sources": sources}

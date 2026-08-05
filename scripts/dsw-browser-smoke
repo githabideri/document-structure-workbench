@@ -196,24 +196,61 @@ record verify-answer pass "assistant=$assistants citations=$citations"
 snapshot conversation-answer
 step conversation-screenshot "$browser" screenshot "$output_dir/conversation.png" || fail "conversation screenshot failed"
 
-evidence_count="$(count '.chat-evidence-list li')"
-[[ "${evidence_count:-0}" -gt 0 ]] || fail "evidence panel is empty"
+evidence_count="$(count '.chat-citation')"
+[[ "${evidence_count:-0}" -gt 0 ]] || fail "assistant citations are empty"
 record evidence-panel pass "items=$evidence_count"
 step open-citation "$browser" click '.chat-citation' || fail "citation could not be opened"
-step citation-wait "$browser" wait --load domcontentloaded || fail "citation page did not load"
+step citation-wait "$browser" wait '[data-ui-id="evidence-heading"]' || fail "evidence reader did not open"
 citation_url="$($browser get url 2>/dev/null | tail -1 || true)"
-[[ "$citation_url" == */documents/* ]] || fail "citation did not navigate to document workspace"
+[[ "$citation_url" == *"evidence="* ]] || fail "citation did not create evidence URL state"
+step evidence-focus "$browser" eval 'JSON.stringify({active:document.activeElement?.dataset?.uiId||document.activeElement?.id||null,heading:document.querySelector("[data-ui-id=\"evidence-heading\"]")?.textContent||""})' || fail "evidence focus state unavailable"
 snapshot cited-document
 step cited-document-screenshot "$browser" screenshot "$output_dir/cited-document.png" || fail "cited document screenshot failed"
 record open-citation pass
-step return-to-chat "$browser" back || fail "could not return to chat"
-if "$browser" wait --text 'Documents' >"$output_dir/return_wait.log" 2>&1; then
-  record return-wait pass
-elif "$browser" wait --text 'Dokumente' >"$output_dir/return_wait_localized.log" 2>&1; then
-  record return-wait pass "localized evidence panel"
+step return-to-chat "$browser" back || fail "could not go back in chat history"
+step return-wait "$browser" wait '[data-ui-id="message-timeline"]' || fail "chat timeline did not remain available"
+race_first="S1"
+race_second="S2"
+if [[ "$(count '[data-evidence-marker="S2"]')" -gt 0 ]]; then
+  race_code="window.__dswRaceOriginalFetch=window.fetch; window.fetch=(url,opts={})=>String(url).includes('/evidence/${race_first}/')?new Promise(resolve=>setTimeout(()=>window.__dswRaceOriginalFetch(url,{...opts,signal:undefined}).then(resolve),900)):window.__dswRaceOriginalFetch(url,opts); 'race wrapper installed'"
+  step race-install "$browser" eval "$race_code" || fail "race wrapper could not be installed"
+  step race-first "$browser" eval "document.querySelector('[data-evidence-marker=\"$race_first\"]')?.click(); 'first requested'" || fail "slow evidence could not be selected"
+  "$browser" wait 100 >/dev/null 2>&1 || true
+  step race-second "$browser" eval "document.querySelector('[data-evidence-marker=\"$race_second\"]')?.click(); 'second requested'" || fail "fast evidence could not be selected"
+  step race-fast-wait "$browser" wait 300 || fail "fast evidence wait failed"
+  step race-before-release "$browser" screenshot "$output_dir/race-before-release.png" || fail "race pre-release screenshot failed"
+  step race-release-wait "$browser" wait 1100 || fail "delayed response wait failed"
+  step race-after-release "$browser" eval "new URL(location.href).searchParams.get('evidence')==='${race_second}' ? 'late response ignored' : (()=>{throw new Error('stale evidence won')})()" || fail "stale response replaced current selection"
+  step race-after-release-screenshot "$browser" screenshot "$output_dir/race-after-release.png" || fail "race post-release screenshot failed"
+  record delayed-response-race pass "late ${race_first} response delivered after ${race_second} and remained ignored"
 else
-  record return-wait fail "see $output_dir/return_wait*.log"; fail "return did not reach chat"
+  record delayed-response-race fail "fixture needs at least two citations"
 fi
+
+step history-reset-close "$browser" press Escape || fail "could not close evidence with Escape"
+step history-reset-close-verify "$browser" eval "!new URL(location.href).searchParams.get('evidence') ? 'history reset' : (()=>{throw new Error('close did not update URL')})()" || fail "close control did not update evidence history"
+step history-open-first "$browser" eval "document.querySelector('[data-evidence-marker=\"$race_first\"]')?.click(); 'first'" || fail "history first selection failed"
+step history-open-second "$browser" eval "document.querySelector('[data-evidence-marker=\"$race_second\"]')?.click(); 'second'" || fail "history second selection failed"
+step history-back-first "$browser" back || fail "history back failed"
+step history-verify-first "$browser" eval "new URL(location.href).searchParams.get('evidence')==='${race_first}' ? 'first restored' : (()=>{throw new Error('first not restored')})()" || fail "history did not restore first evidence"
+step history-back-closed "$browser" back || fail "history second back failed"
+step history-verify-closed "$browser" eval "!new URL(location.href).searchParams.get('evidence') ? 'closed restored' : (()=>{throw new Error('reader not closed')})()" || fail "history did not close evidence"
+step history-forward-first "$browser" forward || fail "history forward first failed"
+step history-forward-verify-first "$browser" eval "new URL(location.href).searchParams.get('evidence')==='${race_first}' ? 'first forward' : (()=>{throw new Error('first forward failed')})()" || fail "history forward did not restore first"
+step history-forward-second "$browser" forward || fail "history forward second failed"
+step history-forward-verify-second "$browser" eval "new URL(location.href).searchParams.get('evidence')==='${race_second}' ? 'second forward' : (()=>{throw new Error('second forward failed')})()" || fail "history forward did not restore second"
+step draft-preservation "$browser" eval "const t=document.querySelector('[data-ui-id=\"composer\"] textarea'); t.value='draft survives evidence navigation'; t.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-evidence-marker=\"${race_first}\"]')?.click(); 'draft set'" || fail "draft preservation setup failed"
+step draft-verify "$browser" eval "document.querySelector('[data-ui-id=\"composer\"] textarea')?.value==='draft survives evidence navigation' ? 'draft preserved' : (()=>{throw new Error('draft lost')})()" || fail "draft was lost"
+
+for viewport in 1440x1000 1024x768 390x844; do
+  width="${viewport%x*}"; height="${viewport#*x}"
+  step "viewport-${viewport}" "$browser" set viewport "$width" "$height" || fail "could not set viewport $viewport"
+  step "viewport-${viewport}-open" "$browser" eval "document.querySelector('[data-evidence-marker=\"${race_first}\"]')?.click(); 'opened'" || fail "could not open evidence at $viewport"
+  step "viewport-${viewport}-wait" "$browser" wait 500 || fail "evidence did not settle at $viewport"
+  step "viewport-${viewport}-assert" "$browser" eval "(()=>{const d=document.documentElement; const panel=document.querySelector('[data-ui-id=\"evidence-reader\"]'); const close=document.querySelector('.evidence-close'); const composer=document.querySelector('[data-ui-id=\"composer\"]'); const scrollables=[...document.querySelectorAll('.chat-sessions,.chat-messages,.chat-context,.evidence-page-viewport')].filter(x=>!x.closest('[hidden]')); if(d.scrollWidth>d.clientWidth+2) throw new Error('body overflow'); if(!panel||!close||!composer||scrollables.some(x=>x.clientHeight<1)) throw new Error('workspace control/scroll failure'); return JSON.stringify({viewport:'$viewport',bodyScrollWidth:d.scrollWidth,bodyClientWidth:d.clientWidth,focus:document.activeElement?.dataset?.uiId||document.activeElement?.id||null,selected:new URL(location.href).searchParams.get('evidence'),scrollables:scrollables.map(x=>({id:x.dataset.uiId||x.className,height:x.clientHeight}))})})()" || fail "responsive assertions failed at $viewport"
+  step "viewport-${viewport}-screenshot" "$browser" screenshot "$output_dir/chat-${viewport}.png" || fail "viewport screenshot failed at $viewport"
+done
+
 snapshot returned-chat
 step return-screenshot "$browser" screenshot "$output_dir/returned-chat.png" || fail "return screenshot failed"
 record return-to-chat pass

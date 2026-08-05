@@ -32,7 +32,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.mode == "empty-final":
             message, finish = {"content": ""}, "stop"
         else:
-            message, finish = {"content": "The selected fixture contains generic archival evidence. [S1]"}, "stop"
+            message, finish = {"content": "The selected fixture contains archival evidence across provenance, context, and research details. [S1] [S2] [S3] [S4] [S5]"}, "stop"
         payload = {"model": self.model, "choices": [{"finish_reason": finish, "message": message}],
                    "usage": {"prompt_tokens": 10, "completion_tokens": 12, "total_tokens": 22}}
         raw = json.dumps(payload).encode()

@@ -546,6 +546,10 @@ def _create_ocr_request(request, page, region=None):
         body = json.loads(request.body or "{}")
     except json.JSONDecodeError:
         body = {}
+    provider = str(body.get("provider") or getattr(settings, "DSW_OCR_PROVIDER", "qwen")).strip()
+    from .processors.vision_ocr import OCR_PROVIDERS
+    if provider not in OCR_PROVIDERS:
+        return JsonResponse({"error": f"Unsupported visual OCR provider: {provider}"}, status=400)
     prompt = str(body.get("prompt") or (
         "Transcribe exactly the visible text. Preserve spelling, punctuation and line breaks. "
         "Do not translate, summarize, correct, infer, or add text. Return only the transcription."
@@ -554,8 +558,10 @@ def _create_ocr_request(request, page, region=None):
         source_document=page.document.processing_job.source_document,
         document=page.document, page=page, region=region,
         target="region" if region else "page",
-        provider=getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible"),
-        model=getattr(settings, "DSW_OCR_MODEL", ""), prompt=prompt,
+        provider=provider,
+        model=(str(body.get("model") or "").strip() or (
+            getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")
+        )), prompt=prompt,
         created_by=token.user if token.user_id else None,
     )
     return JsonResponse(_ocr_request_json(item), status=201)

@@ -64,7 +64,7 @@ class Command(BaseCommand):
             image, image_info = make_crop(request.page, request.region)
             request.input_sha256 = request_metadata(image, image_info)["sha256"]
             request.input_metadata = request_metadata(image, image_info)
-            text, raw = VisionOcrClient().transcribe(image, request.prompt)
+            text, raw = VisionOcrClient(provider=request.provider, model=request.model or None).transcribe(image, request.prompt)
             request.candidate_text = text
             request.raw_response = raw if isinstance(raw, dict) else {"response": raw}
             request.state = "completed"

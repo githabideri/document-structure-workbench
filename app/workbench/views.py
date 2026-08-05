@@ -722,11 +722,16 @@ def create_ocr_request(request, region_id):
     region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "page__document__processing_job__source_document"), pk=region_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(region.page.document.collection):
         raise PermissionDenied
+    from .processors.vision_ocr import OCR_PROVIDERS
+    provider = (request.POST.get("provider") or getattr(settings, "DSW_OCR_PROVIDER", "qwen")).strip()
+    if provider not in OCR_PROVIDERS:
+        messages.error(request, _("Unsupported visual OCR provider."))
+        return _redirect_to_region(request, region)
     item = OcrRequest.objects.create(
         source_document=region.page.document.processing_job.source_document,
         document=region.page.document, page=region.page, region=region,
-        target="region", provider=getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible"),
-        model=getattr(settings, "DSW_OCR_MODEL", ""),
+        target="region", provider=provider,
+        model=(getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")),
         prompt=(request.POST.get("prompt") or
                 "Transcribe exactly the visible text. Preserve spelling, punctuation and line breaks. "
                 "Do not translate, summarize, correct, infer, or add text. Return only the transcription."),
@@ -744,11 +749,16 @@ def create_page_ocr_request(request, page_id):
     page = get_object_or_404(Page.objects.select_related("document__collection", "document__processing_job__source_document"), pk=page_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(page.document.collection):
         raise PermissionDenied
+    from .processors.vision_ocr import OCR_PROVIDERS
+    provider = (request.POST.get("provider") or getattr(settings, "DSW_OCR_PROVIDER", "qwen")).strip()
+    if provider not in OCR_PROVIDERS:
+        messages.error(request, _("Unsupported visual OCR provider."))
+        return redirect(f"{reverse('document_detail', args=[page.document.processing_job.source_document.id])}?revision={page.document_id}&page={page.page_number}")
     OcrRequest.objects.create(
         source_document=page.document.processing_job.source_document,
         document=page.document, page=page, target="page",
-        provider=getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible"),
-        model=getattr(settings, "DSW_OCR_MODEL", ""),
+        provider=provider,
+        model=(getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")),
         prompt=(request.POST.get("prompt") or
                 "Transcribe exactly all visible text on this page. Preserve layout with line breaks. "
                 "Do not translate, summarize, correct, infer, or add text. Return only the transcription."),

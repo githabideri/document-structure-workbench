@@ -105,6 +105,10 @@
                     <form method="post" action="{% url 'create_ocr_request' selected_region.id %}">
                         {% csrf_token %}
                         <p class="help-text">{% trans "Ask the configured visual model to transcribe this crop. The result will appear as a candidate and will not replace the current text automatically." %}</p>
+                        <label>{% trans "Visual model" %}<select name="provider">
+                            <option value="qwen" selected>{% trans "Qwen vision (chat model)" %}</option>
+                            <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
+                        </select></label>
                         <button class="btn btn-secondary" type="submit">{% trans "Re-run visual OCR" %}</button>
                     </form>
                     <form method="post" action="{% url 'correct_region_text' selected_region.id %}">
@@ -131,7 +135,7 @@
                 {% if selected_region.ocr_requests.all %}<details class="ocr-history" open><summary>{% trans "Visual OCR candidates" %}</summary>
                     {% for candidate in selected_region.ocr_requests.all %}
                     <div class="history-item">
-                        <strong>#{{ candidate.id }} · {{ candidate.state }}</strong>
+                        <strong>#{{ candidate.id }} · {{ candidate.state }} · {{ candidate.provider }}{% if candidate.model %} ({{ candidate.model }}){% endif %}</strong>
                         {% if candidate.state == "completed" %}<pre>{{ candidate.candidate_text }}</pre>
                             {% if not candidate.accepted_correction_id and can_edit_document %}<form method="post" action="{% url 'accept_ocr_request' candidate.id %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">{% trans "Accept candidate" %}</button></form>{% endif %}
                         {% elif candidate.error_message %}<p class="progress-message error">{{ candidate.error_message }}</p>{% else %}<p>{% trans "Waiting for the visual OCR worker." %}</p>{% endif %}
@@ -157,9 +161,12 @@
             {% endif %}
             <section class="page-text" id="page-text">
                 <h3>{% trans "Full page text" %}</h3>
-                {% if source_document and can_edit_document and selected_page %}<form method="post" action="{% url 'create_page_ocr_request' selected_page.id %}">{% csrf_token %}<button class="btn btn-secondary" type="submit">{% trans "Re-run full page with visual OCR" %}</button></form>{% endif %}
+                {% if source_document and can_edit_document and selected_page %}<form method="post" action="{% url 'create_page_ocr_request' selected_page.id %}">{% csrf_token %}<label>{% trans "Visual model" %}<select name="provider">
+                    <option value="qwen" selected>{% trans "Qwen vision (chat model)" %}</option>
+                    <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
+                </select></label><button class="btn btn-secondary" type="submit">{% trans "Re-run full page with visual OCR" %}</button></form>{% endif %}
                 {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
-                {% if page_ocr_requests %}<details class="ocr-history" open data-ocr-pending="{% for candidate in page_ocr_requests %}{% if candidate.state == 'queued' or candidate.state == 'processing' %}true{% endif %}{% endfor %}"><summary>{% trans "Page OCR candidates" %}</summary>{% for candidate in page_ocr_requests %}<div class="history-item"><strong>#{{ candidate.id }} · {{ candidate.state }}</strong>{% if candidate.candidate_text %}<pre>{{ candidate.candidate_text }}</pre>{% endif %}{% if candidate.error_message %}<p class="progress-message error">{{ candidate.error_message }}</p>{% endif %}</div>{% endfor %}</details>{% endif %}
+                {% if page_ocr_requests %}<details class="ocr-history" open data-ocr-pending="{% for candidate in page_ocr_requests %}{% if candidate.state == 'queued' or candidate.state == 'processing' %}true{% endif %}{% endfor %}"><summary>{% trans "Page OCR candidates" %}</summary>{% for candidate in page_ocr_requests %}<div class="history-item"><strong>#{{ candidate.id }} · {{ candidate.state }} · {{ candidate.provider }}{% if candidate.model %} ({{ candidate.model }}){% endif %}</strong>{% if candidate.candidate_text %}<pre>{{ candidate.candidate_text }}</pre>{% endif %}{% if candidate.error_message %}<p class="progress-message error">{{ candidate.error_message }}</p>{% endif %}</div>{% endfor %}</details>{% endif %}
             </section>
             {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.safe_html %}<div class="table-preview">{{ extraction.safe_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
         </aside>

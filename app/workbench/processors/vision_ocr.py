@@ -17,6 +17,15 @@ class VisionOcrError(RuntimeError):
     pass
 
 
+OCR_PROVIDERS = {
+    "qwen": "Qwen vision (chat endpoint)",
+    "paddleocr-vl": "PaddleOCR-VL",
+    # Kept for compatibility with existing deployments that used the generic
+    # OpenAI-compatible OCR settings before provider selection was exposed.
+    "openai-compatible": "OpenAI-compatible vision endpoint",
+}
+
+
 def page_image_path(page):
     base = Path(getattr(settings, "ARTIFACTS_BASE_DIR", "/var/lib/dsw/artifacts")).resolve()
     path = (base / page.image_path).resolve()
@@ -49,12 +58,25 @@ def make_crop(page, region=None):
 
 class VisionOcrClient:
     def __init__(self, base_url=None, api_key=None, model=None, provider=None):
-        self.base_url = (base_url or getattr(settings, "DSW_OCR_BASE_URL", "")).rstrip("/")
-        self.api_key = api_key if api_key is not None else getattr(settings, "DSW_OCR_API_KEY", "")
-        self.model = model or getattr(settings, "DSW_OCR_MODEL", "")
+        self.provider = provider or getattr(settings, "DSW_OCR_PROVIDER", "qwen")
+        if self.provider not in OCR_PROVIDERS:
+            raise VisionOcrError(f"Unsupported visual OCR provider: {self.provider}")
+        # Qwen is already the configured research model. Reuse its endpoint
+        # and credentials so a visual rerun genuinely uses a different model
+        # from PaddleOCR without duplicating deployment secrets.
+        if self.provider == "qwen":
+            configured_base = getattr(settings, "DSW_CHAT_BASE_URL", "")
+            configured_key = getattr(settings, "DSW_CHAT_API_KEY", "")
+            configured_model = getattr(settings, "DSW_CHAT_MODEL", "")
+        else:
+            configured_base = getattr(settings, "DSW_OCR_BASE_URL", "")
+            configured_key = getattr(settings, "DSW_OCR_API_KEY", "")
+            configured_model = getattr(settings, "DSW_OCR_MODEL", "")
+        self.base_url = (base_url or configured_base).rstrip("/")
+        self.api_key = api_key if api_key is not None else configured_key
+        self.model = model or configured_model
         self.timeout = getattr(settings, "DSW_OCR_TIMEOUT", 300)
         self.max_tokens = getattr(settings, "DSW_OCR_MAX_TOKENS", 4096)
-        self.provider = provider or getattr(settings, "DSW_OCR_PROVIDER", "openai-compatible")
 
     def transcribe(self, image_bytes, prompt):
         if not self.base_url or not self.model:

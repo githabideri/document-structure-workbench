@@ -167,7 +167,7 @@ DSW_OCR_API_KEY = os.environ.get("DSW_OCR_API_KEY", "")
 DSW_OCR_MODEL = os.environ.get("DSW_OCR_MODEL", "PaddleOCR-VL-0.9B")
 DSW_OCR_TIMEOUT = int(os.environ.get("DSW_OCR_TIMEOUT", "300"))
 DSW_OCR_MAX_TOKENS = int(os.environ.get("DSW_OCR_MAX_TOKENS", "4096"))
-DSW_OCR_PROVIDER = os.environ.get("DSW_OCR_PROVIDER", "paddleocr-vl")
+DSW_OCR_PROVIDER = os.environ.get("DSW_OCR_PROVIDER", "qwen")
 DSW_INGESTION_OCR_ENABLED = os.environ.get("DSW_INGESTION_OCR_ENABLED", "true").lower() == "true"
 DSW_INGESTION_OCR_REQUIRED = os.environ.get("DSW_INGESTION_OCR_REQUIRED", "true").lower() == "true"
 DSW_INGESTION_OCR_PROVIDER = os.environ.get("DSW_INGESTION_OCR_PROVIDER", "paddleocr-vl")

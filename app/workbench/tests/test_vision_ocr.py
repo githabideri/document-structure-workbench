@@ -52,6 +52,26 @@ class VisionOcrTests(TestCase):
         self.assertEqual(request["messages"][0]["content"][0]["text"], "transcribe")
         self.assertTrue(request["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,"))
 
+    @override_settings(
+        DSW_CHAT_BASE_URL="http://qwen.test/v1",
+        DSW_CHAT_API_KEY="chat-secret",
+        DSW_CHAT_MODEL="Qwen3.6-35B-A3B",
+        DSW_OCR_BASE_URL="http://paddle.test/v1",
+        DSW_OCR_MODEL="PaddleOCR-VL-0.9B",
+    )
+    def test_qwen_provider_uses_chat_endpoint_configuration(self):
+        response = type("Response", (), {"raise_for_status": lambda self: None, "json": lambda self: {"choices": [{"message": {"content": "qwen text"}}]}})()
+        with patch("workbench.processors.vision_ocr.requests.post", return_value=response) as post:
+            text, _ = VisionOcrClient(provider="qwen").transcribe(b"png", "read this")
+        self.assertEqual(text, "qwen text")
+        self.assertEqual(post.call_args.args[0], "http://qwen.test/v1/chat/completions")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer chat-secret")
+        self.assertEqual(post.call_args.kwargs["json"]["model"], "Qwen3.6-35B-A3B")
+
+    def test_unknown_provider_is_rejected(self):
+        with self.assertRaisesMessage(Exception, "Unsupported visual OCR provider: made-up"):
+            VisionOcrClient(provider="made-up")
+
     def test_request_keeps_candidate_separate_from_region_text(self):
         item = OcrRequest.objects.create(source_document=self.source, document=self.document, page=self.page, region=self.region, prompt="x", candidate_text="new", state="completed")
         self.assertEqual(self.region.text, "old")

@@ -1,0 +1,120 @@
+{
+  "id": "01K0FIXTURE0SUCCEEDED",
+  "status": "succeeded",
+  "scope": "region",
+  "created_at": "2026-08-07T00:20:00Z",
+  "completed_at": "2026-08-07T00:20:18Z",
+  "label": "document-183-page-4-region-912",
+  "self": "/v1/transcriptions/01K0FIXTURE0SUCCEEDED",
+  "pipeline": {
+    "id": "htrflow-trocr-prototype",
+    "label": "HTRflow + TrOCR prototype"
+  },
+  "page": {
+    "width": 1450,
+    "height": 620
+  },
+  "regions": [
+    {
+      "label": "region0",
+      "bbox": {
+        "xmin": 0.0,
+        "ymin": 0.0,
+        "xmax": 1.0,
+        "ymax": 1.0
+      },
+      "lines": [
+        {
+          "label": "region0_line0",
+          "bbox": {"xmin": 0.041, "ymin": 0.062, "xmax": 0.938, "ymax": 0.146},
+          "text": "am 3. Mai neunzehnhundertachtzehn",
+          "candidates": ["am 3. Mai neunzehnhundertachtzehn"],
+          "scores": [0.42],
+          "confidence": 0.42,
+          "segmentation_confidence": 0.93,
+          "order": 1
+        },
+        {
+          "label": "region0_line1",
+          "bbox": {"xmin": 0.040, "ymin": 0.182, "xmax": 0.940, "ymax": 0.266},
+          "text": "der Herr Hauptmann ordnete an",
+          "candidates": ["der Herr Hauptmann ordnete an"],
+          "scores": [0.39],
+          "confidence": 0.39,
+          "segmentation_confidence": 0.91,
+          "order": 2
+        },
+        {
+          "label": "region0_line2",
+          "bbox": {"xmin": 0.042, "ymin": 0.302, "xmax": 0.936, "ymax": 0.386},
+          "text": "dass die Kompanie zur Stellung",
+          "candidates": ["dass die Kompanie zur Stellung"],
+          "scores": [0.45],
+          "confidence": 0.45,
+          "segmentation_confidence": 0.94,
+          "order": 3
+        },
+        {
+          "label": "region0_line3",
+          "bbox": {"xmin": 0.039, "ymin": 0.422, "xmax": 0.941, "ymax": 0.506},
+          "text": "zuruckkehren solle sobald die",
+          "candidates": ["zuruckkehren solle sobald die"],
+          "scores": [0.38],
+          "confidence": 0.38,
+          "segmentation_confidence": 0.90,
+          "order": 4
+        },
+        {
+          "label": "region0_line4",
+          "bbox": {"xmin": 0.041, "ymin": 0.542, "xmax": 0.938, "ymax": 0.626},
+          "text": "Gegner zuruckgegangen waren",
+          "candidates": ["Gegner zuruckgegangen waren"],
+          "scores": [0.41],
+          "confidence": 0.41,
+          "segmentation_confidence": 0.92,
+          "order": 5
+        },
+        {
+          "label": "region0_line5",
+          "bbox": {"xmin": 0.043, "ymin": 0.662, "xmax": 0.937, "ymax": 0.746},
+          "text": "wurde der Abschnitt bis zum",
+          "candidates": ["wurde der Abschnitt bis zum"],
+          "scores": [0.36],
+          "confidence": 0.36,
+          "segmentation_confidence": 0.89,
+          "order": 6
+        },
+        {
+          "label": "region0_line6",
+          "bbox": {"xmin": 0.040, "ymin": 0.782, "xmax": 0.939, "ymax": 0.866},
+          "text": "Morgen gehalten und verstarkt",
+          "candidates": ["Morgen gehalten und verstarkt"],
+          "scores": [0.44],
+          "confidence": 0.44,
+          "segmentation_confidence": 0.93,
+          "order": 7
+        },
+        {
+          "label": "region0_line7",
+          "bbox": {"xmin": 0.038, "ymin": 0.902, "xmax": 0.942, "ymax": 0.986},
+          "text": "die Lage blieb darauf ruhig",
+          "candidates": ["die Lage blieb darauf ruhig"],
+          "scores": [0.40],
+          "confidence": 0.40,
+          "segmentation_confidence": 0.91,
+          "order": 8
+        }
+      ]
+    }
+  ],
+  "text": "am 3. Mai neunzehnhundertachtzehn\nder Herr Hauptmann ordnete an\ndass die Kompanie zur Stellung\nzuruckkehren solle sobald die\nGegner zuruckgegangen waren\nwurde der Abschnitt bis zum\nMorgen gehalten und verstarkt\ndie Lage blieb darauf ruhig",
+  "diagnostics": {
+    "n_regions": 1,
+    "n_lines": 8,
+    "mean_line_confidence": 0.406
+  },
+  "execution": {
+    "device": "cuda:0",
+    "duration_ms": 17800
+  }
+}

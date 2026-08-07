@@ -676,6 +676,11 @@ def document_detail(request, document_id):
         "can_edit_document": can_edit_document,
         "thread_id": request.GET.get("thread", ""),
         "htr_enabled": getattr(settings, "DSW_HTR_ENABLED", False) or getattr(settings, "DSW_HTR_FIXTURE_MODE", False),
+        "htr_default_pipeline": getattr(settings, "DSW_HTR_DEFAULT_PIPELINE", "htrflow-trocr-kurrent"),
+        "htr_pipelines": [
+            ("htrflow-trocr-kurrent", "TrOCR · Kurrent (19th-c. German)"),
+            ("htrflow-trocr-prototype", "TrOCR · prototype (generic)"),
+        ],
     })
 
 

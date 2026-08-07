@@ -110,6 +110,13 @@
                         <p class="help-text">{% trans "Detect handwritten lines in this region and transcribe them. The result is a candidate — it never replaces the current text until you accept it." %}</p>
                         <div class="htr-status" data-htr-status role="status" aria-live="polite"></div>
                         <div class="htr-actions">
+                            <label class="htr-pipeline-label" for="htr-pipeline-select">{% trans "Recognizer" %}
+                                <select id="htr-pipeline-select" data-htr-pipeline>
+                                    {% for pid, pname in htr_pipelines %}
+                                        <option value="{{ pid }}"{% if pid == htr_default_pipeline %} selected{% endif %}>{{ pname }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
                             <button class="btn btn-secondary" type="button" data-htr-run disabled>{% trans "Run HTR" %}</button>
                             <button class="btn btn-secondary" type="button" data-htr-toggle-lines hidden>{% trans "Show HTR lines" %}</button>
                             <button class="btn btn-secondary" type="button" data-htr-run-again hidden>{% trans "Run again" %}</button>

@@ -151,7 +151,7 @@ class HtrServiceTests(HtrWorldMixin, TestCase):
         self.assertEqual(item.provider, HTR_PROVIDER)
         self.assertEqual(item.target, "region")
         self.assertEqual(item.state, "queued")
-        self.assertEqual(item.metadata["pipeline_id"], "htrflow-trocr-prototype")
+        self.assertEqual(item.metadata["pipeline_id"], "htrflow-trocr-kurrent")
 
     def test_accept_creates_text_correction_and_links_it(self):
         item = self._completed_request()
@@ -232,7 +232,7 @@ class HtrApiTests(HtrWorldMixin, TestCase):
         body = r.json()
         self.assertEqual(body["provider"], HTR_PROVIDER)
         self.assertEqual(body["state"], "queued")
-        self.assertEqual(body["pipeline_id"], "htrflow-trocr-prototype")
+        self.assertEqual(body["pipeline_id"], "htrflow-trocr-kurrent")
 
     def test_post_then_get_lists_run_newest_first(self):
         self.client.post(f"/api/regions/{self.region.id}/htr-runs/",

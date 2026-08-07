@@ -183,7 +183,7 @@ DSW_INGESTION_OCR_MODEL = os.environ.get("DSW_INGESTION_OCR_MODEL", DSW_OCR_MODE
 DSW_HTR_ENABLED = os.environ.get("DSW_HTR_ENABLED", "false").lower() == "true"
 DSW_HTR_BASE_URL = os.environ.get("DSW_HTR_BASE_URL", "").rstrip("/")
 DSW_HTR_API_TOKEN = os.environ.get("DSW_HTR_API_TOKEN", "")
-DSW_HTR_DEFAULT_PIPELINE = os.environ.get("DSW_HTR_DEFAULT_PIPELINE", "htrflow-trocr-prototype")
+DSW_HTR_DEFAULT_PIPELINE = os.environ.get("DSW_HTR_DEFAULT_PIPELINE", "htrflow-trocr-kurrent")
 DSW_HTR_POLL_INTERVAL_SECONDS = float(os.environ.get("DSW_HTR_POLL_INTERVAL_SECONDS", "2"))
 DSW_HTR_TIMEOUT_SECONDS = int(os.environ.get("DSW_HTR_TIMEOUT_SECONDS", "600"))
 DSW_HTR_CONNECT_TIMEOUT = int(os.environ.get("DSW_HTR_CONNECT_TIMEOUT", "10"))

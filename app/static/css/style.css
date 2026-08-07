@@ -744,7 +744,9 @@ a.item-row:hover { background: var(--bg); }
 .htr-panel { margin-top: 1rem; border-top: 1px solid #e5e7eb; padding-top: .75rem; }
 .htr-panel > details > summary { font-weight: 600; cursor: pointer; }
 .htr-panel .help-text { color: var(--secondary); font-size: .875rem; margin: .5rem 0; }
-.htr-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+.htr-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; align-items: center; }
+.htr-pipeline-label { display: inline-flex; align-items: center; gap: .35rem; font-size: .875rem; color: var(--secondary); }
+.htr-pipeline-label select { padding: .25rem .4rem; font-size: .875rem; border: 1px solid #d1d5db; border-radius: .25rem; background: #fff; }
 .htr-status { font-size: .875rem; min-height: 1.25rem; }
 .htr-status[data-kind="error"] { color: #b91c1c; }
 .htr-status[data-kind="success"] { color: #047857; }

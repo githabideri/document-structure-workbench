@@ -35,6 +35,7 @@ if (panel) {
   const runBtn = panel.querySelector("[data-htr-run]");
   const toggleBtn = panel.querySelector("[data-htr-toggle-lines]");
   const runAgainBtn = panel.querySelector("[data-htr-run-again]");
+  const pipelineSelect = panel.querySelector("[data-htr-pipeline]");
   const lineLayer = document.querySelector('g[data-layer="htr-lines"]');
 
   let selectedRun = null;     // run object currently shown (or null)
@@ -257,7 +258,9 @@ if (panel) {
     runBtn.disabled = true;
     status("Submitting region to HTR…");
     try {
-      const run = await json("POST", `/api/regions/${regionId}/htr-runs/`, {});
+      const run = await json("POST", `/api/regions/${regionId}/htr-runs/`, {
+        pipeline_id: pipelineSelect ? pipelineSelect.value : undefined,
+      });
       latestRuns.unshift(run);
       latestRuns.sort((a, b) => b.id - a.id);
       renderRunList(latestRuns);
@@ -288,6 +291,9 @@ if (panel) {
   }
 
   // ---- bootstrap ------------------------------------------------------
+
+  // Recognizer identity label in the run history reflects per-run pipeline.
+  // The selector drives which recognizer the next run uses.
 
   runBtn?.addEventListener("click", startRun);
   runAgainBtn?.addEventListener("click", startRun);

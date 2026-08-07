@@ -57,6 +57,7 @@
                 <div class="scan-stage" id="scan-stage" data-zoom="1">
                     <img id="page-image" src="{% url 'page_image' selected_page.id %}" alt="{% trans 'Original document page' %}">
                     <svg class="region-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="{% trans 'Detected regions' %}">
+                        <g data-layer="regions" aria-hidden="true">
                         {% for region in page_regions %}
                         <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}">
                             <rect class="region-box region-{{ region.display_region_type }}{% if region.display_is_suppressed %} is-suppressed{% endif %}{% if region.id == selected_region.id %} is-selected{% endif %}"
@@ -66,6 +67,8 @@
                             </rect>
                         </a>
                         {% endfor %}
+                        </g>
+                        <g data-layer="htr-lines" aria-label="{% trans 'Handwriting recognition lines' %}" hidden></g>
                     </svg>
                     <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
                         {% for region in page_regions %}
@@ -101,6 +104,20 @@
                 </div>
                 <p class="region-text">{{ selected_region.effective_text|default:_('No text was extracted for this region.') }}</p>
                 {% if source_document and can_edit_document %}
+                <section class="htr-panel" data-htr-region="{{ selected_region.id }}" data-htr-enabled="{{ htr_enabled|yesno:'true,false' }}" data-htr-csrf="{{ csrf_token }}" aria-label="{% trans 'Handwriting recognition' %}">
+                    <details>
+                        <summary>{% trans "Handwriting recognition (HTR)" %}</summary>
+                        <p class="help-text">{% trans "Detect handwritten lines in this region and transcribe them. The result is a candidate — it never replaces the current text until you accept it." %}</p>
+                        <div class="htr-status" data-htr-status role="status" aria-live="polite"></div>
+                        <div class="htr-actions">
+                            <button class="btn btn-secondary" type="button" data-htr-run disabled>{% trans "Run HTR" %}</button>
+                            <button class="btn btn-secondary" type="button" data-htr-toggle-lines hidden>{% trans "Show HTR lines" %}</button>
+                            <button class="btn btn-secondary" type="button" data-htr-run-again hidden>{% trans "Run again" %}</button>
+                        </div>
+                        <div class="htr-runs" data-htr-runs></div>
+                        <div class="htr-line-detail" data-htr-line-detail hidden></div>
+                    </details>
+                </section>
                 <details class="correction-editor"><summary>{% trans "Suggest a text correction" %}</summary>
                     <form method="post" action="{% url 'create_ocr_request' selected_region.id %}">
                         {% csrf_token %}
@@ -175,5 +192,6 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script type="module" src="{% static 'js/htr-workspace.js' %}"></script>
 <script type="module" src="{% static 'js/document-workspace.js' %}"></script>
 {% endblock %}

@@ -675,6 +675,7 @@ def document_detail(request, document_id):
         "workspace_revision_id": document.id,
         "can_edit_document": can_edit_document,
         "thread_id": request.GET.get("thread", ""),
+        "htr_enabled": getattr(settings, "DSW_HTR_ENABLED", False) or getattr(settings, "DSW_HTR_FIXTURE_MODE", False),
     })
 
 

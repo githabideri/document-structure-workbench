@@ -739,3 +739,27 @@ a.item-row:hover { background: var(--bg); }
     .form-step { flex-direction: column; }
     .item-row { align-items: flex-start; }
 }
+
+/* ----- HTR (handwritten-text recognition) panel + line overlay ----- */
+.htr-panel { margin-top: 1rem; border-top: 1px solid #e5e7eb; padding-top: .75rem; }
+.htr-panel > details > summary { font-weight: 600; cursor: pointer; }
+.htr-panel .help-text { color: var(--secondary); font-size: .875rem; margin: .5rem 0; }
+.htr-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+.htr-status { font-size: .875rem; min-height: 1.25rem; }
+.htr-status[data-kind="error"] { color: #b91c1c; }
+.htr-status[data-kind="success"] { color: #047857; }
+.htr-runs { margin-top: .5rem; }
+.htr-history-item { padding: .5rem; border: 1px solid #e5e7eb; border-radius: .375rem; margin-bottom: .5rem; }
+.htr-history-item.is-selected { border-color: #d97706; background: #fffbeb; }
+.htr-run-actions { display: flex; gap: .5rem; margin-top: .5rem; align-items: center; }
+.htr-line-meta { display: flex; gap: .75rem; font-size: .875rem; color: var(--secondary); margin-bottom: .25rem; }
+.htr-line-text { margin: 0; padding: .5rem; background: #f9fafb; border-radius: .375rem; font-size: .875rem; }
+.htr-line-detail { margin-top: .5rem; padding: .5rem; border: 1px solid #e5e7eb; border-radius: .375rem; }
+.badge { display: inline-block; padding: .125rem .5rem; background: #dcfce7; color: #065f46; border-radius: 1rem; font-size: .75rem; }
+
+/* HTR line overlay — lives inside the same viewBox=0 0 1 1 region-overlay SVG. */
+.htr-line { cursor: pointer; }
+.htr-line-box { fill: rgba(217,119,6,.10); stroke: #d97706; stroke-width: .004; vector-effect: non-scaling-stroke; transition: fill .15s, stroke .15s; }
+.htr-line:hover .htr-line-box, .htr-line:focus .htr-line-box { fill: rgba(217,119,6,.30); stroke-width: .006; }
+.htr-line.is-selected .htr-line-box { fill: rgba(217,119,6,.40); stroke: #b45309; stroke-width: .007; }
+.htr-line-order { fill: #b45309; font-size: .02px; font-weight: 700; pointer-events: none; }

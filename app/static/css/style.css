@@ -756,6 +756,7 @@ a.item-row:hover { background: var(--bg); }
 .htr-line-text { margin: 0; padding: .5rem; background: #f9fafb; border-radius: .375rem; font-size: .875rem; }
 .htr-line-detail { margin-top: .5rem; padding: .5rem; border: 1px solid #e5e7eb; border-radius: .375rem; }
 .badge { display: inline-block; padding: .125rem .5rem; background: #dcfce7; color: #065f46; border-radius: 1rem; font-size: .75rem; }
+.badge-htr-pipeline { background: #ffedd5; color: #9a3412; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-left: .25rem; }
 
 /* HTR line overlay — lives inside the same viewBox=0 0 1 1 region-overlay SVG. */
 .htr-line { cursor: pointer; }

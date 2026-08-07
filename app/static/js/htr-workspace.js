@@ -18,6 +18,12 @@
  */
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
 const panel = document.querySelector("[data-htr-region]");
 if (panel) {
   const regionId = panel.dataset.htrRegion;
@@ -114,7 +120,14 @@ if (panel) {
       label.textContent = line.order || "";
       g.appendChild(rect);
       g.appendChild(label);
-      g.addEventListener("click", () => selectLine(run, line));
+      const activate = () => selectLine(run, line);
+      g.addEventListener("click", activate);
+      g.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activate();
+        }
+      });
       g.setAttribute("role", "button");
       g.setAttribute("tabindex", "0");
       g.setAttribute("aria-label", `Line ${line.order || ""}: ${(line.text || "").slice(0, 40)}`);
@@ -134,11 +147,14 @@ if (panel) {
     selectedLine = line.order;
     highlightLine(line.order);
     lineDetailEl.hidden = false;
-    const conf = line.confidence != null ? `${(line.confidence * 100).toFixed(0)}%` : "—";
-    const seg = line.segmentation_confidence != null ? `${(line.segmentation_confidence * 100).toFixed(0)}%` : "—";
+    const confPct = line.confidence != null ? Math.round(line.confidence * 100) : null;
+    const segPct = line.segmentation_confidence != null ? Math.round(line.segmentation_confidence * 100) : null;
+    const conf = confPct != null ? `${confPct}%` : "—";
+    const seg = segPct != null ? `${segPct}%` : "—";
+    const labelText = line.label || `line ${line.order || ""}`;
     lineDetailEl.innerHTML = `
-      <div class="htr-line-meta"><strong>${line.label || ("line " + (line.order || ""))}</strong>
-        <span>${conf}% transcription</span><span>${seg}% segmentation</span></div>
+      <div class="htr-line-meta"><strong>${escapeHtml(labelText)}</strong>
+        <span>${escapeHtml(conf)} transcription</span><span>${escapeHtml(seg)} segmentation</span></div>
       <pre class="htr-line-text"></pre>`;
     lineDetailEl.querySelector(".htr-line-text").textContent = line.text || "";
   }
@@ -165,9 +181,10 @@ if (panel) {
       const lines = run.result ? run.result.lines.length : 0;
       const dur = fmtDuration(run.result && run.result.execution);
       const stateLabel = run.state === "completed" ? `completed · ${lines} lines${dur ? " · " + dur : ""}` : run.state;
-      let html = `<strong>#${run.id} · ${stateLabel}</strong>`;
-      if (run.state === "completed" && run.error_message) html += `<p class="progress-message error">${run.error_message}</p>`;
-      else if (run.state === "failed") html += `<p class="progress-message error">${run.error_message || "failed"}</p>`;
+      const pipelineLabel = run.pipeline_id ? `<span class="badge badge-htr-pipeline">${escapeHtml(run.pipeline_id)}</span>` : "";
+      let html = `<strong>#${run.id} · ${stateLabel}</strong> ${pipelineLabel}`;
+      if (run.state === "completed" && run.error_message) html += `<p class="progress-message error">${escapeHtml(run.error_message)}</p>`;
+      else if (run.state === "failed") html += `<p class="progress-message error">${escapeHtml(run.error_message || "failed")}</p>`;
       else if (run.state === "queued" || run.state === "processing") html += `<p class="progress-message">Working…</p>`;
       // Action buttons
       const btns = [];

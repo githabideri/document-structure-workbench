@@ -636,7 +636,7 @@ def document_detail(request, document_id):
             selected_region = None
 
     page_text = ""
-    page_ocr_requests = list(OcrRequest.objects.filter(page=page).order_by("-created_at", "-id")[:10]) if page else []
+    page_ocr_requests = list(OcrRequest.objects.filter(page=page).exclude(provider="htr").order_by("-created_at", "-id")[:10]) if page else []
     processing_job = getattr(document, "processing_job", None)
     if processing_job:
         artifact = ProcessingArtifact.objects.filter(
@@ -669,6 +669,7 @@ def document_detail(request, document_id):
         "selected_region": selected_region,
         "page_text": page_text,
         "page_ocr_requests": page_ocr_requests,
+        "visual_ocr_requests": (list(selected_region.ocr_requests.exclude(provider="htr").order_by("-created_at", "-id")[:10]) if selected_region else []),
         "processing_job": processing_job,
         "source_document": source_document,
         "workspace_document_id": source_document.id if source_document else document.id,

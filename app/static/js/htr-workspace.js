@@ -187,6 +187,12 @@ if (panel) {
       if (run.state === "completed" && run.error_message) html += `<p class="progress-message error">${escapeHtml(run.error_message)}</p>`;
       else if (run.state === "failed") html += `<p class="progress-message error">${escapeHtml(run.error_message || "failed")}</p>`;
       else if (run.state === "queued" || run.state === "processing") html += `<p class="progress-message">Working…</p>`;
+      // Show the recognized transcription text inline so a completed run is not
+      // just an id/state/model badge with no readable output.
+      const runText = run.result && run.result.text;
+      if (run.state === "completed" && runText) {
+        html += `<pre class="htr-run-text">${escapeHtml(runText)}</pre>`;
+      }
       // Action buttons
       const btns = [];
       if (run.state === "completed") btns.push(`<button class="btn btn-sm btn-secondary" data-action="show">${isSel ? "Hide lines" : "Show lines"}</button>`);
@@ -319,6 +325,18 @@ if (panel) {
       const data = await json("GET", `/api/regions/${regionId}/htr-runs/`);
       latestRuns = data.runs || [];
       renderRunList(latestRuns);
+      // Auto-show the latest handwriting-line overlay so a first-time user sees
+      // the per-line segmentation immediately (no hidden control to discover).
+      // The previous run stays one click away in the history list.
+      const autoShow = latestRuns.find(
+        (r) => r.state === "completed" && r.result && r.result.lines && r.result.lines.length
+      );
+      if (autoShow) {
+        selectRun(autoShow);       // render lines + reveal toggle
+        renderRunList(latestRuns); // mark the auto-shown run as selected
+        const detailsEl = panel.querySelector("details");
+        if (detailsEl) detailsEl.open = true;
+      }
       // Resume polling if any run is still in flight.
       const active = latestRuns.find((r) => r.state === "queued" || r.state === "processing");
       if (active) { runBtn.hidden = true; pollRun(active.id); }

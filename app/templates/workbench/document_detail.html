@@ -156,8 +156,8 @@
                     {% endif %}
                 </details>
                 {% endif %}
-                {% if selected_region.ocr_requests.all %}<details class="ocr-history" open><summary>{% trans "Visual OCR candidates" %}</summary>
-                    {% for candidate in selected_region.ocr_requests.all %}
+                {% if visual_ocr_requests %}<details class="ocr-history" open><summary>{% trans "Visual OCR candidates" %}</summary>
+                    {% for candidate in visual_ocr_requests %}
                     <div class="history-item">
                         <strong>#{{ candidate.id }} · {{ candidate.state }} · {{ candidate.provider }}{% if candidate.model %} ({{ candidate.model }}){% endif %}</strong>
                         {% if candidate.state == "completed" %}<pre>{{ candidate.candidate_text }}</pre>

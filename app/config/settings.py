@@ -175,6 +175,29 @@ DSW_INGESTION_OCR_REQUIRED = os.environ.get("DSW_INGESTION_OCR_REQUIRED", "true"
 DSW_INGESTION_OCR_PROVIDER = os.environ.get("DSW_INGESTION_OCR_PROVIDER", "paddleocr-vl")
 DSW_INGESTION_OCR_MODEL = os.environ.get("DSW_INGESTION_OCR_MODEL", DSW_OCR_MODEL)
 
+# Optional handwritten-text recognition (HTR) rerun. This is a distinct,
+# region-scoped action separate from the full-page visual OCR rerun above: the
+# selected region crop is submitted to the HTR inference service and the
+# line-level transcription is stored as a *candidate* (OcrRequest provider="htr")
+# that never overwrites region text until a curator accepts it as a correction.
+DSW_HTR_ENABLED = os.environ.get("DSW_HTR_ENABLED", "false").lower() == "true"
+DSW_HTR_BASE_URL = os.environ.get("DSW_HTR_BASE_URL", "").rstrip("/")
+DSW_HTR_API_TOKEN = os.environ.get("DSW_HTR_API_TOKEN", "")
+DSW_HTR_DEFAULT_PIPELINE = os.environ.get("DSW_HTR_DEFAULT_PIPELINE", "htrflow-trocr-prototype")
+DSW_HTR_POLL_INTERVAL_SECONDS = float(os.environ.get("DSW_HTR_POLL_INTERVAL_SECONDS", "2"))
+DSW_HTR_TIMEOUT_SECONDS = int(os.environ.get("DSW_HTR_TIMEOUT_SECONDS", "600"))
+DSW_HTR_CONNECT_TIMEOUT = int(os.environ.get("DSW_HTR_CONNECT_TIMEOUT", "10"))
+DSW_HTR_FIXTURE_DELAY_SECONDS = float(os.environ.get("DSW_HTR_FIXTURE_DELAY_SECONDS", "3"))
+# Local development / UI testing without a deployed HTR service: the worker
+# returns a recorded fixture result (app/workbench/tests/fixtures/htr/) after a
+# short delay so the queued/processing/completed flow is observable. Never set
+# this in a real deployment.
+DSW_HTR_FIXTURE_MODE = os.environ.get("DSW_HTR_FIXTURE_MODE", "false").lower() == "true"
+DSW_HTR_FIXTURE_PATH = os.environ.get(
+    "DSW_HTR_FIXTURE_PATH",
+    str(Path(__file__).resolve().parent.parent / "workbench" / "tests" / "fixtures" / "htr" / "transcription-succeeded.json"),
+)
+
 # Fail clearly when API URL is absent in production
 if not DEBUG and not DSW_DOCLING_API_URL:
     import warnings

@@ -30,6 +30,7 @@ from functools import wraps
 
 from django.conf import settings
 from django.http import FileResponse, JsonResponse
+from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
@@ -46,6 +47,7 @@ from .models import (
     ChatThread, ChatRun, ChatMessage,
 )
 from .policy import ProjectAccessPolicy
+from .processors.htr import HTR_PROVIDER, HTR_SCHEMA_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -971,6 +973,41 @@ def _ocr_request_json(item):
     }
 
 
+def _flatten_htr_lines(raw):
+    """Flatten nested region/line output into a single order-sorted list."""
+    lines = []
+    for region in (raw or {}).get("regions", []):
+        for line in region.get("lines", []):
+            lines.append(line)
+    lines.sort(key=lambda line: line.get("order", 0))
+    return lines
+
+
+def _htr_run_json(item):
+    """Serialize an HTR OcrRequest, including normalized line results."""
+    base = _ocr_request_json(item)
+    raw = item.raw_response or {}
+    meta = item.metadata or {}
+    crop = meta.get("crop") or (item.input_metadata or {}).get("crop") or {}
+    result = None
+    if item.state == "completed":
+        result = {
+            "schema_version": meta.get("schema_version", HTR_SCHEMA_VERSION),
+            "text": item.candidate_text or raw.get("text", ""),
+            "regions": raw.get("regions", []),
+            "lines": _flatten_htr_lines(raw),
+            "diagnostics": raw.get("diagnostics", {}),
+            "execution": raw.get("execution", {}),
+            "crop": crop,
+        }
+    base.update({
+        "pipeline_id": meta.get("pipeline_id", ""),
+        "remote_id": meta.get("remote_id", ""),
+        "result": result,
+    })
+    return base
+
+
 def _create_ocr_request(request, page, region=None):
     token = request._api_token
     try:
@@ -1046,6 +1083,85 @@ def api_ocr_request_accept(request, request_id):
         return JsonResponse({"request_id": request._request_id, "error": {"code": "invalid_transition", "message": str(exc)}}, status=409)
     item.refresh_from_db()
     return JsonResponse(_ocr_request_json(item))
+
+
+# ---------------------------------------------------------------------------
+# Handwritten-text recognition (HTR) — region-scoped rerun (session JSON)
+#
+# These endpoints serve the workspace UI (session-auth, JSON). They are
+# intentionally separate from the token-only /api/v1/ OCR endpoints and from
+# the full-page visual OCR rerun: HTR targets one selected region and produces
+# line-level output. Acceptance reuses the normal RegionCorrection path.
+# ---------------------------------------------------------------------------
+
+def _htr_available():
+    return getattr(settings, "DSW_HTR_ENABLED", False) or getattr(settings, "DSW_HTR_FIXTURE_MODE", False)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def api_region_htr_runs(request, region_id):
+    """List previous HTR runs for a region (GET) or start a new one (POST)."""
+    region = get_object_or_404(
+        PageRegion.objects.select_related("page__document__collection", "page__document__processing_job__source_document"),
+        pk=region_id,
+    )
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(region.page.document.collection):
+        return JsonResponse({"error": {"code": "forbidden"}}, status=403)
+    if request.method == "GET":
+        runs = (OcrRequest.objects.filter(region=region, provider=HTR_PROVIDER)
+                .order_by("-created_at", "-id")[:25])
+        return JsonResponse({"region_id": region.id, "runs": [_htr_run_json(r) for r in runs]})
+    if not policy.can_edit(region.page.document.collection):
+        return JsonResponse({"error": {"code": "forbidden"}}, status=403)
+    if not _htr_available():
+        return JsonResponse({"error": {"code": "htr_disabled", "message": "HTR is not enabled."}}, status=409)
+    try:
+        body = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        body = {}
+    pipeline_id = str(body.get("pipeline_id") or getattr(settings, "DSW_HTR_DEFAULT_PIPELINE", "")).strip()
+    try:
+        from .services import HtrService
+        item = HtrService.create(page=region.page, region=region, pipeline_id=pipeline_id, user=request.user)
+    except (PermissionError, ValueError) as exc:
+        return JsonResponse({"error": {"code": "invalid_request", "message": str(exc)}}, status=400)
+    return JsonResponse(_htr_run_json(item), status=201)
+
+
+@login_required
+@require_http_methods(["GET"])
+def api_htr_run_detail(request, request_id):
+    """Return one HTR run, including normalized line results when completed."""
+    item = get_object_or_404(OcrRequest.objects.select_related("page", "region", "document__collection"), pk=request_id)
+    if item.provider != HTR_PROVIDER:
+        return JsonResponse({"error": {"code": "not_found"}}, status=404)
+    if not ProjectAccessPolicy(user=request.user).can_view(item.document.collection):
+        return JsonResponse({"error": {"code": "forbidden"}}, status=403)
+    return JsonResponse(_htr_run_json(item))
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_htr_run_accept(request, request_id):
+    """Accept an HTR candidate as a reversible region-text correction."""
+    item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
+    if item.provider != HTR_PROVIDER:
+        return JsonResponse({"error": {"code": "not_found"}}, status=404)
+    body = json.loads(request.body or "{}") if request.body else {}
+    try:
+        from .services import CorrectionError, HtrService
+        HtrService.accept(item=item, user=request.user, expected_current=body.get("expected_current_text"))
+    except PermissionError as exc:
+        return JsonResponse({"error": {"code": "forbidden", "message": str(exc)}}, status=403)
+    except CorrectionError as exc:
+        code = "region_state_conflict" if "changed" in str(exc) else "invalid_request"
+        return JsonResponse({"error": {"code": code, "message": str(exc)}}, status=409 if code == "region_state_conflict" else 400)
+    except ValueError as exc:
+        return JsonResponse({"error": {"code": "invalid_transition", "message": str(exc)}}, status=409)
+    item.refresh_from_db()
+    return JsonResponse(_htr_run_json(item))
 
 
 # ---------------------------------------------------------------------------

@@ -508,6 +508,67 @@ class OcrService:
             return correction
 
 
+class HtrService:
+    """Region-scoped handwritten-text recognition candidate lifecycle.
+
+    HTR is deliberately separate from the full-page visual OCR rerun: it targets
+    a single detected region, produces line-level output, and is always stored
+    as a candidate (``OcrRequest(provider="htr")``). Acceptance reuses the
+    normal ``RegionCorrection`` text path so existing revert semantics apply.
+    """
+
+    @staticmethod
+    def create(*, page, region, pipeline_id="", user=None, policy=None):
+        from .policy import ProjectAccessPolicy
+        from .processors.htr import HTR_PROVIDER, HTR_SCHEMA_VERSION
+        policy = policy or ProjectAccessPolicy(user=user)
+        if not policy.can_edit(page.document.collection):
+            raise PermissionError("You do not have permission to edit this project.")
+        if region is None:
+            raise ValueError("HTR is region-scoped; select a region first.")
+        if region.page_id != page.id:
+            raise ValueError("The selected region does not belong to this page.")
+        pipeline = pipeline_id or getattr(
+            settings, "DSW_HTR_DEFAULT_PIPELINE", "htrflow-trocr-prototype"
+        )
+        return OcrRequest.objects.create(
+            source_document=page.document.processing_job.source_document,
+            document=page.document, page=page, region=region,
+            target="region", provider=HTR_PROVIDER, model="",
+            prompt="htr",
+            metadata={"pipeline_id": pipeline, "schema_version": HTR_SCHEMA_VERSION},
+            created_by=user,
+        )
+
+    @staticmethod
+    def accept(*, item, user=None, policy=None, expected_current=None):
+        from .policy import ProjectAccessPolicy
+        from .processors.htr import HTR_PROVIDER
+        policy = policy or ProjectAccessPolicy(user=user)
+        with transaction.atomic():
+            locked = OcrRequest.objects.select_for_update().select_related(
+                "document__collection", "region"
+            ).get(pk=item.pk)
+            if not policy.can_edit(locked.document.collection):
+                raise PermissionError("You do not have permission to edit this project.")
+            if locked.provider != HTR_PROVIDER or locked.state != "completed" or not locked.region_id:
+                raise ValueError("Only completed region HTR candidates can be accepted.")
+            if locked.accepted_correction_id:
+                return locked.accepted_correction
+            text = (locked.candidate_text or "").strip()
+            if not text:
+                raise ValueError("This HTR candidate has no text to accept.")
+            correction = CorrectionService.apply(
+                region=locked.region, user=user, policy=policy, operation="text",
+                before={"text": locked.region.effective_text}, after={"text": text},
+                reason=f"Accepted HTR transcription #{locked.pk}",
+                expected_current=expected_current,
+            )
+            locked.accepted_correction = correction
+            locked.save(update_fields=["accepted_correction"])
+            return correction
+
+
 class IngestionError(Exception):
     """Raised when upload/ingestion fails."""
     pass

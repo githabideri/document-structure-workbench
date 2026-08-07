@@ -115,6 +115,10 @@ urlpatterns = [
     path("api/v1/pages/<int:page_id>/ocr/", api.api_page_ocr, name="api_page_ocr"),
     path("api/v1/ocr/requests/<int:request_id>/", api.api_ocr_request_detail, name="api_ocr_request_detail"),
     path("api/v1/ocr/requests/<int:request_id>/accept/", api.api_ocr_request_accept, name="api_ocr_request_accept"),
+    # Handwritten-text recognition (HTR) — region-scoped rerun, session JSON.
+    path("api/regions/<int:region_id>/htr-runs/", api.api_region_htr_runs, name="api_region_htr_runs"),
+    path("api/htr-runs/<int:request_id>/", api.api_htr_run_detail, name="api_htr_run_detail"),
+    path("api/htr-runs/<int:request_id>/accept/", api.api_htr_run_accept, name="api_htr_run_accept"),
     path("api/v1/tasks/", api.api_tasks, name="api_tasks"),
     path("api/v1/tasks/<int:task_id>/", api.api_task_detail, name="api_task_detail"),
     path("api/v1/tasks/<int:task_id>/submit/", api.api_task_submit, name="api_task_submit"),

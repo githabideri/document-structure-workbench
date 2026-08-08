@@ -18,14 +18,38 @@ class Command(BaseCommand):
     help = "Dump rendering diagnostics for a source document (read-only)."
 
     def add_arguments(self, parser):
-        parser.add_argument("--source-id", required=True, type=int,
+        parser.add_argument("--source-id", type=int, default=None,
                             help="SourceDocument id (the /documents/<id>/ URL id).")
+        parser.add_argument(
+            "--filename",
+            default="",
+            help="Locate source document(s) by case-insensitive filename substring.",
+        )
 
     def handle(self, *args, **options):
-        source = SourceDocument.objects.filter(pk=options["source_id"]).first()
-        if not source:
-            raise CommandError("No source document with id {}".format(options["source_id"]))
+        source_id = options["source_id"]
+        filename = options["filename"].strip()
+        if not source_id and not filename:
+            raise CommandError("Provide --source-id or --filename.")
 
+        sources = SourceDocument.objects.all()
+        if source_id:
+            sources = sources.filter(pk=source_id)
+        if filename:
+            sources = sources.filter(filename__icontains=filename)
+        sources = list(sources.order_by("id"))
+        if not sources:
+            raise CommandError(
+                "No source document matches source-id={!r} filename={!r}.".format(
+                    source_id, filename
+                )
+            )
+
+        for source in sources:
+            self._dump(source)
+        self.stdout.write(self.style.SUCCESS("ready"))
+
+    def _dump(self, source):
         self.stdout.write("source id={} filename={!r} project={!r}".format(
             source.id, source.filename, source.collection.name if source.collection else None,
         ))
@@ -46,7 +70,6 @@ class Command(BaseCommand):
                     )
                 )
                 if has_table:
-                    # Show the first table-like line around the markup.
                     idx = text.lower().find("<table")
                     self.stdout.write("    sample: {!r}".format(text[idx:idx + 160]))
 
@@ -67,4 +90,3 @@ class Command(BaseCommand):
                     table.stable_table_id, ", ".join(info) or "none",
                 )
             )
-        self.stdout.write(self.style.SUCCESS("ready"))

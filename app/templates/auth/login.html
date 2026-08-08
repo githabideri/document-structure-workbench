@@ -15,6 +15,11 @@
             <label for="id_password">{% trans "Password" %}</label>
             <input type="password" name="password" id="id_password" required>
         </div>
+        {% if form.non_field_errors %}
+        <div class="form-error" role="alert">
+            {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}
         <button type="submit" class="btn btn-primary">{% trans "Login" %}</button>
     </form>
 </div>

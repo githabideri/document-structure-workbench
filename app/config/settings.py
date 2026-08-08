@@ -122,6 +122,23 @@ X_FRAME_OPTIONS = "DENY"
 CSRF_COOKIE_SECURE = os.environ.get("DSW_SECURE_COOKIES", "false").lower() == "true"
 SESSION_COOKIE_SECURE = os.environ.get("DSW_SECURE_COOKIES", "false").lower() == "true"
 
+# --- Reverse-proxy / HTTPS hardening (public exposure via Caddy) ---
+# The TLS-terminating Caddy proxy is the sole public ingress; trust its
+# X-Forwarded-Proto so is_secure, URL generation and redirects are correct
+# behind HTTPS. These are safe defaults and apply to every deployment.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_TRUSTED_ORIGINS = [
+    "https://dsw.martinfellner.at",
+    "https://dsw.tail51128.ts.net",
+]
+
+# Login brute-force throttle (cache-backed, no extra dependency/migration).
+LOGIN_THROTTLE_FAILURE_LIMIT = int(os.environ.get("DSW_LOGIN_THROTTLE_FAILURE_LIMIT", "8"))
+LOGIN_THROTTLE_COOLDOWN_SECONDS = int(os.environ.get("DSW_LOGIN_THROTTLE_COOLDOWN_SECONDS", "900"))
+
 # Paths (overridable for deployment)
 ARTIFACTS_BASE_DIR = Path(os.environ.get("DSW_ARTIFACTS_DIR", os.environ.get("DSW_ARTIFACTS_ROOT", "/var/lib/dsw/artifacts")))
 

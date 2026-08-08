@@ -1,15 +1,13 @@
 """URL configuration for Document Structure Workbench."""
 from django.contrib import admin
 from django.urls import path
-from django.contrib.auth import views as auth_views
-from workbench import views
-from workbench import api
+from workbench import api, security, views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
 
     # Auth
-    path("login/", auth_views.LoginView.as_view(template_name="auth/login.html"), name="login"),
+    path("login/", security.ThrottledLoginView.as_view(template_name="auth/login.html"), name="login"),
     path("logout/", views.logout_view, name="logout"),
 
     # Dashboard

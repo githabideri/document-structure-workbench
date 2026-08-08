@@ -61,6 +61,7 @@ htmlcov/
 
 # Translations (generated)
 locale/**/*.mo
+locale_reviewed/**/*.mo
 
 # Local development
 local_settings.py

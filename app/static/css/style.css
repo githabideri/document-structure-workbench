@@ -698,6 +698,9 @@ a.item-row:hover { background: var(--bg); }
 .file-drop:hover, .file-drop.dragover { border-color: var(--primary); background: #eff6ff; }
 .file-drop.has-file { border-color: var(--success, #16a34a); background: #f0fdf4; }
 .file-drop.has-error { border-color: #dc2626; background: #fef2f2; }
+.region-detail-back { margin-left: auto; }
+.correction-block { margin: 0.5rem 0 1rem; padding: 0.75rem 0.9rem; border: 1px solid var(--border); border-radius: 8px; }
+.correction-block-title { margin: 0 0 0.4rem; font-size: 0.9rem; }
 .file-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .file-drop span { color: var(--secondary); font-size: 0.85rem; }
 .file-selected {

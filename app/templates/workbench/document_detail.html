@@ -101,6 +101,7 @@
                 <div class="region-detail-heading">
                     <span class="region-type-badge">{{ selected_region.display_region_type_label }}{% if selected_region.display_is_suppressed %} · {% trans "Suppressed" %}{% endif %}</span>
                     <span>{% trans "Region" %} {{ selected_region.id }}</span>
+                    <a class="btn btn-sm btn-secondary region-detail-back" href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}">← {% trans "Back to page" %}</a>
                 </div>
                 <p class="region-text">{{ selected_region.effective_text|default:_('No text was extracted for this region.') }}</p>
                 {% if source_document and can_edit_document %}
@@ -126,46 +127,43 @@
                     </details>
                 </section>
                 <details class="correction-editor"><summary>{% trans "Suggest a text correction" %}</summary>
-                    <form method="post" action="{% url 'create_ocr_request' selected_region.id %}">
-                        {% csrf_token %}
-                        <p class="help-text">{% trans "Ask the configured visual model to transcribe this crop. The result will appear as a candidate and will not replace the current text automatically." %}</p>
-                        <label>{% trans "Visual model" %}<select name="provider">
-                            <option value="qwen" selected>{% trans "Qwen vision (chat model)" %}</option>
-                            <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
-                        </select></label>
-                        <button class="btn btn-secondary" type="submit">{% trans "Re-run visual OCR" %}</button>
-                    </form>
-                    <form method="post" action="{% url 'correct_region_text' selected_region.id %}">
-                        {% csrf_token %}
-                        <label>{% trans "Replacement text" %}<textarea name="replacement_text" required>{{ selected_region.effective_text }}</textarea></label>
-                        <input type="hidden" name="expected_current_text" value="{{ selected_region.effective_text }}">
-                        <label>{% trans "Reason (optional)" %}<input name="reason"></label>
-                        <button class="btn btn-primary" type="submit">{% trans "Save correction" %}</button>
-                    </form>
-                    <form method="post" action="{% url 'correct_region' selected_region.id %}">
-                        {% csrf_token %}<input type="hidden" name="operation" value="type"><input type="hidden" name="expected_current_value" value="{{ selected_region.effective_region_type }}">
-                        <label>{% trans "Region type" %}<select name="region_type">{% for value, label in region_types %}<option value="{{ value }}"{% if value == selected_region.effective_region_type %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-                        <button class="btn btn-secondary" type="submit">{% trans "Change type" %}</button>
-                    </form>
-                    <form method="post" action="{% url 'correct_region' selected_region.id %}">
-                        {% csrf_token %}<input type="hidden" name="operation" value="suppress"><input type="hidden" name="expected_current_value" value="{% if selected_region.is_suppressed %}true{% else %}false{% endif %}">
-                        {% if not selected_region.display_is_suppressed %}<button class="btn btn-secondary" type="submit">{% trans "Suppress region" %}</button>{% endif %}
-                    </form>
+                    <section class="correction-block">
+                        <h4 class="correction-block-title">{% trans "Re-transcribe this region with a visual model" %}</h4>
+                        <p class="help-text">{% trans "Runs a fresh visual OCR over this crop. The result appears as a candidate below and never replaces the current text automatically." %}</p>
+                        <form method="post" action="{% url 'create_ocr_request' selected_region.id %}">
+                            {% csrf_token %}
+                            <label>{% trans "Visual model" %}<select name="provider">
+                                <option value="qwen" selected>{% trans "Qwen vision (chat model)" %}</option>
+                                <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
+                            </select></label>
+                            <button class="btn btn-secondary" type="submit">{% trans "Re-run visual OCR" %}</button>
+                        </form>
+                    </section>
+                    <section class="correction-block">
+                        <h4 class="correction-block-title">{% trans "Manual correction" %}</h4>
+                        <form method="post" action="{% url 'correct_region_text' selected_region.id %}">
+                            {% csrf_token %}
+                            <label>{% trans "Replacement text" %}<textarea name="replacement_text" required>{{ selected_region.effective_text }}</textarea></label>
+                            <input type="hidden" name="expected_current_text" value="{{ selected_region.effective_text }}">
+                            <label>{% trans "Reason (optional)" %}<input name="reason"></label>
+                            <button class="btn btn-primary" type="submit">{% trans "Save correction" %}</button>
+                        </form>
+                        <form method="post" action="{% url 'correct_region' selected_region.id %}">
+                            {% csrf_token %}<input type="hidden" name="operation" value="type"><input type="hidden" name="expected_current_value" value="{{ selected_region.effective_region_type }}">
+                            <label>{% trans "Region type" %}<select name="region_type">{% for value, label in region_types %}<option value="{{ value }}"{% if value == selected_region.effective_region_type %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+                            <button class="btn btn-secondary" type="submit">{% trans "Change type" %}</button>
+                        </form>
+                        <form method="post" action="{% url 'correct_region' selected_region.id %}">
+                            {% csrf_token %}<input type="hidden" name="operation" value="suppress"><input type="hidden" name="expected_current_value" value="{% if selected_region.is_suppressed %}true{% else %}false{% endif %}">
+                            {% if not selected_region.display_is_suppressed %}<button class="btn btn-secondary" type="submit">{% trans "Suppress region" %}</button>{% endif %}
+                        </form>
+                    </section>
                     {% if selected_region.display_is_suppressed %}
                     {% if selected_region.suppression_correction %}<form method="post" action="{% url 'revert_region_correction' selected_region.suppression_correction.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-secondary" type="submit">{% trans "Restore region" %}</button></form>{% endif %}
                     {% endif %}
                 </details>
                 {% endif %}
-                {% if visual_ocr_requests %}<details class="ocr-history" open><summary>{% trans "Visual OCR candidates" %}</summary>
-                    {% for candidate in visual_ocr_requests %}
-                    <div class="history-item">
-                        <strong>#{{ candidate.id }} · {{ candidate.state }} · {{ candidate.provider }}{% if candidate.model %} ({{ candidate.model }}){% endif %}</strong>
-                        {% if candidate.state == "completed" %}<pre>{{ candidate.candidate_text }}</pre>
-                            {% if not candidate.accepted_correction_id and can_edit_document %}<form method="post" action="{% url 'accept_ocr_request' candidate.id %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">{% trans "Accept candidate" %}</button></form>{% endif %}
-                        {% elif candidate.error_message %}<p class="progress-message error">{{ candidate.error_message }}</p>{% else %}<p>{% trans "Waiting for the visual OCR worker." %}</p>{% endif %}
-                    </div>
-                    {% endfor %}
-                </details>{% endif %}
+                {% if visual_ocr_requests %}{% include "_ocr_history_fragment.html" with ocr_candidates=visual_ocr_requests ocr_kind="region" ocr_title=_("Visual OCR candidates") fragment_url=region_ocr_fragment_url any_pending=region_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
                 {% if selected_region.corrections.all %}<details class="correction-history"><summary>{% trans "Correction history" %}</summary>
                     {% for correction in selected_region.corrections.all %}<div class="history-item"><span>{{ correction.get_operation_display }} · {{ correction.created_at|date:"SHORT_DATETIME_FORMAT" }} · {{ correction.get_status_display }}</span>{% if can_edit_document and correction.status == "active" %}<form method="post" action="{% url 'revert_region_correction' correction.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-secondary" type="submit">{% trans "Undo" %}</button></form>{% endif %}</div>{% empty %}<p class="empty-state">{% trans "No corrections yet." %}</p>{% endfor %}
                 </details>{% endif %}
@@ -190,7 +188,7 @@
                     <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
                 </select></label><button class="btn btn-secondary" type="submit">{% trans "Re-run full page with visual OCR" %}</button></form>{% endif %}
                 {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
-                {% if page_ocr_requests %}<details class="ocr-history" open data-ocr-pending="{% for candidate in page_ocr_requests %}{% if candidate.state == 'queued' or candidate.state == 'processing' %}true{% endif %}{% endfor %}"><summary>{% trans "Page OCR candidates" %}</summary>{% for candidate in page_ocr_requests %}<div class="history-item"><strong>#{{ candidate.id }} · {{ candidate.state }} · {{ candidate.provider }}{% if candidate.model %} ({{ candidate.model }}){% endif %}</strong>{% if candidate.candidate_text %}<pre>{{ candidate.candidate_text }}</pre>{% endif %}{% if candidate.error_message %}<p class="progress-message error">{{ candidate.error_message }}</p>{% endif %}</div>{% endfor %}</details>{% endif %}
+                {% if page_ocr_requests %}{% include "_ocr_history_fragment.html" with ocr_candidates=page_ocr_requests ocr_kind="page" ocr_title=_("Page OCR candidates") fragment_url=page_ocr_fragment_url any_pending=page_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
             </section>
             {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.safe_html %}<div class="table-preview">{{ extraction.safe_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
         </aside>

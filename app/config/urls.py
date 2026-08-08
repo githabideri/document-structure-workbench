@@ -33,6 +33,7 @@ urlpatterns = [
     path("documents/new/", views.document_new, name="document_new"),
     path("documents/<int:document_id>/", views.document_detail, name="document_detail"),
     path("regions/<int:region_id>/correct-text/", views.correct_region_text, name="correct_region_text"),
+    path("documents/<int:document_id>/ocr-history/", views.ocr_history_fragment, name="ocr_history_fragment"),
     path("regions/<int:region_id>/ocr/", views.create_ocr_request, name="create_ocr_request"),
     path("pages/<int:page_id>/ocr/", views.create_page_ocr_request, name="create_page_ocr_request"),
     path("ocr/requests/<int:request_id>/accept/", views.accept_ocr_request, name="accept_ocr_request"),

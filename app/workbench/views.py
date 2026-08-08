@@ -689,6 +689,10 @@ def document_detail(request, document_id):
                     strip=True,
                 )
 
+    visual_ocr_requests = (
+        list(selected_region.ocr_requests.exclude(provider="htr").order_by("-created_at", "-id")[:10])
+        if selected_region else []
+    )
     return render(request, "workbench/document_detail.html", {
         "document": document,
         "tables": tables,
@@ -701,7 +705,17 @@ def document_detail(request, document_id):
         "selected_region": selected_region,
         "page_text": page_text,
         "page_ocr_requests": page_ocr_requests,
-        "visual_ocr_requests": (list(selected_region.ocr_requests.exclude(provider="htr").order_by("-created_at", "-id")[:10]) if selected_region else []),
+        "visual_ocr_requests": visual_ocr_requests,
+        "region_ocr_fragment_url": (
+            reverse("ocr_history_fragment", args=[source_document.id]) + f"?region={selected_region.id}"
+            if source_document and selected_region else ""
+        ),
+        "page_ocr_fragment_url": (
+            reverse("ocr_history_fragment", args=[source_document.id]) + f"?page={page.id}"
+            if source_document and page else ""
+        ),
+        "region_ocr_any_pending": any(c.state in {"queued", "processing"} for c in visual_ocr_requests),
+        "page_ocr_any_pending": any(c.state in {"queued", "processing"} for c in page_ocr_requests),
         "processing_job": processing_job,
         "source_document": source_document,
         "workspace_document_id": source_document.id if source_document else document.id,
@@ -799,6 +813,43 @@ def _redirect_to_region(request, region):
     target = source.id if source else region.page.document_id
     query = f"?revision={region.page.document_id}&page={region.page_number}&region={region.id}" if source else f"?page={region.page_number}&region={region.id}"
     return redirect(f"{reverse('document_detail', args=[target])}{query}")
+
+
+@login_required
+def ocr_history_fragment(request, document_id):
+    """Render just the OCR-candidates history so polling never reloads the page
+    image. Called by the region/page detail JS while a candidate is pending."""
+    from .policy import ProjectAccessPolicy
+    from .models import OcrRequest, PageRegion, SourceDocument
+    source = get_object_or_404(SourceDocument.objects.select_related("collection"), pk=document_id)
+    if not ProjectAccessPolicy(user=request.user).can_view(source.collection):
+        raise PermissionDenied
+    region_id = request.GET.get("region")
+    page_id = request.GET.get("page")
+    candidates = []
+    ocr_kind = "region"
+    ocr_title = _("Visual OCR candidates")
+    if region_id:
+        region = PageRegion.objects.filter(
+            pk=int(region_id),
+            page__document__processing_job__source_document_id=source.pk,
+        ).first()
+        if region:
+            candidates = list(region.ocr_requests.exclude(provider="htr").order_by("-created_at", "-id")[:10])
+    elif page_id:
+        page = get_object_or_404(Page, pk=int(page_id), document__processing_job__source_document_id=source.pk)
+        ocr_kind = "page"
+        ocr_title = _("Page OCR candidates")
+        candidates = list(OcrRequest.objects.filter(page=page).exclude(provider="htr").order_by("-created_at", "-id")[:10])
+    any_pending = any(c.state in {"queued", "processing"} for c in candidates)
+    return render(request, "workbench/_ocr_history_fragment.html", {
+        "ocr_candidates": candidates,
+        "ocr_kind": ocr_kind,
+        "ocr_title": ocr_title,
+        "fragment_url": request.get_full_path(),
+        "any_pending": any_pending,
+        "can_edit_document": ProjectAccessPolicy(user=request.user).can_edit(source.collection),
+    })
 
 
 @login_required

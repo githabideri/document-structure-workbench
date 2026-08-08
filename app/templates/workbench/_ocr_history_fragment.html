@@ -1,0 +1,23 @@
+{% load i18n %}
+<details class="ocr-history" open
+         {% if ocr_kind and fragment_url %}data-ocr-url="{{ fragment_url }}"{% endif %}
+         data-ocr-pending="{% if any_pending %}true{% else %}false{% endif %}">
+    <summary>{{ ocr_title }}</summary>
+    {% for candidate in ocr_candidates %}
+    <div class="history-item" data-request-id="{{ candidate.id }}">
+        <strong>#{{ candidate.id }} · {{ candidate.state }} · {{ candidate.provider }}{% if candidate.model %} ({{ candidate.model }}){% endif %}</strong>
+        {% if candidate.state == "completed" %}
+        <pre>{{ candidate.candidate_text }}</pre>
+        {% if candidate.region_id and not candidate.accepted_correction_id and can_edit_document %}
+        <form method="post" action="{% url 'accept_ocr_request' candidate.id %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">{% trans "Accept candidate" %}</button></form>
+        {% endif %}
+        {% elif candidate.error_message %}
+        <p class="progress-message error">{{ candidate.error_message }}</p>
+        {% else %}
+        <p class="progress-message">{% trans "Waiting for the visual OCR worker." %}</p>
+        {% endif %}
+    </div>
+    {% empty %}
+    <p class="empty-state">{% trans "No candidates yet." %}</p>
+    {% endfor %}
+</details>

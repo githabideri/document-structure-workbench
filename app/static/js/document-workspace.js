@@ -71,7 +71,34 @@ document.querySelector("[data-show-suppressed]")?.addEventListener("click", even
     applyFilter();
 });
 document.querySelector("[data-region-filter].is-active")?.click();
-if (document.querySelector("[data-ocr-pending*='true']")) window.setTimeout(() => window.location.reload(), 3000);
+
+// Lightweight OCR-status polling: while any OCR candidate is pending, fetch a
+// small status fragment and swap only that history block — never reload the
+// page/image. Polling stops automatically when no candidate remains pending.
+(function startOcrPolling() {
+    const anyPending = () => !!document.querySelector("[data-ocr-pending='true'][data-ocr-url]");
+    let timer = null;
+    async function tick() {
+        const blocks = [...document.querySelectorAll("[data-ocr-pending='true'][data-ocr-url]")];
+        await Promise.all(blocks.map(async block => {
+            try {
+                const resp = await fetch(block.dataset.ocrUrl, {
+                    credentials: "same-origin",
+                    headers: {"Accept": "text/html", "X-Requested-With": "XMLHttpRequest"},
+                });
+                if (!resp.ok) return;
+                const html = await resp.text();
+                const tmp = document.createElement("template");
+                tmp.innerHTML = html;
+                const fresh = tmp.content.querySelector(".ocr-history");
+                if (fresh && block.parentNode) block.replaceWith(fresh);
+            } catch (err) { /* keep the current block on transient errors */ }
+        }));
+        if (anyPending()) timer = setTimeout(tick, 2500);
+    }
+    if (anyPending()) tick();
+})();
+
 const selected = document.querySelector("[data-selected-region]");
 if (selected) document.getElementById(`region-${selected.dataset.selectedRegion}`)?.scrollIntoView({block: "nearest"});
 publishDiagnostics();

@@ -31,41 +31,66 @@ HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 BASELINE_FIXTURE = os.path.join(HERE, "tests", "fixtures", "chat", "research_baseline_cases.json")
 
 
-#: Hard OCR / historical cases added beyond the 10 Phase-0 cases to stress the
-#: fuzzy retriever (misspelt names, hyphenation, historical spelling, and a
-#: question whose relevant passage does not contain the exact surface form).
+#: Hard OCR / historical cases built from the REAL deployed archival corpus so the
+#: expected sources (below) are human-adjudicated. Each case maps to real
+#: documents whose indexed passages contain the target text:
+#:
+#:   * FV_0100.jpg  ("Probescans")  — 1946 Freistadt correspondence: Felix
+#:     Fasching / OCR'd "Felix Fassling", "Fremdenverkehrsamt" / OCR'd
+#:     "Fremdensverkehrsamt,", "Freistadt" / OCR'd "Freistaßt", Urlaub Juni 1946.
+#:   * BH_Fr-592_6931__.JPG  ("Freistadt")  — Bezirkshauptmannschaft Freistadt.
+#:   * 0001.jpg  ("Probescans")  — "MOLKEREIGENOSSENSCHAFT FREISTADT UND UMGEBUNG"
+#:
+#: Queries without a real corpus answer (previously hard-01 "Schachermair",
+#: hard-02 "Reiseverordnung") were replaced; a genuine no-answer control is kept.
 HARD_CASES = [
     {
         "id": "hard-01",
         "category": 11,
         "category_label": "OCR-damaged personal name",
-        "question": "Schachermair an der Spitze der Gemeindeverwaltung?",
-        "scope": {"mode": "project", "project_id": "Korrespondenz"},
-        "expected_sources": [],
+        "question": "Felix Fassling",
+        "scope": {"mode": "project", "project_id": "Probescans"},
+        "expected_sources": ["FV_0100.jpg"],
     },
     {
         "id": "hard-02",
         "category": 12,
-        "category_label": "hyphenated compound",
-        "question": "Reiseverordnung in Freistadt",
-        "scope": {"mode": "project", "project_id": "Korrespondenz"},
-        "expected_sources": [],
+        "category_label": "exact normal query (no fuzzy regression)",
+        "question": "Molkereigenossenschaft Freistadt",
+        "scope": {"mode": "all"},
+        "expected_sources": ["0001.jpg"],
     },
     {
         "id": "hard-03",
         "category": 13,
-        "category_label": "historical place spelling / OCR",
+        "category_label": "multiple OCR damage (place + organisation)",
         "question": "Fremdenverkehrsambt Freistatt fersteher",
-        "scope": {"mode": "project", "project_id": "Korrespondenz"},
-        "expected_sources": [],
+        "scope": {"mode": "all"},
+        "expected_sources": ["FV_0100.jpg"],
     },
     {
         "id": "hard-04",
         "category": 14,
-        "category_label": "no fuzzy garbage on nothing",
-        "question": "Unbürgermeisterzusammenkunft 1820 in Freistadt",
-        "scope": {"mode": "project", "project_id": "Korrespondenz"},
+        "category_label": "unsupported / no corpus answer",
+        "question": "Unbürgermeisterzusammenkunft 1820",
+        "scope": {"mode": "all"},
         "expected_sources": [],
+    },
+    {
+        "id": "hard-05",
+        "category": 15,
+        "category_label": "diacritic / historical place spelling",
+        "question": "Freistatt fersteher",
+        "scope": {"mode": "all"},
+        "expected_sources": ["FV_0100.jpg", "BH_Fr-592_6931__.JPG"],
+    },
+    {
+        "id": "hard-06",
+        "category": 16,
+        "category_label": "punctuation/hyphen-tolerated phrase",
+        "question": "Molkereigenossenschaft, Freistadt und Umgebung",
+        "scope": {"mode": "all"},
+        "expected_sources": ["0001.jpg"],
     },
 ]
 

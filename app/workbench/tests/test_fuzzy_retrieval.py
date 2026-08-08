@@ -10,6 +10,7 @@ The deterministic retriever itself stays frozen and is covered unchanged by
 """
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from unittest.mock import patch
 
 from workbench.models import (
     Collection, Document, Page, ProcessingJob, ProcessingPreset,
@@ -198,6 +199,41 @@ class FuzzyLexicalRetrieverTests(FuzzyLexicalRetrieverSetupMixin, TestCase):
             revision_ids=[rev2.processed_revision_id],
         )
         self.assertEqual([h.passage.id for h in filtered], [rev2.id])
+
+    @patch("workbench.retrieval.FUZZY_FULL_SCAN_MAX", 3)
+    def test_large_scope_fuzzy_only_match_remains_retrievable(self):
+        """An OCR-damaged query whose token has NO exact overlap anywhere must
+        still find its fuzzy match once the scope is forced onto the large-scope
+        path (a bounded scan window must not silently drop fuzzy-only recall)."""
+        source, _, fx = self.make_source("largefuzzy.pdf", passages=[
+            {"key": "target", "page": 1, "text": "An den Gemeindevorsteher Schachermayr von Freistadt"},
+            {"key": "other", "page": 2, "text": "ein ganz anderer Inhalt ohne jeden Bezug hier"},
+            {"key": "other2", "page": 3, "text": "noch mehr fremde Wörter ohne Relevanz"},
+            {"key": "other3", "page": 4, "text": "völlig unpassendes weiteres Material allesamt"},
+        ])
+        # scope_count=4 > patched FUZZY_FULL_SCAN_MAX=3 => large-scope path.
+        hits = self.search("Schachermair", [source.pk], [self.project.pk])
+        self.assertTrue(any(h.passage.id == fx["target"].id for h in hits))
+        self.assertEqual(self.retriever.last_stats["scope_count"], 4)
+
+    @patch("workbench.retrieval.FUZZY_FULL_SCAN_MAX", 3)
+    def test_large_scope_prefilter_bounds_fetch_to_candidates(self):
+        """On the large-scope path the DB-side exact-token prefilter must only
+        materialize matching passages, not the whole scope, before scoring."""
+        source, _, fx = self.make_source("largeexact.pdf", passages=[
+            {"key": "m1", "page": 1, "text": "Restaurierung der Turmspitze"},
+            {"key": "no1", "page": 2, "text": "irgendwelcher anderer Text ohne den Begriff"},
+            {"key": "no2", "page": 3, "text": "noch mehr unpassender Inhalt hier drin"},
+            {"key": "m2", "page": 4, "text": "die zweite Restaurierung wird erwähnt"},
+            {"key": "no3", "page": 5, "text": "völlig fremde Wörter ohne jeden Bezug"},
+            {"key": "no4", "page": 6, "text": "sonstiges weiteres Material ohne Treffer"},
+        ])
+        hits = self.search("Restaurierung", [source.pk], [self.project.pk])
+        self.assertEqual({h.passage.id for h in hits}, {fx["m1"].id, fx["m2"].id})
+        # Only the prefiltered candidates were fetched/scanned, not all six.
+        self.assertEqual(self.retriever.last_stats["passages_scanned"], 2)
+        self.assertEqual(self.retriever.last_stats["scope_count"], 6)
+
 
     def test_source_and_project_filtering_strict(self):
         other = Collection.objects.create(name="Other", created_by=self.user)

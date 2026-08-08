@@ -292,17 +292,51 @@ class FuzzyLexicalRetriever(EvidenceRetriever):
             revision_ids=revision_ids, limit=limit,
         )
 
-    def _scope_passages(self, *, source_ids, project_ids, revision_ids):
+    _RELATED = (
+        "source_document", "processed_revision", "processing_job", "page", "page_region",
+    )
+
+    def _scope_passages(self, *, source_ids, project_ids, revision_ids, all_tokens=None):
+        """Return ``(rows, scope_count)`` without ever materializing the whole
+        scope merely to learn that it is large.
+
+        * Small scopes: full (measured, bounded-by-corpus-size) Python scan.
+        * Large scopes with query tokens: a DB-side exact-token prefilter keeps
+          the fetched row set small (no full load into Python).
+        * Large scopes where that prefilter finds nothing (a genuine OCR-damaged,
+          fuzzy-only query with no exact token overlap): a fixed-size bounded
+          scan window over the earliest passages keeps fuzzy recall reachable
+          without silently returning nothing or scanning an arbitrarily large
+          corpus. SQLite exposes no indexed fuzzy lookup, so this is the honest
+          large-scope limitation.
+        """
+        base = self._base_queryset(
+            source_ids=source_ids, project_ids=project_ids, revision_ids=revision_ids,
+        )
+        scope_count = base.count()
+        ordered = base.order_by("id")
+        if scope_count > FUZZY_FULL_SCAN_MAX and all_tokens:
+            candidate_q = Q()
+            for token in all_tokens:
+                candidate_q |= Q(normalized_text__icontains=token)
+            rows = list(
+                ordered.filter(candidate_q).select_related(*self._RELATED)
+            )
+            if not rows:
+                rows = list(
+                    ordered.select_related(*self._RELATED)[:FUZZY_FULL_SCAN_MAX]
+                )
+        else:
+            rows = list(ordered.select_related(*self._RELATED))
+        return rows, scope_count
+
+    def _base_queryset(self, *, source_ids, project_ids, revision_ids):
         queryset = SearchPassage.objects.filter(
             source_document_id__in=source_ids, project__in=project_ids,
         )
         if revision_ids:
             queryset = queryset.filter(processed_revision_id__in=revision_ids)
-        scope_count = queryset.count()
-        selected_rows = list(queryset.select_related(
-            "source_document", "processed_revision", "processing_job", "page", "page_region",
-        ))
-        return selected_rows, scope_count
+        return queryset
 
     def search(self, *, query, source_ids, project_ids, revision_ids=None, limit=24):
         started = time.monotonic()
@@ -312,18 +346,10 @@ class FuzzyLexicalRetriever(EvidenceRetriever):
         fuzz_tokens = [t for t in all_tokens if len(t) >= FUZZY_MIN_TOKEN_LEN]
         query_alpha = alpha(normalized_question)
 
-        rows, scope_count = self._scope_passages(
-            source_ids=source_ids, project_ids=project_ids, revision_ids=revision_ids,
+        passages, scope_count = self._scope_passages(
+            source_ids=source_ids, project_ids=project_ids,
+            revision_ids=revision_ids, all_tokens=all_tokens,
         )
-        passages = rows
-        # Large-scope bound: restrict to passages sharing any exact token overlap
-        # so we never pay O(N * fuzzy) on a huge corpus.
-        if scope_count > FUZZY_FULL_SCAN_MAX and all_tokens:
-            passages = [
-                p for p in passages
-                if p.normalized_text and any(tok in p.normalized_text for tok in all_tokens)
-            ]
-
         scored = []
         scanned = 0
         for passage in passages:
@@ -363,6 +389,7 @@ class FuzzyLexicalRetriever(EvidenceRetriever):
             "passages_scanned": scanned,
             "hits_returned": len(selected),
             "retrieval_ms": round((time.monotonic() - started) * 1000, 3),
+            "scope_count": scope_count,
         }
         return selected
 

@@ -1,20 +1,20 @@
 {% extends "base.html" %}
-{% load static %}
-{% block title %}Technical Report{% endblock %}
+{% load static i18n %}
+{% block title %}{% trans "Technical report" %}{% endblock %}
 
 {% block content %}
 <div class="technical-report">
-    <h1>Technical Report</h1>
+    <h1>{% trans "Technical report" %}</h1>
 
-    <h2>Profile Statistics</h2>
+    <h2>{% trans "Profile statistics" %}</h2>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Profile</th>
-                <th>Tables</th>
-                <th>Mean TEDS-S</th>
-                <th>Mean TEDS</th>
-                <th>Failures</th>
+                <th>{% trans "Profile" %}</th>
+                <th>{% trans "Tables" %}</th>
+                <th>{% trans "Mean TEDS-S" %}</th>
+                <th>{% trans "Mean TEDS" %}</th>
+                <th>{% trans "Failures" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -27,13 +27,13 @@
                 <td>{{ data.failures }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="5">No extraction data.</td></tr>
+            <tr><td colspan="5">{% trans "No extraction data." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>
 
     <div class="actions">
-        <a href="{% url 'curator_dashboard' %}" class="btn btn-secondary">Back to Evaluation</a>
+        <a href="{% url 'curator_dashboard' %}" class="btn btn-secondary">{% trans "Back to evaluation" %}</a>
     </div>
 </div>
 {% endblock %}

@@ -1,0 +1,568 @@
+# Reviewed German UI translations for Document Structure Workbench
+# Maintained separately from the legacy machine/fuzzy catalogue.
+msgid ""
+msgstr ""
+"Project-Id-Version: Document Structure Workbench 0.1\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Document Structure Workbench"
+msgstr "Document Structure Workbench"
+
+msgid "Evaluation"
+msgstr "Auswertung"
+
+msgid "Document workspace"
+msgstr "Dokument-Arbeitsbereich"
+
+msgid "Evidence workspace"
+msgstr "Recherche-Arbeitsbereich"
+
+msgid "Research conversations"
+msgstr "Recherche-Chats"
+
+msgid "New conversation"
+msgstr "Neuer Chat"
+
+msgid "Conversations"
+msgstr "Chats"
+
+msgid "Untitled conversation"
+msgstr "Unbenannter Chat"
+
+msgid "No conversations yet."
+msgstr "Noch keine Chats."
+
+msgid "Conversation"
+msgstr "Chat"
+
+msgid "Read-only research"
+msgstr "Recherche ohne Bearbeitungszugriff"
+
+msgid "Start a research conversation"
+msgstr "Recherche starten"
+
+msgid "Evidence scope"
+msgstr "Quellenauswahl"
+
+msgid "Evidence context"
+msgstr "Quellenkontext"
+
+msgid "The frozen source scope for this conversation."
+msgstr "Die für diesen Chat festgelegte Quellenauswahl."
+
+msgid "active revision"
+msgstr "aktive Version"
+
+msgid "Latest evidence"
+msgstr "Aktuelle Quellen"
+
+msgid "Page"
+msgstr "Seite"
+
+msgid "No documents in this project yet."
+msgstr "In diesem Projekt gibt es noch keine Dokumente."
+
+msgid "Read-only"
+msgstr "Schreibgeschützt"
+
+msgid "New document"
+msgstr "Neues Dokument"
+
+msgid "Search documents"
+msgstr "Dokumente durchsuchen"
+
+msgid "Search the project"
+msgstr "Projekt durchsuchen"
+
+msgid "Other"
+msgstr "Sonstiges"
+
+msgid "You do not have access to this project."
+msgstr "Sie haben keinen Zugriff auf dieses Projekt."
+
+msgid "You do not have access to this document."
+msgstr "Sie haben keinen Zugriff auf dieses Dokument."
+
+msgid "You do not have access to this table."
+msgstr "Sie haben keinen Zugriff auf diese Tabelle."
+
+msgid "You do not have access to this job."
+msgstr "Sie haben keinen Zugriff auf diesen Auftrag."
+
+msgid "You do not have access to this artifact."
+msgstr "Sie haben keinen Zugriff auf dieses Artefakt."
+
+msgid "Processing progress"
+msgstr "Fortschritt"
+
+msgid "Waiting for worker"
+msgstr "Wartet auf Verarbeitung"
+
+msgid "Elapsed:"
+msgstr "Dauer:"
+
+msgid "Worker heartbeat:"
+msgstr "Letztes Lebenszeichen:"
+
+msgid "ago"
+msgstr "zuvor"
+
+msgid "Last processor response:"
+msgstr "Letzte Rückmeldung der Verarbeitung:"
+
+msgid "Resume polling"
+msgstr "Statusabfrage fortsetzen"
+
+msgid "Retry result import"
+msgstr "Ergebnisse erneut importieren"
+
+msgid "Turn scans into structured documents you can inspect and improve."
+msgstr "Scans in strukturierte, prüfbare Dokumente umwandeln."
+
+msgid "Projects keep related source documents and their processing history together."
+msgstr "In Projekten verwalten Sie zusammengehörige Quelldokumente und deren Verarbeitung."
+
+msgid "Uploaded sources and their latest analysis status."
+msgstr "Hochgeladene Quelldokumente und ihr aktueller Verarbeitungsstatus."
+
+msgid "Add a PDF to begin building your project."
+msgstr "Fügen Sie ein PDF hinzu, um mit Ihrem Projekt zu beginnen."
+
+msgid "You can view documents after a project editor adds them."
+msgstr "Dokumente werden hier angezeigt, sobald sie dem Projekt hinzugefügt wurden."
+
+msgid "Items needing attention"
+msgstr "Offene Aufgaben"
+
+msgid "Assigned comparison and review work."
+msgstr "Zugewiesene Vergleichs- und Prüfaufgaben."
+
+msgid "Open reviews"
+msgstr "Offene Prüfungen"
+
+msgid "Inspect the original scan and the structure detected by the processor."
+msgstr "Vergleichen Sie den Originalscan mit der automatisch erkannten Dokumentstruktur."
+
+msgid "Scan controls"
+msgstr "Ansicht"
+
+msgid "Detected structure"
+msgstr "Erkannte Struktur"
+
+msgid "click a region to inspect it"
+msgstr "Bereich auswählen, um Details anzuzeigen"
+
+msgid "Extracted content"
+msgstr "Erkannter Inhalt"
+
+msgid "Confidence"
+msgstr "Sicherheit"
+
+msgid "Processor"
+msgstr "Verarbeitung"
+
+msgid "Document processor"
+msgstr "Dokumentenverarbeitung"
+
+msgid "Processing job"
+msgstr "Verarbeitungsauftrag"
+
+msgid "Original reference"
+msgstr "Originalreferenz"
+
+msgid "No readable table extraction is available."
+msgstr "Für diese Tabelle liegt kein lesbares Extraktionsergebnis vor."
+
+msgid "Choose where this document belongs, then upload the original PDF for analysis."
+msgstr "Wählen Sie das zugehörige Projekt und laden Sie anschließend das Original-PDF zur Verarbeitung hoch."
+
+msgid "Advanced evaluation options"
+msgstr "Erweiterte Auswertungsoptionen"
+
+msgid "Use these only when comparing extraction methods or creating benchmark reviews."
+msgstr "Diese Optionen sind für den Vergleich von Extraktionsverfahren und für Benchmark-Prüfungen vorgesehen."
+
+msgid "The upload enters a processing queue. You will see when a worker starts, when Docling is analyzing it, and when the extracted results are ready."
+msgstr "Nach dem Upload wird das Dokument zur Verarbeitung eingereiht. Der Status zeigt, wann die Verarbeitung beginnt, Docling das Dokument analysiert und die Ergebnisse bereitstehen."
+
+msgid "Ask a project owner for Editor access before uploading a document."
+msgstr "Zum Hochladen benötigen Sie Bearbeitungsrechte für mindestens ein Projekt."
+
+msgid "Bad rowspan"
+msgstr "Fehlerhafte Zeilenzusammenführung"
+
+msgid "A cell that should span multiple rows does not, or spans the wrong number."
+msgstr "Eine Zelle erstreckt sich nicht über die erwarteten Zeilen oder über die falsche Anzahl von Zeilen."
+
+msgid "Bad colspan"
+msgstr "Fehlerhafte Spaltenzusammenführung"
+
+msgid "A cell that should span multiple columns does not, or spans the wrong number."
+msgstr "Eine Zelle erstreckt sich nicht über die erwarteten Spalten oder über die falsche Anzahl von Spalten."
+
+msgid "A cell that should not exist is present."
+msgstr "Es wurde eine zusätzliche Zelle erkannt, die in der Vorlage nicht vorhanden ist."
+
+msgid "Detection and Crop Errors"
+msgstr "Erkennungs- und Ausschnittfehler"
+
+msgid "Scoring Guide"
+msgstr "Bewertungsskala"
+
+msgid "Major correction — significant errors that require manual fixing."
+msgstr "Größere Korrektur — deutliche Fehler, die manuell behoben werden müssen."
+
+msgid "Choose its project and upload a PDF."
+msgstr "Wählen Sie das zugehörige Projekt und laden Sie ein PDF hoch."
+
+msgid "See whether the document is waiting, being analyzed, ready, or needs attention."
+msgstr "Verfolgen Sie, ob das Dokument wartet, verarbeitet wird, fertig ist oder geprüft werden muss."
+
+msgid "Comparison reviews and technical evaluation tools are available separately to users who need them."
+msgstr "Vergleichsprüfungen und technische Auswertungen stehen bei Bedarf in eigenen Bereichen zur Verfügung."
+
+msgid "Processing Purpose"
+msgstr "Verarbeitungszweck"
+
+msgid "What happens next:"
+msgstr "Wie es weitergeht:"
+
+msgid "Candidate X"
+msgstr "Kandidat X"
+
+msgid "Candidate Y"
+msgstr "Kandidat Y"
+
+msgid "Candidate X — Structure"
+msgstr "Kandidat X — Struktur"
+
+msgid "Candidate Y — Structure"
+msgstr "Kandidat Y — Struktur"
+
+msgid "3 Correct"
+msgstr "3 · Korrekt"
+
+msgid "2 Minor"
+msgstr "2 · Kleinere Fehler"
+
+msgid "1 Major"
+msgstr "1 · Größere Fehler"
+
+msgid "0 Unusable"
+msgstr "0 · Nicht nutzbar"
+
+msgid "Model Identities Revealed"
+msgstr "Modelle aufgedeckt"
+
+msgid "Next Review"
+msgstr "Nächste Prüfung"
+
+msgid "Find text and identifiers in authorized processed revisions."
+msgstr "Durchsuchen Sie freigegebene Dokumentversionen nach Text und Kennungen."
+
+msgid "Try an exact identifier, name, or phrase."
+msgstr "Versuchen Sie es mit einer exakten Kennung, einem Namen oder einer Wortfolge."
+
+msgid "New project"
+msgstr "Neues Projekt"
+
+msgid "Description"
+msgstr "Beschreibung"
+
+msgid "Project type"
+msgstr "Projekttyp"
+
+msgid "Real corpus"
+msgstr "Realer Korpus"
+
+msgid "Integration validation"
+msgstr "Integrationsprüfung"
+
+msgid "Benchmark dataset"
+msgstr "Benchmark-Datensatz"
+
+msgid "Create project"
+msgstr "Projekt erstellen"
+
+msgid "Decisions"
+msgstr "Entscheidungen"
+
+msgid "Decision"
+msgstr "Entscheidung"
+
+msgid "Decision:"
+msgstr "Entscheidung:"
+
+msgid "Current decision"
+msgstr "Aktuelle Entscheidung"
+
+msgid "By:"
+msgstr "Von:"
+
+msgid "Reason:"
+msgstr "Begründung:"
+
+msgid "Date:"
+msgstr "Datum:"
+
+msgid "Reviewer:"
+msgstr "Geprüft von:"
+
+msgid "Preferred:"
+msgstr "Bevorzugt:"
+
+msgid "Extractions"
+msgstr "Extraktionen"
+
+msgid "Profile"
+msgstr "Profil"
+
+msgid "Rows"
+msgstr "Zeilen"
+
+msgid "Columns"
+msgstr "Spalten"
+
+msgid "No extractions."
+msgstr "Keine Extraktionen vorhanden."
+
+msgid "Make decision"
+msgstr "Entscheidung treffen"
+
+msgid "Accepted"
+msgstr "Akzeptiert"
+
+msgid "Rejected"
+msgstr "Abgelehnt"
+
+msgid "Needs review"
+msgstr "Prüfung erforderlich"
+
+msgid "Manual correction"
+msgstr "Manuelle Korrektur"
+
+msgid "Selected extraction"
+msgstr "Ausgewählte Extraktion"
+
+msgid "None"
+msgstr "Keine"
+
+msgid "Reason"
+msgstr "Begründung"
+
+msgid "Submit decision"
+msgstr "Entscheidung speichern"
+
+msgid "Back to decisions"
+msgstr "Zurück zu den Entscheidungen"
+
+msgid "Pending"
+msgstr "Ausstehend"
+
+msgid "No tables."
+msgstr "Keine Tabellen vorhanden."
+
+msgid "Reviews completed"
+msgstr "Abgeschlossene Prüfungen"
+
+msgid "Awaiting review"
+msgstr "Ausstehende Prüfungen"
+
+msgid "Preference distribution"
+msgstr "Verteilung der Präferenzen"
+
+msgid "Preference"
+msgstr "Präferenz"
+
+msgid "Count"
+msgstr "Anzahl"
+
+msgid "No reviews yet."
+msgstr "Noch keine Prüfungen."
+
+msgid "Error category totals"
+msgstr "Fehler nach Kategorie"
+
+msgid "Error"
+msgstr "Fehler"
+
+msgid "No errors reported."
+msgstr "Keine Fehler gemeldet."
+
+msgid "Technical report"
+msgstr "Technischer Bericht"
+
+msgid "Export reviews"
+msgstr "Prüfungen exportieren"
+
+msgid "Export decisions"
+msgstr "Entscheidungen exportieren"
+
+msgid "Export summary"
+msgstr "Zusammenfassung exportieren"
+
+msgid "Profile statistics"
+msgstr "Profilstatistik"
+
+msgid "Mean TEDS-S"
+msgstr "Mittlerer TEDS-S"
+
+msgid "Mean TEDS"
+msgstr "Mittlerer TEDS"
+
+msgid "Failures"
+msgstr "Fehler"
+
+msgid "No extraction data."
+msgstr "Keine Extraktionsdaten vorhanden."
+
+msgid "Back to evaluation"
+msgstr "Zurück zur Auswertung"
+
+msgid "Run diagnostics"
+msgstr "Diagnose anzeigen"
+
+msgid "Maintainer diagnostics"
+msgstr "Diagnose für Administratoren"
+
+msgid "Chat run diagnostics"
+msgstr "Diagnose des Chat-Laufs"
+
+msgid "Outcome summary"
+msgstr "Ergebnisübersicht"
+
+msgid "Outcome"
+msgstr "Ergebnis"
+
+msgid "Stage"
+msgstr "Phase"
+
+msgid "Failure category"
+msgstr "Fehlerkategorie"
+
+msgid "Duration"
+msgstr "Dauer"
+
+msgid "Model/provider"
+msgstr "Modell/Anbieter"
+
+msgid "Retrieval"
+msgstr "Suche"
+
+msgid "Evidence"
+msgstr "Quellen"
+
+msgid "Citation validation"
+msgstr "Prüfung der Quellenverweise"
+
+msgid "Retry"
+msgstr "Erneuter Versuch"
+
+msgid "Valid"
+msgstr "Gültig"
+
+msgid "Invalid markers"
+msgstr "Ungültige Verweise"
+
+msgid "Eligible"
+msgstr "Möglich"
+
+msgid "Not available"
+msgstr "Nicht verfügbar"
+
+msgid "What happened"
+msgstr "Ablauf"
+
+msgid "Event details"
+msgstr "Ereignisdetails"
+
+msgid "No timeline events were recorded."
+msgstr "Es wurden keine Ereignisse aufgezeichnet."
+
+msgid "Retrieval and model interaction"
+msgstr "Suche und Modellinteraktion"
+
+msgid "Scope"
+msgstr "Umfang"
+
+msgid "Configured tool mode"
+msgstr "Konfigurierter Tool-Modus"
+
+msgid "Actual retrieval path"
+msgstr "Tatsächlicher Suchpfad"
+
+msgid "Evidence passages"
+msgstr "Quellenausschnitte"
+
+msgid "Model search requests"
+msgstr "Suchanfragen des Modells"
+
+msgid "Selected evidence"
+msgstr "Ausgewählte Quellen"
+
+msgid "Matching passage"
+msgstr "Passender Textausschnitt"
+
+msgid "Full page sent to model"
+msgstr "An das Modell übermittelte Seite"
+
+msgid "No evidence was selected."
+msgstr "Es wurden keine Quellen ausgewählt."
+
+msgid "Model reasoning content"
+msgstr "Begründungsausgabe des Modells"
+
+msgid "Raw diagnostic record"
+msgstr "Diagnose-Rohdaten"
+
+msgid "Handwriting recognition lines"
+msgstr "Zeilen der Handschrifterkennung"
+
+msgid "Handwriting recognition"
+msgstr "Handschrifterkennung"
+
+msgid "Handwriting recognition (HTR)"
+msgstr "Handschrifterkennung (HTR)"
+
+msgid "Detect handwritten lines in this region and transcribe them. The result is a candidate — it never replaces the current text until you accept it."
+msgstr "Erkennt handschriftliche Zeilen in diesem Bereich und transkribiert sie. Das Ergebnis wird als Vorschlag gespeichert und erst nach Ihrer Bestätigung übernommen."
+
+msgid "Recognizer"
+msgstr "Erkennungsmodell"
+
+msgid "Run HTR"
+msgstr "HTR starten"
+
+msgid "Show HTR lines"
+msgstr "HTR-Zeilen anzeigen"
+
+msgid "Run again"
+msgstr "Erneut ausführen"
+
+msgid "Visual OCR candidates"
+msgstr "Vorschläge der visuellen OCR"
+
+msgid "Accept candidate"
+msgstr "Vorschlag übernehmen"
+
+msgid "Waiting for the visual OCR worker."
+msgstr "Wartet auf die visuelle OCR."
+
+msgid "Visual model"
+msgstr "Visuelles Modell"
+
+msgid "Qwen vision (chat model)"
+msgstr "Qwen Vision (Chat-Modell)"
+
+msgid "Re-run visual OCR"
+msgstr "Visuelle OCR erneut ausführen"
+
+msgid "Re-run full page with visual OCR"
+msgstr "Ganze Seite erneut mit visueller OCR verarbeiten"
+
+msgid "Page OCR candidates"
+msgstr "OCR-Vorschläge für die Seite"

@@ -53,9 +53,19 @@ class Command(BaseCommand):
                 except (PermissionError, LifecycleError) as exc:
                     self.stdout.write("candidate %s cannot edit: %s" % (admin.username, exc))
             else:
+                detail = "; ".join(
+                    "%s super=%s groups=%s" % (
+                        u.username, u.is_superuser,
+                        list(u.groups.values_list("name", flat=True)),
+                    ) for u in uniq
+                )
+                proj = source.collection
                 raise CommandError(
-                    "No global-admin identity can edit project for %r. Admins found: %s" % (
-                        source.filename, ",".join(u.username for u in uniq) or "none")
+                    "No global-admin identity can edit project for %r. Admins: %s | project=%s archived=%s" % (
+                        source.filename, detail or "none",
+                        proj.name if proj else None,
+                        proj.is_archived if proj else None,
+                    )
                 )
         for source in sources:
             ProjectLifecycleService.archive_source(

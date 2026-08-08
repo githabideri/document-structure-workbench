@@ -156,6 +156,7 @@ DSW_CHAT_FINAL_REQUEST_TIMEOUT = int(os.environ.get("DSW_CHAT_FINAL_REQUEST_TIME
 DSW_CHAT_WALL_CLOCK_TIMEOUT = int(os.environ.get("DSW_CHAT_WALL_CLOCK_TIMEOUT", "900"))
 DSW_CHAT_MAX_TOKENS = int(os.environ.get("DSW_CHAT_MAX_TOKENS", "16384"))
 DSW_CHAT_TOOL_MODE = os.environ.get("DSW_CHAT_TOOL_MODE", "fallback")
+DSW_CHAT_RETRIEVER = os.environ.get("DSW_CHAT_RETRIEVER", "deterministic_lexical")
 DSW_CHAT_MAX_TOOL_CALLS = min(20, max(1, int(os.environ.get("DSW_CHAT_MAX_TOOL_CALLS", "10"))))
 DSW_CHAT_MAX_RESULTS_PER_CALL = int(os.environ.get("DSW_CHAT_MAX_RESULTS_PER_CALL", "8"))
 DSW_CHAT_MAX_EVIDENCE = int(os.environ.get("DSW_CHAT_MAX_EVIDENCE", "24"))

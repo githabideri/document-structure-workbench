@@ -14,7 +14,7 @@ from django.utils.safestring import mark_safe
 
 from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, ProcessingArtifact, SearchPassage, SourceDocument
 from .policy import ProjectAccessPolicy
-from .retrieval import DeterministicLexicalRetriever
+from .retrieval import get_retriever
 from .search import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -204,13 +204,22 @@ def process_chat_run(run, worker_id="chat-worker"):
     # Explicit attachments are authoritative initial context.  They are
     # materialized before the provider call; the search tool is not required
     # to discover a document the user already attached.
-    retriever = DeterministicLexicalRetriever()
+    retriever = get_retriever()
+    retriever_name = retriever.name
+    attached_started = time.monotonic()
     selected = retriever.attached_context(
         source_ids=attachment_ids,
         project_ids=attachment_context_projects,
         revision_ids=revision_ids,
         limit=getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
     )
+    record_run_event(run, "retriever", metadata={
+        "implementation": retriever_name,
+        "configured": getattr(settings, "DSW_CHAT_RETRIEVER", "deterministic_lexical"),
+        "phase": "attached_context",
+        "records": getattr(retriever, "last_stats", {}).get("passages_scanned", 0),
+        "retrieval_ms": round((time.monotonic() - attached_started) * 1000, 3),
+    })
     EvidenceItem.objects.filter(run=run).delete()
     items = []
     for index, hit in enumerate(selected, 1):
@@ -252,7 +261,7 @@ def process_chat_run(run, worker_id="chat-worker"):
         "evidence for this turn. State uncertainty and cite document claims with supplied markers such as [S1]. "
         "Never invent citations or URLs.\n\nEVIDENCE:\n" + (context or "No evidence has been retrieved yet.")
     )
-    run.model_metadata = {**(run.model_metadata or {}), "prompt": system, "scope_snapshot": snapshot}
+    run.model_metadata = {**(run.model_metadata or {}), "prompt": system, "scope_snapshot": snapshot, "retriever": retriever_name}
     run.save(update_fields=["model_metadata"])
     record_run_event(run, "assembling", metadata={"source_tokens": sum(len(item.text.split()) for item in items)})
     history_rows = list(thread.messages.exclude(pk=run.user_message_id)
@@ -353,6 +362,7 @@ def process_chat_run(run, worker_id="chat-worker"):
                     repeated_query = fingerprint in seen_query_fingerprints
                     seen_query_fingerprints.add(fingerprint)
                     remaining_evidence = max(0, getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24) - len(items))
+                    search_stats = {}
                     found = [] if repeated_query else retriever.search(
                         query=query,
                         source_ids=source_ids,
@@ -360,6 +370,8 @@ def process_chat_run(run, worker_id="chat-worker"):
                         revision_ids=revision_ids,
                         limit=min(getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8), remaining_evidence),
                     )
+                    if not repeated_query:
+                        search_stats = dict(getattr(retriever, "last_stats", {}) or {})
                     result_entries = []
                     for hit in found:
                         passage = hit.passage
@@ -396,6 +408,10 @@ def process_chat_run(run, worker_id="chat-worker"):
                         "query": query, "query_fingerprint": fingerprint,
                         "result_count": len(found), "new_evidence_count": new_evidence_count,
                         "outcome": outcome, "tool_call_number": tool_call_count,
+                        "retriever": retriever_name,
+                        "retrieval_ms": search_stats.get("retrieval_ms"),
+                        "passages_scanned": search_stats.get("passages_scanned"),
+                        "hits_returned": search_stats.get("hits_returned"),
                     }
                     record_run_event(run, "tool_call", metadata=event_metadata)
                     if outcome != "new_evidence":

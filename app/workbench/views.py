@@ -551,9 +551,21 @@ def chat_run_diagnostics(request, run_id):
     tool_events = [event for event in bundle["events"] if event["name"] in {"tool_call", "tool_fallback", "tool_call_rejected", "tool_call_limit", "final_answer_request", "final_answer_rejected", "citation_rejected"}]
     used_model_tools = bool([event for event in bundle["events"] if event["name"] == "tool_call"])
     retrieval_event = next((event for event in bundle["events"] if event["name"] == "evidence_selected"), {})
+    retriever_event = next((event for event in bundle["events"] if event["name"] == "retriever"), {})
+    run_meta = bundle["run"].get("model_metadata") or {}
+    active_retriever = (
+        retriever_event.get("metadata", {}).get("implementation")
+        or run_meta.get("retriever")
+        or getattr(settings, "DSW_CHAT_RETRIEVER", "deterministic_lexical")
+    )
     provider_summary = {
         "configured_mode": getattr(settings, "DSW_CHAT_TOOL_MODE", "fallback"),
         "actual_mode": "model-requested search" if used_model_tools else "server-side deterministic retrieval",
+        "retriever": active_retriever,
+        "retriever_configured": getattr(settings, "DSW_CHAT_RETRIEVER", "deterministic_lexical"),
+        "retriever_source": (
+            "run-event" if retriever_event else ("run-metadata" if run_meta.get("retriever") else "configured-default")
+        ),
         "tool_events": tool_events,
         "model": (bundle.get("provider") or {}).get("model", settings.DSW_CHAT_MODEL),
         "evidence_count": retrieval_event.get("metadata", {}).get("count", len(bundle["evidence"])),

@@ -90,7 +90,11 @@ LANGUAGES = [
     ("de", "Deutsch"),
 ]
 
+# Reviewed showcase translations take precedence over the legacy catalogue.
+# Keeping the legacy catalogue second preserves existing coverage while allowing
+# corrected wording and newly internationalized UI to ship independently.
 LOCALE_PATHS = [
+    BASE_DIR.parent / "locale_reviewed",
     BASE_DIR.parent / "locale",
 ]
 
@@ -159,9 +163,7 @@ DSW_PROCESSING_STALE_AFTER_SECONDS = int(
 DSW_PROCESSING_LEASE_SECONDS = int(
     os.environ.get("DSW_PROCESSING_LEASE_SECONDS", "90")
 )
-DSW_PROCESSING_MAX_STATUS_ERRORS = int(
-    os.environ.get("DSW_PROCESSING_MAX_STATUS_ERRORS", "5")
-)
+DSW_PROCESSING_MAX_STATUS_ERRORS = int(os.environ.get("DSW_PROCESSING_MAX_STATUS_ERRORS", "5"))
 
 # Optional read-only research assistant (OpenAI-compatible llama.cpp server).
 DSW_CHAT_BASE_URL = os.environ.get("DSW_CHAT_BASE_URL", "")

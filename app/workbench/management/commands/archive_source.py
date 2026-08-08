@@ -10,7 +10,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from workbench.models import SourceDocument
 from workbench.policy import ProjectAccessPolicy
-from workbench.services import ProjectLifecycleService
+from workbench.services import LifecycleError, ProjectLifecycleService
 
 User = get_user_model()
 
@@ -27,13 +27,36 @@ class Command(BaseCommand):
         if not sources:
             raise CommandError("No source document matches filename %r" % options["filename"])
         archived = options["archived"] == "true"
-        admin = (
-            User.objects.filter(is_superuser=True).first()
-            or User.objects.filter(groups__name="Administrator").first()
-        )
-        if admin is None:
-            raise CommandError("No global administrator user available to authorize archiving.")
-        policy = ProjectAccessPolicy(user=admin)
+        # Pick any global-admin identity; try each candidate in order and use the
+        # first that can actually edit the owning project.
+        candidates = list(User.objects.filter(is_superuser=True).order_by("id"))
+        candidates += list(User.objects.filter(groups__name="Administrator").order_by("id"))
+        seen = set(); uniq = []
+        for u in candidates:
+            if u.pk in seen:
+                continue
+            seen.add(u.pk); uniq.append(u)
+        for source in sources:
+            source_is_superuser = False
+            for admin in uniq:
+                policy = ProjectAccessPolicy(user=admin)
+                try:
+                    if policy.can_edit(source.collection):
+                        ProjectLifecycleService.archive_source(
+                            source=source, policy=policy, archived=archived,
+                        )
+                        self.stdout.write(
+                            "archived=%s source=%s project=%s (authorized_by=%s)" % (
+                                archived, source.filename, source.collection.name, admin.username)
+                        )
+                        break
+                except (PermissionError, LifecycleError) as exc:
+                    self.stdout.write("candidate %s cannot edit: %s" % (admin.username, exc))
+            else:
+                raise CommandError(
+                    "No global-admin identity can edit project for %r. Admins found: %s" % (
+                        source.filename, ",".join(u.username for u in uniq) or "none")
+                )
         for source in sources:
             ProjectLifecycleService.archive_source(
                 source=source, policy=policy, archived=archived,

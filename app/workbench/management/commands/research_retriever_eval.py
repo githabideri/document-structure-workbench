@@ -138,10 +138,14 @@ class Command(BaseCommand):
         attached = case.get("attached_documents") or []
         expected = case.get("expected_sources") or []
         source_ids = list(SourceDocument.objects.filter(filename__in=attached).values_list("pk", flat=True))
+        # Only non-archived projects participate, mirroring the real chat's
+        # visible_projects() (an archived project's documents are not in scope).
+        active_projects = Collection.objects.filter(is_archived=False).values_list("pk", flat=True)
+        active_set = set(int(pk) for pk in active_projects)
         pid_slug = scope.get("project_id")
         projects = []
         if pid_slug:
-            for project in Collection.objects.all():
+            for project in Collection.objects.filter(is_archived=False):
                 matches = project.name == pid_slug
                 if not matches and hasattr(project, "slug"):
                     matches = project.slug == pid_slug
@@ -152,9 +156,14 @@ class Command(BaseCommand):
             # Fall back to projects owning the attached / expected sources.
             names = list(set(attached) | set(expected))
             if names:
-                projects = list(SourceDocument.objects.filter(filename__in=names).values_list("collection_id", flat=True).distinct())
+                projects = [
+                    cid for cid in SourceDocument.objects.filter(
+                        filename__in=names, is_archived=False,
+                    ).values_list("collection_id", flat=True).distinct()
+                    if int(cid) in active_set
+                ]
         if not projects:
-            projects = list(Collection.objects.all().values_list("pk", flat=True))
+            projects = sorted(active_set)
         # Mirror how the chat scope freezes its source set: every accessible,
         # non-archived source in the resolved projects (plus explicit
         # attachments). Passing an empty source_ids list would make the

@@ -81,6 +81,7 @@ urlpatterns = [
 
     # User Settings
     path("settings/", views.user_settings, name="user_settings"),
+    path("settings/password/forced/", views.forced_password_change, name="forced_password_change"),
 
     # REST API v1 (secure, token-authenticated)
     path("api/v1/health/", api.api_health, name="api_health"),

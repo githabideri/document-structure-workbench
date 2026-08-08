@@ -27,6 +27,10 @@ class UserPreferences(models.Model):
     timezone = models.CharField(max_length=50, default="Europe/Vienna")
     guided_explanations = models.BooleanField(default=True)
     onboarding_completed_at = models.DateTimeField(null=True, blank=True)
+    must_change_password = models.BooleanField(
+        default=False,
+        help_text="Force the user to set a new password before any other page.",
+    )
 
     class Meta:
         verbose_name = "User preferences"

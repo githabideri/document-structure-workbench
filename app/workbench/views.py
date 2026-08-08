@@ -1642,8 +1642,14 @@ def user_settings(request):
                 from django.contrib import messages
                 messages.error(request, _("New password must be at least 8 characters."))
             else:
+                from django.contrib.auth import update_session_auth_hash
                 request.user.set_password(new_password)
                 request.user.save()
+                update_session_auth_hash(request, request.user)
+                from .models import UserPreferences
+                UserPreferences.get_or_create_for_user(request.user)
+                request.user.preferences.must_change_password = False
+                request.user.preferences.save(update_fields=["must_change_password"])
                 from django.contrib import messages
                 messages.success(request, _("Password changed."))
 
@@ -1684,6 +1690,41 @@ def serve_htmx(request):
 
 
 # --- Upload / Processing ---
+
+
+@login_required
+def forced_password_change(request):
+    """Standalone forced password-change page (for must_change_password users)."""
+    from .models import UserPreferences
+
+    if request.method == "POST":
+        current = request.POST.get("current_password", "")
+        new_password = request.POST.get("new_password", "")
+        confirm = request.POST.get("confirm_password", "")
+        if not request.user.check_password(current):
+            messages.error(request, _("Current password is incorrect."))
+        elif new_password != confirm:
+            messages.error(request, _("New passwords do not match."))
+        elif len(new_password) < 8:
+            messages.error(request, _("New password must be at least 8 characters."))
+        elif request.user.check_password(new_password):
+            messages.error(request, _("New password must differ from the current one."))
+        else:
+            from django.contrib.auth import update_session_auth_hash
+            request.user.set_password(new_password)
+            request.user.save(update_fields=["password"])
+            update_session_auth_hash(request, request.user)
+            prefs = UserPreferences.get_or_create_for_user(request.user)
+            prefs.must_change_password = False
+            prefs.save(update_fields=["must_change_password"])
+            messages.success(request, _("Password updated. You can now continue."))
+            return redirect(request.GET.get("next") or "/")
+
+    return render(request, "workbench/forced_password_change.html", {
+        "username": request.user.get_username(),
+        "next": request.GET.get("next", "/"),
+    })
+
 
 @login_required
 def document_new(request, project_id=None):

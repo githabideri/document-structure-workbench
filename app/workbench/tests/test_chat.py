@@ -353,18 +353,21 @@ class ChatTests(TestCase):
         self.assertEqual(first.scope_snapshot, scope_a)
 
     def test_evidence_persists_after_run(self):
-        from workbench.chat import create_chat_run, select_attached_context
+        from workbench.chat import create_chat_run
         from workbench.models import EvidenceItem
+        from workbench.retrieval import DeterministicLexicalRetriever
         thread = ChatThread.objects.create(project=self.project, created_by=self.user)
         run = create_chat_run(thread, "evidence persistence", scope=self.resolved_project_scope())
-        selected = select_attached_context([self.source.pk], [self.project.pk])
-        self.assertEqual(len(selected), 1)
-        _, passage, reason = selected[0]
+        hits = DeterministicLexicalRetriever().attached_context(
+            source_ids=[self.source.pk], project_ids=[self.project.pk],
+        )
+        self.assertEqual(len(hits), 1)
+        passage = hits[0].passage
         EvidenceItem.objects.create(run=run, marker="S1", source_document=passage.source_document,
                                     processed_revision=passage.processed_revision, processing_job=passage.processing_job,
                                     page=passage.page, page_region=passage.page_region, passage=passage,
-                                    text=passage.text, page_text=passage.text, retrieval_method="direct-attachment",
-                                    selection_reason="attached-document/context", ordinal=1)
+                                    text=passage.text, page_text=passage.text, retrieval_method=hits[0].method,
+                                    selection_reason=hits[0].reason, ordinal=1)
         self.assertEqual(run.evidence_items.count(), 1)
         self.assertEqual(run.evidence_items.first().marker, "S1")
 

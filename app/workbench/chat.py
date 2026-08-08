@@ -14,6 +14,7 @@ from django.utils.safestring import mark_safe
 
 from .models import ChatMessage, ChatRun, ChatRunEvent, EvidenceItem, ProcessingArtifact, SearchPassage, SourceDocument
 from .policy import ProjectAccessPolicy
+from .retrieval import DeterministicLexicalRetriever
 from .search import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -45,37 +46,6 @@ def record_run_event(run, name, *, metadata=None, error_code="", duration_ms=Non
     )
 
 
-def select_attached_context(source_ids, projects, revision_ids=None, limit=24):
-    """Select one immutable, full-page context item per explicitly attached page.
-
-    Attachments are an explicit user input, not a retrieval hint.  Their
-    content is therefore placed in the initial run context before the model
-    is called.  One representative indexed passage per page gives the
-    evidence item stable provenance while ``page_text`` carries the complete
-    extracted page text.  The caller still applies the configured context
-    token budget and evidence limit.
-    """
-    queryset = SearchPassage.objects.filter(
-        source_document_id__in=source_ids, project__in=projects,
-    )
-    if revision_ids:
-        queryset = queryset.filter(processed_revision_id__in=revision_ids)
-    passages = queryset.select_related(
-        "source_document", "processed_revision", "processing_job", "page", "page_region",
-    ).order_by("source_document_id", "page__page_number", "ordinal", "id")
-    selected = []
-    seen_pages = set()
-    for passage in passages:
-        page_key = (passage.source_document_id, passage.processed_revision_id, passage.page_id)
-        if page_key in seen_pages:
-            continue
-        seen_pages.add(page_key)
-        selected.append((0, passage, "attached-document/context"))
-        if len(selected) >= limit:
-            break
-    return selected
-
-
 def build_direct_context(source_ids, projects, limit=32):
     passages = SearchPassage.objects.filter(
         source_document_id__in=source_ids, project__in=projects,
@@ -92,42 +62,6 @@ def build_direct_context(source_ids, projects, limit=32):
             f"page {page}; region {passage.page_region_id or '-'}\n{excerpt}"
         )
     return "\n\n".join(lines), citations
-
-
-def select_evidence(question, source_ids, projects, revision_ids=None, limit=24):
-    """Select passages across the complete scope with deterministic coverage."""
-    tokens = [token for token in re.findall(r"[\w-]{3,}", normalize_text(question))]
-    queryset = SearchPassage.objects.filter(
-        source_document_id__in=source_ids, project__in=projects,
-    )
-    if revision_ids:
-        queryset = queryset.filter(processed_revision_id__in=revision_ids)
-    passages = list(queryset.select_related("source_document", "processed_revision", "processing_job", "page", "page_region"))
-    scored = []
-    for passage in passages:
-        text = passage.normalized_text
-        score = sum(text.count(token) for token in tokens)
-        if normalize_text(question) in text:
-            score += 10
-        if score:
-            scored.append((score, passage))
-    scored.sort(key=lambda pair: (-pair[0], pair[1].source_document_id, pair[1].page.page_number if pair[1].page else 0, pair[1].ordinal))
-    selected = []
-    seen_pages = set()
-    # First pass guarantees page coverage among matching evidence.
-    for score, passage in scored:
-        page_key = (passage.source_document_id, passage.page_id)
-        if page_key not in seen_pages:
-            selected.append((score, passage, "query-match/page-coverage"))
-            seen_pages.add(page_key)
-        if len(selected) >= limit:
-            break
-    for score, passage in scored:
-        if len(selected) >= limit:
-            break
-        if not any(existing[1].id == passage.id for existing in selected):
-            selected.append((score, passage, "query-match"))
-    return selected
 
 
 def _legacy_scope(thread):
@@ -270,22 +204,24 @@ def process_chat_run(run, worker_id="chat-worker"):
     # Explicit attachments are authoritative initial context.  They are
     # materialized before the provider call; the search tool is not required
     # to discover a document the user already attached.
-    selected = select_attached_context(
-        attachment_ids,
-        attachment_context_projects,
+    retriever = DeterministicLexicalRetriever()
+    selected = retriever.attached_context(
+        source_ids=attachment_ids,
+        project_ids=attachment_context_projects,
         revision_ids=revision_ids,
         limit=getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24),
     )
     EvidenceItem.objects.filter(run=run).delete()
     items = []
-    for index, (score, passage, reason) in enumerate(selected, 1):
+    for index, hit in enumerate(selected, 1):
+        passage = hit.passage
         items.append(EvidenceItem(
             run=run, marker=f"S{index}", source_document=passage.source_document,
             processed_revision=passage.processed_revision, processing_job=passage.processing_job,
             page=passage.page, page_region=passage.page_region, passage=passage,
-            text=passage.text[:1600], page_text=_full_page_text(passage), retrieval_method="direct-attachment",
-            selection_reason=reason,
-            score=score, ordinal=index,
+            text=passage.text[:1600], page_text=_full_page_text(passage), retrieval_method=hit.method,
+            selection_reason=hit.reason,
+            score=hit.score, ordinal=index,
         ))
     existing_passage_ids = {item.passage_id for item in items}
     EvidenceItem.objects.bulk_create(items)
@@ -417,22 +353,23 @@ def process_chat_run(run, worker_id="chat-worker"):
                     repeated_query = fingerprint in seen_query_fingerprints
                     seen_query_fingerprints.add(fingerprint)
                     remaining_evidence = max(0, getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24) - len(items))
-                    found = [] if repeated_query else select_evidence(
-                        query,
-                        source_ids,
-                        attachment_context_projects,
+                    found = [] if repeated_query else retriever.search(
+                        query=query,
+                        source_ids=source_ids,
+                        project_ids=attachment_context_projects,
                         revision_ids=revision_ids,
                         limit=min(getattr(settings, "DSW_CHAT_MAX_RESULTS_PER_CALL", 8), remaining_evidence),
                     )
                     result_entries = []
-                    for _, passage, reason in found:
+                    for hit in found:
+                        passage = hit.passage
                         if len(items) >= getattr(settings, "DSW_CHAT_MAX_EVIDENCE", 24):
                             break
                         if passage.id in existing_passage_ids:
                             continue
                         marker = f"S{len(items) + 1}"
                         page_text = _full_page_text(passage)
-                        evidence = EvidenceItem.objects.create(run=run, marker=marker, source_document=passage.source_document, processed_revision=passage.processed_revision, processing_job=passage.processing_job, page=passage.page, page_region=passage.page_region, passage=passage, text=passage.text[:1600], page_text=page_text, retrieval_method="native-tool", selection_reason="search-tool/" + reason, ordinal=len(items) + 1)
+                        evidence = EvidenceItem.objects.create(run=run, marker=marker, source_document=passage.source_document, processed_revision=passage.processed_revision, processing_job=passage.processing_job, page=passage.page, page_region=passage.page_region, passage=passage, text=passage.text[:1600], page_text=page_text, retrieval_method="native-tool", selection_reason="search-tool/" + hit.reason, ordinal=len(items) + 1)
                         items.append(evidence)
                         existing_passage_ids.add(passage.id)
                         result_entries.append({"marker": marker, "text": passage.text[:1600], "page_text": page_text, "source_document_id": passage.source_document_id, "revision_id": passage.processed_revision_id, "page": passage.page.page_number if passage.page else None})

@@ -155,7 +155,16 @@ class Command(BaseCommand):
                 projects = list(SourceDocument.objects.filter(filename__in=names).values_list("collection_id", flat=True).distinct())
         if not projects:
             projects = list(Collection.objects.all().values_list("pk", flat=True))
-        return {"mode": scope.get("mode", "project"), "source_ids": source_ids, "project_ids": projects}
+        # Mirror how the chat scope freezes its source set: every accessible,
+        # non-archived source in the resolved projects (plus explicit
+        # attachments). Passing an empty source_ids list would make the
+        # SourceDocument id__in filter return nothing, so the retriever sees a
+        # real scoped source set exactly like a live run does.
+        scope_source_ids = list(SourceDocument.objects.filter(
+            collection_id__in=projects, is_archived=False,
+        ).values_list("pk", flat=True))
+        scope_source_ids = sorted(set(scope_source_ids) | set(source_ids))
+        return {"mode": scope.get("mode", "project"), "source_ids": scope_source_ids, "project_ids": projects}
 
     def _evaluate_case(self, case, retrievers, expected_sources):
         expected_sources = set(expected_sources or case.get("expected_sources") or [])

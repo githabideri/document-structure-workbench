@@ -1,5 +1,6 @@
 import {apiFetch} from "./core/api-client.js";
 import {publishDiagnostics} from "./core/diagnostics.js";
+import {t} from "./core/i18n.js";
 
 const root = document.querySelector("[data-ui-id='chat-workspace']");
 if (!root) {
@@ -34,7 +35,7 @@ if (!root) {
         else history.pushState({run, evidence: marker || null}, "", url);
     };
     const setLoading = () => {
-        heading.textContent = "Loading evidence";
+        heading.textContent = t("Loading evidence");
         root.querySelector("[data-evidence-meta]").textContent = "";
         root.querySelector("[data-evidence-passage]").textContent = "";
         root.querySelector("[data-evidence-page-text]").textContent = "";
@@ -51,9 +52,9 @@ if (!root) {
     const renderEvidence = item => {
         evidenceState = item;
         heading.textContent = `[${item.marker}] ${item.filename}`;
-        root.querySelector("[data-evidence-meta]").textContent = `${item.project} · Revision ${item.revision_id} · Page ${item.page_number ?? "?"}${item.region_id ? ` · Region ${item.region_id}` : ""}`;
-        root.querySelector("[data-evidence-passage]").textContent = item.passage || "No matching passage was stored.";
-        root.querySelector("[data-evidence-page-text]").textContent = item.page_text || item.passage || "No page text was stored.";
+        root.querySelector("[data-evidence-meta]").textContent = `${item.project} · ${t("Revision")} ${item.revision_id} · ${t("Page")} ${item.page_number ?? "?"}${item.region_id ? ` · ${t("Region")} ${item.region_id}` : ""}`;
+        root.querySelector("[data-evidence-passage]").textContent = item.passage || t("No matching passage was stored.");
+        root.querySelector("[data-evidence-page-text]").textContent = item.page_text || item.passage || t("No page text was stored.");
         root.querySelector("[data-evidence-reason]").textContent = item.selection_reason || "—";
         root.querySelector("[data-evidence-revision]").textContent = item.revision_id ?? "—";
         root.querySelector("[data-evidence-score]").textContent = item.score ?? "—";
@@ -102,18 +103,14 @@ if (!root) {
             if (focus) heading.focus();
         } catch (error) {
             if (error.name === "AbortError" || generation !== evidenceGeneration) return;
-            heading.textContent = error.code === "network_error" ? "Evidence could not be loaded" : "Evidence unavailable";
-            root.querySelector("[data-evidence-passage]").textContent = error.message || "The evidence request failed.";
+            heading.textContent = error.code === "network_error" ? t("Evidence could not be loaded") : t("Evidence unavailable");
+            root.querySelector("[data-evidence-passage]").textContent = error.message || t("The evidence request failed.");
             updateDiagnostics();
         }
     };
     root.addEventListener("click", event => {
         const citation = event.target.closest?.(".chat-citation");
-        if (citation) {
-            event.preventDefault();
-            loadEvidence(citation.dataset.runId, citation.dataset.evidenceMarker);
-            return;
-        }
+        if (citation) { event.preventDefault(); loadEvidence(citation.dataset.runId, citation.dataset.evidenceMarker); return; }
         if (event.target.closest?.(".evidence-close")) { closeEvidence(); return; }
         if (event.target.closest?.(".inspector-close")) { closeInspector(); return; }
         const inspectorButton = event.target.closest?.(".run-inspector-open");
@@ -138,26 +135,21 @@ if (!root) {
         inspector.dataset.invokingId = invoking.dataset.uiId || "";
         inspector.querySelector("#run-inspector-heading").focus();
         const body = inspector.querySelector("[data-inspector-body]");
-        body.innerHTML = "<p>Loading run diagnostics…</p>";
+        body.innerHTML = `<p>${escapeHtml(t("Loading run diagnostics…"))}</p>`;
         try {
-            const data = await apiFetch(`/chat/runs/${encodeURIComponent(run)}/diagnostics/data/`);
-            const d = data;
-            body.innerHTML = `<div class="inspector-summary"><strong>${escapeHtml(d.outcome.state)}</strong><span>${escapeHtml(d.outcome.failure_category || d.outcome.stage || "—")}</span><span>${d.retrieval.tool_call_count} tool calls · ${d.retrieval.evidence_count} evidence</span><span>${escapeHtml(d.provider.model || "—")}</span></div><h3>Phases</h3><ol class="inspector-phases">${d.phases.map(phase => `<li class="${phase.status === "failed" ? "is-failed" : ""}"><strong>${escapeHtml(phase.name)}</strong><span>${escapeHtml(phase.summary || "")}</span><small>${phase.duration_ms ?? "—"} ms</small></li>`).join("")}</ol><h3>Retrieval</h3><p>${escapeHtml(d.retrieval.path)} · ${d.retrieval.queries.map(escapeHtml).join(", ") || "No queries"}</p><h3>Evidence</h3><ul class="inspector-evidence">${d.evidence.map(item => `<li><strong>[${escapeHtml(item.marker)}]</strong> ${escapeHtml(item.filename)} · p. ${item.page ?? "?"}<br><span>${escapeHtml(item.passage)}</span></li>`).join("") || "<li>No evidence</li>"}</ul><details><summary>Raw diagnostics</summary><pre>${escapeHtml(JSON.stringify(d.raw, null, 2))}</pre></details>`;
+            const d = await apiFetch(`/chat/runs/${encodeURIComponent(run)}/diagnostics/data/`);
+            body.innerHTML = `<div class="inspector-summary"><strong>${escapeHtml(d.outcome.state)}</strong><span>${escapeHtml(d.outcome.failure_category || d.outcome.stage || "—")}</span><span>${d.retrieval.tool_call_count} ${escapeHtml(t("tool calls"))} · ${d.retrieval.evidence_count} ${escapeHtml(t("evidence"))}</span><span>${escapeHtml(d.provider.model || "—")}</span></div><h3>${escapeHtml(t("Phases"))}</h3><ol class="inspector-phases">${d.phases.map(phase => `<li class="${phase.status === "failed" ? "is-failed" : ""}"><strong>${escapeHtml(phase.name)}</strong><span>${escapeHtml(phase.summary || "")}</span><small>${phase.duration_ms ?? "—"} ms</small></li>`).join("")}</ol><h3>${escapeHtml(t("Retrieval"))}</h3><p>${escapeHtml(d.retrieval.path)} · ${d.retrieval.queries.map(escapeHtml).join(", ") || escapeHtml(t("No queries"))}</p><h3>${escapeHtml(t("Evidence"))}</h3><ul class="inspector-evidence">${d.evidence.map(item => `<li><strong>[${escapeHtml(item.marker)}]</strong> ${escapeHtml(item.filename)} · ${t("Page")} ${item.page ?? "?"}<br><span>${escapeHtml(item.passage)}</span></li>`).join("") || `<li>${escapeHtml(t("No evidence"))}</li>`}</ul><details><summary>${escapeHtml(t("Raw diagnostics"))}</summary><pre>${escapeHtml(JSON.stringify(d.raw, null, 2))}</pre></details>`;
             updateDiagnostics();
-        } catch (error) { body.textContent = error.message || "Diagnostics unavailable."; }
+        } catch (error) { body.textContent = error.message || t("Diagnostics unavailable."); }
     };
     const closeInspector = () => {
         const current = state();
         inspector.hidden = true;
         if (current.run && current.evidence) {
-            const hasCurrentEvidence = evidenceState
-                && String(evidenceState.run_id) === String(current.run)
-                && evidenceState.marker === current.evidence;
+            const hasCurrentEvidence = evidenceState && String(evidenceState.run_id) === String(current.run) && evidenceState.marker === current.evidence;
             evidencePanel.hidden = false;
             contextSummary.hidden = true;
-            if (!hasCurrentEvidence && citationFor(current.run, current.evidence)) {
-                loadEvidence(current.run, current.evidence, {historyMode: "replace", focus: false});
-            }
+            if (!hasCurrentEvidence && citationFor(current.run, current.evidence)) loadEvidence(current.run, current.evidence, {historyMode: "replace", focus: false});
         } else {
             evidenceState = null;
             evidencePanel.hidden = true;
@@ -174,10 +166,6 @@ if (!root) {
     composer?.addEventListener("keydown", event => {
         if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); }
     });
-    // Per-turn scope editor on the follow-up composer. The editor is collapsed
-    // by default and submits scope_inherit=1 (inherit the previous run's frozen
-    // scope). Any change marks the scope dirty, clears the flag, and previews
-    // the configuration that will actually be frozen for this question.
     const scopeInherit = composer?.querySelector("[data-scope-inherit]");
     const scopeEditor = composer?.querySelector("[data-scope-editor]");
     if (scopeEditor) {
@@ -199,13 +187,12 @@ if (!root) {
         const updateScopeSummary = () => {
             const attachedCount = [...composer.querySelectorAll("[data-scope-source]:checked")].length;
             let text;
-            if (!modeSelect || modeSelect.value === "all") {
-                text = `All accessible projects · ${attachedCount} attached`;
-            } else {
+            if (!modeSelect || modeSelect.value === "all") text = t("All accessible projects · {count} attached", {count: attachedCount});
+            else {
                 const name = projectName(projectSelect.value);
-                text = name ? `Project "${name}" · ${attachedCount} attached` : `One project · ${attachedCount} attached`;
+                text = name ? t("Project “{name}” · {count} attached", {name, count: attachedCount}) : t("One project · {count} attached", {count: attachedCount});
             }
-            if (scopeDirty) text += " · changed for this question";
+            if (scopeDirty) text += t(" · changed for this question");
             if (summary) summary.textContent = text;
         };
         const markDirty = () => {
@@ -225,10 +212,7 @@ if (!root) {
         if (!inspector.hidden) closeInspector(); else if (!evidencePanel.hidden) closeEvidence();
     });
     const closeButton = root.querySelector(".evidence-close");
-    if (closeButton) closeButton.onclick = event => {
-        event.stopPropagation();
-        closeEvidence();
-    };
+    if (closeButton) closeButton.onclick = event => { event.stopPropagation(); closeEvidence(); };
     window.addEventListener("popstate", () => {
         const current = state();
         if (current.evidence) loadEvidence(current.run, current.evidence, {historyMode: "replace", focus: true});

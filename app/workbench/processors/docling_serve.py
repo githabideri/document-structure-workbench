@@ -53,6 +53,12 @@ class SubmissionUncertain(RuntimeError):
     """The transport failed after submission may have reached the processor."""
 
 
+class SubmissionNotDelivered(SubmissionUncertain):
+    """The processor was unreachable (e.g. connection refused), so the submission
+    deterministically did NOT reach it. Retrying cannot duplicate the work, so
+    the worker may retry these automatically (bounded by the configured cap)."""
+
+
 class ProcessorProtocolError(RuntimeError):
     """The processor returned a response that violates its contract."""
 
@@ -157,8 +163,17 @@ class DoclingServeProcessor(DocumentProcessor):
             )
             resp.raise_for_status()
             result = resp.json()
-        except (requests.ConnectionError, requests.Timeout) as exc:
+        except requests.ConnectionError as exc:
+            # Connection refused/reset before any response: the submission did
+            # not reach the processor, so auto-retry is safe.
             logger.error("Cannot connect to Docling server at %s", self.server_url)
+            raise SubmissionNotDelivered(
+                f"Docling submission was not delivered: {self.server_url}"
+            ) from exc
+        except requests.Timeout as exc:
+            # Ambiguous: the request may have reached the processor. Keep this
+            # manual (submission_uncertain, no auto-retry).
+            logger.error("Docling submission timed out at %s", self.server_url)
             raise SubmissionUncertain(
                 f"Docling submission outcome is uncertain: {self.server_url}"
             ) from exc

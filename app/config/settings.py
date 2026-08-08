@@ -163,6 +163,12 @@ DSW_PROCESSING_STALE_AFTER_SECONDS = int(
 DSW_PROCESSING_LEASE_SECONDS = int(
     os.environ.get("DSW_PROCESSING_LEASE_SECONDS", "90")
 )
+DSW_PROCESSING_SUBMIT_RETRY_MAX = int(
+    os.environ.get("DSW_PROCESSING_SUBMIT_RETRY_MAX", "3")
+)
+DSW_PROCESSING_SUBMIT_RETRY_BACKOFF = int(
+    os.environ.get("DSW_PROCESSING_SUBMIT_RETRY_BACKOFF", "60")
+)
 DSW_PROCESSING_MAX_STATUS_ERRORS = int(os.environ.get("DSW_PROCESSING_MAX_STATUS_ERRORS", "5"))
 
 # Optional read-only research assistant (OpenAI-compatible llama.cpp server).

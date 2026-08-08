@@ -650,6 +650,13 @@ class ProcessingJob(models.Model):
     status_message = models.CharField(max_length=500, blank=True)
     remote_status = models.CharField(max_length=100, blank=True)
     consecutive_poll_errors = models.PositiveIntegerField(default=0)
+    # Bounded automatic retry for submissions that deterministically did NOT
+    # reach the processor (e.g. connection refused while it was offline). Only
+    # ever set when the transport proved non-delivery, so retrying cannot create
+    # a duplicate. After ``submission_retries`` reaches the configured cap the
+    # job remains 'submission_uncertain' for operator handling.
+    auto_retry_allowed = models.BooleanField(default=False)
+    submission_retries = models.PositiveIntegerField(default=0)
     error_message = models.TextField(blank=True)
     pages_processed = models.PositiveIntegerField(default=0)
     tables_found = models.PositiveIntegerField(default=0)
@@ -668,9 +675,11 @@ class ProcessingJob(models.Model):
         "submitting": ["processing", "submission_uncertain", "interrupted", "failed", "cancelled"],
         "processing": ["importing", "interrupted", "failed", "cancelled"],
         "importing": ["completed", "partial", "interrupted", "failed"],
-        # Closing an uncertain submission is an operator decision; it does
-        # not claim that the remote processor never received the file.
-        "submission_uncertain": ["failed", "cancelled"],
+        # An eligible uncertain submission is auto-retried (worker) for a bounded
+        # number of attempts via 'submitting'; otherwise closing it is an operator
+        # decision. It does not claim the remote processor never received the file
+        # unless auto_retry_allowed was set by a deterministic non-delivery.
+        "submission_uncertain": ["submitting", "failed", "cancelled"],
         "interrupted": ["processing", "importing", "failed", "cancelled"],
         "completed": [],
         "partial": [],

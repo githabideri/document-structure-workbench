@@ -2058,6 +2058,73 @@ class WorkerRecoveryTest(TestCase):
         self.assertIn("3 consecutive attempts", job.error_message)
         self.assertEqual(command.processor.get_status.call_count, 3)
 
+    @override_settings(DSW_PROCESSING_SUBMIT_RETRY_BACKOFF=1, DSW_PROCESSING_SUBMIT_RETRY_MAX=3)
+    def test_uncertain_not_delivered_job_is_auto_retried_and_resubmitted(self):
+        """A provably non-delivered submission is reclaimed and re-submitted."""
+        job = self._job(
+            state="submission_uncertain",
+            external_job_id="",
+            auto_retry_allowed=True,
+            submission_retries=1,
+            finished_at=timezone.now() - timedelta(seconds=120),
+        )
+        command = self._command()
+        claimed, action = command._claim_next_job()
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.pk, job.pk)
+        self.assertEqual(action, "submit")
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.state, "submitting")
+        self.assertEqual(claimed.external_job_id, "")
+        # The worker's submit action is the auto-retry path; the actual submit
+        # call is exercised elsewhere, so we only assert the claim contract here.
+
+    @override_settings(DSW_PROCESSING_SUBMIT_RETRY_BACKOFF=1)
+    def test_uncertain_ambiguous_job_is_not_auto_retried(self):
+        """A merely-ambiguous submission (auto_retry_allowed=False) stays manual."""
+        job = self._job(
+            state="submission_uncertain",
+            external_job_id="",
+            auto_retry_allowed=False,
+            submission_retries=0,
+            finished_at=timezone.now() - timedelta(seconds=120),
+        )
+        command = self._command()
+        self.assertIsNone(command._claim_next_job())
+        command.processor.submit.assert_not_called()
+        job.refresh_from_db()
+        self.assertEqual(job.state, "submission_uncertain")
+
+    @override_settings(DSW_PROCESSING_SUBMIT_RETRY_BACKOFF=1, DSW_PROCESSING_SUBMIT_RETRY_MAX=3)
+    def test_auto_retry_bounded_after_max_attempts(self):
+        """Once submission_retries reaches the cap the job is no longer reclaimed."""
+        self._job(
+            state="submission_uncertain",
+            external_job_id="",
+            auto_retry_allowed=True,
+            submission_retries=3,  # == DSW_PROCESSING_SUBMIT_RETRY_MAX
+            finished_at=timezone.now() - timedelta(seconds=120),
+        )
+        command = self._command()
+        self.assertIsNone(command._claim_next_job())
+
+    @override_settings(DSW_PROCESSING_SUBMIT_RETRY_MAX=3)
+    def test_not_delivered_submit_marks_uncertain_with_auto_retry_and_budget_message(self):
+        """A ConnectionError-style non-delivery is marked auto-retryable with a
+        bounded-attempt status message."""
+        from workbench.processors.docling_serve import SubmissionNotDelivered
+        job = self._job(state="submitting", external_job_id="")
+        command = self._command()
+        job.worker_id = command.worker_id
+        job.save(update_fields=["worker_id"])
+        command.processor.submit.side_effect = SubmissionNotDelivered("host refused")
+        command._process_job(job, "submit")
+        job.refresh_from_db()
+        self.assertEqual(job.state, "submission_uncertain")
+        self.assertTrue(job.auto_retry_allowed)
+        self.assertEqual(job.submission_retries, 1)
+        self.assertIn("will be retried automatically", job.status_message)
+
     def test_stale_importing_job_is_reimported_idempotently_and_completed(self):
         from workbench.processors.base import ProcessorResult
         from workbench.processors.importer import ResultImporter

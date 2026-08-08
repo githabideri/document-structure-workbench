@@ -17,8 +17,8 @@ from workbench.models import ChatRun, ProcessingJob, SourceDocument, WorkerHeart
 from workbench.chat import record_run_event
 from workbench.services import ChatRunService
 from workbench.processors.docling_serve import (
-    DoclingServeProcessor, ProcessorProtocolError, SubmissionRejected,
-    SubmissionUncertain,
+    DoclingServeProcessor, ProcessorProtocolError, SubmissionNotDelivered,
+    SubmissionRejected, SubmissionUncertain,
 )
 from workbench.processors.importer import ImportError as ImporterError
 from workbench.processors.importer import ResultImporter
@@ -151,6 +151,42 @@ class Command(BaseCommand):
                 self._adopt(job, now, f"Resuming {job.state} after worker interruption.")
                 return job, action
 
+            # --- Bounded automatic retry for uncertain, non-delivered submissions ---
+            # ``auto_retry_allowed`` is only set when the transport proved the file did
+            # not reach the processor (connection refused), so retrying is safe and
+            # cannot duplicate work. Retries are capped and spaced so a transient
+            # outage (e.g. an offline Docling host) does not strand a job forever.
+            retry_max = int(getattr(settings, "DSW_PROCESSING_SUBMIT_RETRY_MAX", 3))
+            if retry_max > 0:
+                backoff = int(getattr(settings, "DSW_PROCESSING_SUBMIT_RETRY_BACKOFF", 60))
+                retryable = ProcessingJob.objects.filter(
+                    state="submission_uncertain",
+                    auto_retry_allowed=True,
+                    submission_retries__lt=retry_max,
+                ).order_by("created_at")
+                for candidate in list(retryable):
+                    locked = self._locked_first(ProcessingJob.objects.filter(pk=candidate.pk))
+                    if not locked:
+                        continue
+                    if locked.auto_retry_allowed and locked.submission_retries < retry_max:
+                        elapsed = (
+                            (now - locked.finished_at).total_seconds()
+                            if locked.finished_at else 0
+                        )
+                        want = backoff * (2 ** max(locked.submission_retries - 1, 0))
+                        if elapsed < want:
+                            continue
+                        locked.transition_to("submitting")
+                        self._adopt(
+                            locked, now,
+                            f"Auto-retrying submission (attempt {locked.submission_retries}/{retry_max}).",
+                        )
+                        logger.info(
+                            "Auto-retrying job %d submission (attempt %d/%d)",
+                            locked.pk, locked.submission_retries, retry_max,
+                        )
+                        return locked, "submit"
+
             queued = ProcessingJob.objects.filter(state="queued").order_by("created_at")
             job = self._locked_first(queued)
             if not job:
@@ -210,8 +246,11 @@ class Command(BaseCommand):
                     task_id = self.processor.submit(job.source_document, job.preset_snapshot or {})
                 except FileNotFoundError:
                     raise
+                except SubmissionNotDelivered as exc:
+                    self._mark_submission_uncertain(job, str(exc), auto_retry=True)
+                    return
                 except SubmissionUncertain as exc:
-                    self._mark_submission_uncertain(job, str(exc))
+                    self._mark_submission_uncertain(job, str(exc), auto_retry=False)
                     return
                 except (SubmissionRejected, ProcessorProtocolError) as exc:
                     raise RuntimeError(str(exc)) from exc
@@ -339,15 +378,38 @@ class Command(BaseCommand):
             ])
             job.state = locked_job.state
 
-    def _mark_submission_uncertain(self, job, error_message):
+    def _mark_submission_uncertain(self, job, error_message, auto_retry=False):
+        """Mark a submission as uncertain, optionally enabling bounded auto-retry.
+
+        ``auto_retry`` must only be True when the transport proved the submission
+        did NOT reach the processor (see ``SubmissionNotDelivered``); retrying
+        then cannot duplicate work. Retries are bounded by
+        ``DSW_PROCESSING_SUBMIT_RETRY_MAX``; beyond it the job stays uncertain
+        for operator handling.
+        """
+        retry_max = int(getattr(settings, "DSW_PROCESSING_SUBMIT_RETRY_MAX", 3))
         try:
             job.transition_to("submission_uncertain")
         except Exception:
             pass
-        job.status_message = (
-            "Submission outcome is uncertain and will not be retried automatically. "
-            f"Operator detail: {error_message[:300]}"
-        )
+        job.auto_retry_allowed = bool(auto_retry)
+        if auto_retry:
+            job.submission_retries += 1
+        remaining = max(retry_max - job.submission_retries, 0)
+        if auto_retry and remaining > 0:
+            job.status_message = (
+                f"Submission was not delivered (processor unreachable); it will be "
+                f"retried automatically (attempt {job.submission_retries}/{retry_max}). "
+                f"Operator detail: {error_message[:200]}"
+            )
+        else:
+            job.status_message = (
+                "Submission outcome is uncertain and will not be retried automatically. "
+                f"Operator detail: {error_message[:200]}"
+            )
+        job.save(update_fields=[
+            "auto_retry_allowed", "submission_retries", "status_message",
+        ])
         self._release(job)
 
     def _interrupt_job(self, job, error_message):

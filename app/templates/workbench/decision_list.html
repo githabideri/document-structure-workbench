@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% load static i18n %}
-{% block title %}Decisions{% endblock %}
+{% block title %}{% trans "Decisions" %}{% endblock %}
 
 {% block content %}
 <div class="decision-list">
-    <h1>Decisions</h1>
+    <h1>{% trans "Decisions" %}</h1>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Document</th>
-                <th>Table ID</th>
-                <th>Decision</th>
-                <th>Actions</th>
+                <th>{% trans "Document" %}</th>
+                <th>{% trans "Table ID" %}</th>
+                <th>{% trans "Decision" %}</th>
+                <th>{% trans "Actions" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -23,13 +23,13 @@
                     {% if table.decision %}
                     {{ table.decision.get_decision_display }}
                     {% else %}
-                    Pending
+                    {% trans "Pending" %}
                     {% endif %}
                 </td>
-                <td><a href="{% url 'decision_detail' table.id %}" class="btn btn-sm">View</a></td>
+                <td><a href="{% url 'decision_detail' table.id %}" class="btn btn-sm">{% trans "View" %}</a></td>
             </tr>
             {% empty %}
-            <tr><td colspan="4">No tables.</td></tr>
+            <tr><td colspan="4">{% trans "No tables." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>

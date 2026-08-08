@@ -27,8 +27,13 @@ class Command(BaseCommand):
         if not sources:
             raise CommandError("No source document matches filename %r" % options["filename"])
         archived = options["archived"] == "true"
-        admin = User.objects.filter(is_superuser=True).first()
-        policy = ProjectAccessPolicy(user=admin) if admin else None
+        admin = (
+            User.objects.filter(is_superuser=True).first()
+            or User.objects.filter(groups__name="Administrator").first()
+        )
+        if admin is None:
+            raise CommandError("No global administrator user available to authorize archiving.")
+        policy = ProjectAccessPolicy(user=admin)
         for source in sources:
             ProjectLifecycleService.archive_source(
                 source=source, policy=policy, archived=archived,

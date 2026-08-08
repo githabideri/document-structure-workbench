@@ -696,8 +696,21 @@ a.item-row:hover { background: var(--bg); }
     cursor: pointer;
 }
 .file-drop:hover, .file-drop.dragover { border-color: var(--primary); background: #eff6ff; }
+.file-drop.has-file { border-color: var(--success, #16a34a); background: #f0fdf4; }
+.file-drop.has-error { border-color: #dc2626; background: #fef2f2; }
 .file-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .file-drop span { color: var(--secondary); font-size: 0.85rem; }
+.file-selected {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    margin-top: 0.35rem;
+}
+.file-selected-name { font-weight: 600; color: var(--text, #111827); }
+.file-selected-meta { color: var(--secondary); }
+.file-selected-ok { color: var(--success, #16a34a); font-weight: 600; }
+.file-drop.has-error .file-selected-ok { color: #dc2626; font-weight: 400; }
 .analysis-option {
     display: flex;
     gap: 0.75rem;

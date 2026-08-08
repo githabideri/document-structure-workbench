@@ -35,6 +35,11 @@
                     <strong>{% trans "Choose a PDF or drop it here" %}</strong>
                     <small>PDF, JPG, PNG, TIFF</small>
                     <span id="file-info">{% trans "Maximum file size: 50 MB" %}</span>
+                    <span id="file-selected" class="file-selected" hidden>
+                        <span class="file-selected-name" data-file-name></span>
+                        <span class="file-selected-meta" data-file-meta></span>
+                        <span class="file-selected-ok" data-file-ok></span>
+                    </span>
                 </label>
             </div>
         </section>

@@ -1,21 +1,5 @@
-/**
- * Region-scoped handwritten-text recognition (HTR) workspace controller.
- *
- * Talks to the session-auth JSON endpoints:
- *   GET/POST /api/regions/{id}/htr-runs/
- *   GET      /api/htr-runs/{id}/
- *   POST     /api/htr-runs/{id}/accept/
- *
- * The line overlay is rendered into the SAME <svg class="region-overlay"> the
- * detected-region boxes use (viewBox "0 0 1 1", preserveAspectRatio="none"),
- * inside a dedicated <g data-layer="htr-lines">. Because that SVG lives inside
- * #scan-stage, the HTR layer automatically survives zoom/pan/fit — no manual
- * transform bookkeeping.
- *
- * Each HTR line arrives in crop-relative coordinates [0,1]; it is mapped to
- * page-relative coordinates through the run's stored padded crop bbox
- * (result.crop.actual_padded_bbox) so the overlay lands on the right pixels.
- */
+import {t} from "./core/i18n.js";
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 function escapeHtml(value) {
@@ -38,12 +22,10 @@ if (panel) {
   const pipelineSelect = panel.querySelector("[data-htr-pipeline]");
   const lineLayer = document.querySelector('g[data-layer="htr-lines"]');
 
-  let selectedRun = null;     // run object currently shown (or null)
-  let selectedLine = null;    // currently highlighted line index
+  let selectedRun = null;
+  let selectedLine = null;
   let pollTimer = null;
-  let inFlight = false;       // guards against duplicate POST while submit pending
-
-  // ---- helpers ---------------------------------------------------------
+  let inFlight = false;
 
   function status(msg, kind = "info") {
     statusEl.textContent = msg || "";
@@ -51,11 +33,7 @@ if (panel) {
   }
 
   async function json(method, url, body = null) {
-    const opts = {
-      method,
-      headers: {"X-CSRFToken": csrf, "Accept": "application/json"},
-      credentials: "same-origin",
-    };
+    const opts = {method, headers: {"X-CSRFToken": csrf, "Accept": "application/json"}, credentials: "same-origin"};
     if (body !== null) {
       opts.headers["Content-Type"] = "application/json";
       opts.body = JSON.stringify(body);
@@ -71,8 +49,6 @@ if (panel) {
     return data;
   }
 
-  // Map a crop-relative line bbox to page-relative coordinates using the
-  // run's stored padded crop bbox. Returns {x,y,width,height} in [0,1].
   function mapLineToPage(line, crop) {
     const box = (crop && crop.actual_padded_bbox) || (crop && crop.page_bbox) || [0, 0, 1, 1];
     const [px0, py0, px1, py1] = box;
@@ -86,8 +62,6 @@ if (panel) {
       height: ((b.ymax || 0) - (b.ymin || 0)) * ph,
     };
   }
-
-  // ---- line overlay rendering -----------------------------------------
 
   function clearLines() {
     if (!lineLayer) return;
@@ -124,14 +98,11 @@ if (panel) {
       const activate = () => selectLine(run, line);
       g.addEventListener("click", activate);
       g.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          activate();
-        }
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
       });
       g.setAttribute("role", "button");
       g.setAttribute("tabindex", "0");
-      g.setAttribute("aria-label", `Line ${line.order || ""}: ${(line.text || "").slice(0, 40)}`);
+      g.setAttribute("aria-label", t("Line {order}: {text}", {order: line.order || "", text: (line.text || "").slice(0, 40)}));
       lineLayer.appendChild(g);
     }
     lineLayer.removeAttribute("hidden");
@@ -139,9 +110,7 @@ if (panel) {
 
   function highlightLine(order) {
     if (!lineLayer) return;
-    lineLayer.querySelectorAll(".htr-line").forEach((g) => {
-      g.classList.toggle("is-selected", g.dataset.order === String(order));
-    });
+    lineLayer.querySelectorAll(".htr-line").forEach((g) => g.classList.toggle("is-selected", g.dataset.order === String(order)));
   }
 
   function selectLine(run, line) {
@@ -152,24 +121,24 @@ if (panel) {
     const segPct = line.segmentation_confidence != null ? Math.round(line.segmentation_confidence * 100) : null;
     const conf = confPct != null ? `${confPct}%` : "—";
     const seg = segPct != null ? `${segPct}%` : "—";
-    const labelText = line.label || `line ${line.order || ""}`;
+    const labelText = line.label || t("line {order}", {order: line.order || ""});
     lineDetailEl.innerHTML = `
       <div class="htr-line-meta"><strong>${escapeHtml(labelText)}</strong>
-        <span>${escapeHtml(conf)} transcription</span><span>${escapeHtml(seg)} segmentation</span></div>
+        <span>${escapeHtml(conf)} ${escapeHtml(t("transcription"))}</span><span>${escapeHtml(seg)} ${escapeHtml(t("segmentation"))}</span></div>
       <pre class="htr-line-text"></pre>`;
     lineDetailEl.querySelector(".htr-line-text").textContent = line.text || "";
   }
-
-  // ---- run list + status ----------------------------------------------
 
   function fmtDuration(exec) {
     if (!exec || !exec.duration_ms) return "";
     return `${(exec.duration_ms / 1000).toFixed(1)}s`;
   }
 
+  function stateName(state) { return t(state); }
+
   function renderRunList(runs) {
     if (!runs || !runs.length) {
-      runsEl.innerHTML = `<p class="empty-state">No HTR runs yet.</p>`;
+      runsEl.innerHTML = `<p class="empty-state">${escapeHtml(t("No HTR runs yet."))}</p>`;
       return;
     }
     runsEl.innerHTML = "";
@@ -181,26 +150,20 @@ if (panel) {
       if (isSel) div.classList.add("is-selected");
       const lines = run.result ? run.result.lines.length : 0;
       const dur = fmtDuration(run.result && run.result.execution);
-      const stateLabel = run.state === "completed" ? `completed · ${lines} lines${dur ? " · " + dur : ""}` : run.state;
+      const stateLabel = run.state === "completed" ? `${t("completed")} · ${t("{count} lines", {count: lines})}${dur ? " · " + dur : ""}` : stateName(run.state);
       const pipelineLabel = run.pipeline_id ? `<span class="badge badge-htr-pipeline">${escapeHtml(run.pipeline_id)}</span>` : "";
-      let html = `<strong>#${run.id} · ${stateLabel}</strong> ${pipelineLabel}`;
+      let html = `<strong>#${run.id} · ${escapeHtml(stateLabel)}</strong> ${pipelineLabel}`;
       if (run.state === "completed" && run.error_message) html += `<p class="progress-message error">${escapeHtml(run.error_message)}</p>`;
-      else if (run.state === "failed") html += `<p class="progress-message error">${escapeHtml(run.error_message || "failed")}</p>`;
-      else if (run.state === "queued" || run.state === "processing") html += `<p class="progress-message">Working…</p>`;
-      // Show the recognized transcription text inline so a completed run is not
-      // just an id/state/model badge with no readable output.
+      else if (run.state === "failed") html += `<p class="progress-message error">${escapeHtml(run.error_message || t("failed"))}</p>`;
+      else if (run.state === "queued" || run.state === "processing") html += `<p class="progress-message">${escapeHtml(t("Working…"))}</p>`;
       const runText = run.result && run.result.text;
-      if (run.state === "completed" && runText) {
-        html += `<pre class="htr-run-text">${escapeHtml(runText)}</pre>`;
-      }
-      // Action buttons
+      if (run.state === "completed" && runText) html += `<pre class="htr-run-text">${escapeHtml(runText)}</pre>`;
       const btns = [];
-      if (run.state === "completed") btns.push(`<button class="btn btn-sm btn-secondary" data-action="show">${isSel ? "Hide lines" : "Show lines"}</button>`);
-      if (run.state === "completed" && !run.accepted_correction_id) btns.push(`<button class="btn btn-sm btn-primary" data-action="accept">Accept as correction</button>`);
-      if (run.accepted_correction_id) btns.push(`<span class="badge">accepted</span>`);
+      if (run.state === "completed") btns.push(`<button class="btn btn-sm btn-secondary" data-action="show">${escapeHtml(t(isSel ? "Hide lines" : "Show lines"))}</button>`);
+      if (run.state === "completed" && !run.accepted_correction_id) btns.push(`<button class="btn btn-sm btn-primary" data-action="accept">${escapeHtml(t("Accept as correction"))}</button>`);
+      if (run.accepted_correction_id) btns.push(`<span class="badge">${escapeHtml(t("accepted"))}</span>`);
       html += `<div class="htr-run-actions">${btns.join("")}</div>`;
       div.innerHTML = html;
-      // Wire actions
       div.querySelector('[data-action="show"]')?.addEventListener("click", () => {
         if (isSel) { selectedRun = null; clearLines(); lineDetailEl.hidden = true; toggleBtn.hidden = true; }
         else selectRun(run);
@@ -219,10 +182,8 @@ if (panel) {
     lineDetailEl.hidden = true;
     renderLines(run);
     toggleBtn.hidden = !(run && run.result && run.result.lines && run.result.lines.length);
-    toggleBtn.textContent = "Hide HTR lines";
+    toggleBtn.textContent = t("Hide HTR lines");
   }
-
-  // ---- polling --------------------------------------------------------
 
   function stopPolling() {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
@@ -233,40 +194,34 @@ if (panel) {
     const tick = async () => {
       try {
         const run = await json("GET", `/api/htr-runs/${runId}/`);
-        // update the run inside latestRuns
         const idx = latestRuns.findIndex((r) => String(r.id) === String(runId));
         if (idx >= 0) latestRuns[idx] = run; else latestRuns.unshift(run);
         latestRuns.sort((a, b) => b.id - a.id);
         if (run.state === "queued" || run.state === "processing") {
-          status(`HTR run #${run.id} is ${run.state}…`, "info");
+          status(t("HTR run #{id} is {state}…", {id: run.id, state: stateName(run.state)}), "info");
           renderRunList(latestRuns);
           pollTimer = setTimeout(tick, 1500);
         } else {
-          status(run.state === "completed" ? `HTR run #${run.id} completed.` : `HTR run #${run.id} failed.`, run.state === "completed" ? "success" : "error");
+          status(run.state === "completed" ? t("HTR run #{id} completed.", {id: run.id}) : t("HTR run #{id} failed.", {id: run.id}), run.state === "completed" ? "success" : "error");
           renderRunList(latestRuns);
           runAgainBtn.hidden = false;
           runBtn.hidden = true;
-          // auto-select the just-completed run so lines appear
           if (run.state === "completed") selectRun(run);
         }
       } catch (err) {
-        status(`Polling error: ${err.message}`, "error");
+        status(t("Polling error: {message}", {message: err.message}), "error");
       }
     };
     tick();
   }
 
-  // ---- actions --------------------------------------------------------
-
   async function startRun() {
     if (inFlight) return;
     inFlight = true;
     runBtn.disabled = true;
-    status("Submitting region to HTR…");
+    status(t("Submitting region to HTR…"));
     try {
-      const run = await json("POST", `/api/regions/${regionId}/htr-runs/`, {
-        pipeline_id: pipelineSelect ? pipelineSelect.value : undefined,
-      });
+      const run = await json("POST", `/api/regions/${regionId}/htr-runs/`, {pipeline_id: pipelineSelect ? pipelineSelect.value : undefined});
       latestRuns.unshift(run);
       latestRuns.sort((a, b) => b.id - a.id);
       renderRunList(latestRuns);
@@ -275,7 +230,7 @@ if (panel) {
       toggleBtn.hidden = true;
       pollRun(run.id);
     } catch (err) {
-      status(err.message || "Could not start HTR run.", "error");
+      status(err.message || t("Could not start HTR run."), "error");
       runBtn.disabled = false;
     } finally {
       inFlight = false;
@@ -284,71 +239,60 @@ if (panel) {
 
   async function acceptRun(run) {
     try {
-      status(`Accepting HTR run #${run.id} as a correction…`);
+      status(t("Accepting HTR run #{id} as a correction…", {id: run.id}));
       const updated = await json("POST", `/api/htr-runs/${run.id}/accept/`, {});
       const idx = latestRuns.findIndex((r) => String(r.id) === String(run.id));
       if (idx >= 0) latestRuns[idx] = updated;
       renderRunList(latestRuns);
-      status(`Accepted. Reloading to show the corrected region text…`, "success");
+      status(t("Accepted. Reloading to show the corrected region text…"), "success");
       setTimeout(() => window.location.reload(), 1200);
     } catch (err) {
-      status(err.message || "Could not accept this run.", "error");
+      status(err.message || t("Could not accept this run."), "error");
     }
   }
-
-  // ---- bootstrap ------------------------------------------------------
-
-  // Recognizer identity label in the run history reflects per-run pipeline.
-  // The selector drives which recognizer the next run uses.
 
   runBtn?.addEventListener("click", startRun);
   runAgainBtn?.addEventListener("click", startRun);
   toggleBtn?.addEventListener("click", () => {
     if (lineLayer && !lineLayer.hasAttribute("hidden")) {
       lineLayer.setAttribute("hidden", "");
-      toggleBtn.textContent = "Show HTR lines";
+      toggleBtn.textContent = t("Show HTR lines");
     } else if (selectedRun) {
       renderLines(selectedRun);
-      toggleBtn.textContent = "Hide HTR lines";
+      toggleBtn.textContent = t("Hide HTR lines");
     }
   });
 
   async function init() {
     if (!enabled) {
-      status("HTR is not enabled on this server.", "info");
+      status(t("HTR is not enabled on this server."), "info");
       runBtn.disabled = true;
       return;
     }
     runBtn.disabled = false;
-    status("Loading previous HTR runs…");
+    status(t("Loading previous HTR runs…"));
     try {
       const data = await json("GET", `/api/regions/${regionId}/htr-runs/`);
       latestRuns = data.runs || [];
       renderRunList(latestRuns);
-      // Auto-show the latest handwriting-line overlay so a first-time user sees
-      // the per-line segmentation immediately (no hidden control to discover).
-      // The previous run stays one click away in the history list.
-      const autoShow = latestRuns.find(
-        (r) => r.state === "completed" && r.result && r.result.lines && r.result.lines.length
-      );
+      const autoShow = latestRuns.find((r) => r.state === "completed" && r.result && r.result.lines && r.result.lines.length);
       if (autoShow) {
-        selectRun(autoShow);       // render lines + reveal toggle
-        renderRunList(latestRuns); // mark the auto-shown run as selected
+        selectRun(autoShow);
+        renderRunList(latestRuns);
         const detailsEl = panel.querySelector("details");
         if (detailsEl) detailsEl.open = true;
       }
-      // Resume polling if any run is still in flight.
       const active = latestRuns.find((r) => r.state === "queued" || r.state === "processing");
       if (active) { runBtn.hidden = true; pollRun(active.id); }
       else if (latestRuns.length) {
-        status(`${latestRuns.length} previous run(s) on this region.`, "info");
+        status(t("{count} previous run(s) on this region.", {count: latestRuns.length}), "info");
         runBtn.hidden = true;
         runAgainBtn.hidden = false;
       } else {
-        status("Ready. Click “Run HTR” to detect and transcribe handwritten lines.", "info");
+        status(t("Ready. Click “Run HTR” to detect and transcribe handwritten lines."), "info");
       }
     } catch (err) {
-      status(`Could not load HTR runs: ${err.message}`, "error");
+      status(t("Could not load HTR runs: {message}", {message: err.message}), "error");
     }
   }
 

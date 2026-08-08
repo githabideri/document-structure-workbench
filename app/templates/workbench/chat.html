@@ -52,8 +52,27 @@
         {% endif %}
       </div>
       <form method="post" class="chat-question-form" data-ui-id="composer">
-        {% csrf_token %}<label class="sr-only" for="question">{% trans "Question" %}</label>
-        <div class="composer-main"><textarea id="question" name="question" rows="2" required maxlength="10000" placeholder="{% trans 'Ask a follow-up question' %}"></textarea><small class="scope-summary" data-ui-id="scope-summary">{% trans "Scope for this turn: frozen conversation sources" %}</small></div>
+        {% csrf_token %}<input type="hidden" name="scope_inherit" value="1" data-scope-inherit><label class="sr-only" for="question">{% trans "Question" %}</label>
+        <div class="composer-main"><textarea id="question" name="question" rows="2" required maxlength="10000" placeholder="{% trans 'Ask a follow-up question' %}"></textarea><small class="scope-summary" data-ui-id="scope-summary"></small>
+          <details class="source-config source-config-followup" data-scope-editor>
+            <summary>{% trans "Sources" %}</summary>
+            <fieldset><legend>{% trans "Scope for this question" %}</legend>
+              <label for="followup_scope_mode">{% trans "Scope" %}</label>
+              <select id="followup_scope_mode" name="scope_mode" data-scope-mode>
+                <option value="all"{% if default_scope.mode == 'all' %} selected{% endif %}>{% trans "All accessible projects" %}</option>
+                <option value="project"{% if default_scope.mode == 'project' %} selected{% endif %}>{% trans "One project" %}</option>
+              </select>
+              <label for="followup_project_id">{% trans "Project" %}</label>
+              <select id="followup_project_id" name="project_id" data-scope-project>
+                <option value="">{% trans "Choose a project" %}</option>
+                {% for project in projects %}<option value="{{ project.id }}"{% if default_scope.project_ids|first == project.id %} selected{% endif %}>{{ project.name }}</option>{% endfor %}
+              </select>
+              <p class="chat-context-intro">{% trans "This configuration is frozen for this question and does not change previous answers." %}</p>
+              <h3>{% trans "Explicit attachments" %}</h3>
+              {% for source in source_options %}<label class="checkbox-row" data-project-id="{{ source.collection_id }}" data-source-id="{{ source.id }}"><input type="checkbox" name="source" value="{{ source.id }}" data-scope-source{% if source.id in default_scope.attachment_ids %} checked{% endif %}><span>{{ source.filename }}<small>{{ source.collection.name }}</small></span></label>{% empty %}<p>{% trans "No accessible processed documents." %}</p>{% endfor %}
+            </fieldset>
+          </details>
+        </div>
         <button class="btn btn-primary" type="submit">{% trans "Ask" %}</button>
       </form>
       {% else %}

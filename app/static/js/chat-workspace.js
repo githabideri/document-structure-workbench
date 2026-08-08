@@ -174,6 +174,52 @@ if (!root) {
     composer?.addEventListener("keydown", event => {
         if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); }
     });
+    // Per-turn scope editor on the follow-up composer. The editor is collapsed
+    // by default and submits scope_inherit=1 (inherit the previous run's frozen
+    // scope). Any change marks the scope dirty, clears the flag, and previews
+    // the configuration that will actually be frozen for this question.
+    const scopeInherit = composer?.querySelector("[data-scope-inherit]");
+    const scopeEditor = composer?.querySelector("[data-scope-editor]");
+    if (scopeEditor) {
+        const modeSelect = composer.querySelector("[data-scope-mode]");
+        const projectSelect = composer.querySelector("[data-scope-project]");
+        const summary = composer.querySelector("[data-ui-id='scope-summary']");
+        let scopeDirty = false;
+        const projectName = id => {
+            if (!projectSelect) return "";
+            const opt = [...projectSelect.options].find(option => option.value === String(id));
+            return opt ? opt.textContent.trim() : "";
+        };
+        const updateProjectEnabled = () => {
+            if (!projectSelect) return;
+            const enabled = !modeSelect || modeSelect.value !== "all";
+            projectSelect.disabled = !enabled;
+            projectSelect.setAttribute("aria-disabled", String(!enabled));
+        };
+        const updateScopeSummary = () => {
+            const attachedCount = [...composer.querySelectorAll("[data-scope-source]:checked")].length;
+            let text;
+            if (!modeSelect || modeSelect.value === "all") {
+                text = `All accessible projects · ${attachedCount} attached`;
+            } else {
+                const name = projectName(projectSelect.value);
+                text = name ? `Project "${name}" · ${attachedCount} attached` : `One project · ${attachedCount} attached`;
+            }
+            if (scopeDirty) text += " · changed for this question";
+            if (summary) summary.textContent = text;
+        };
+        const markDirty = () => {
+            scopeDirty = true;
+            if (scopeInherit) scopeInherit.value = "0";
+            updateProjectEnabled();
+            updateScopeSummary();
+        };
+        modeSelect?.addEventListener("change", markDirty);
+        projectSelect?.addEventListener("change", markDirty);
+        composer.querySelectorAll("[data-scope-source]").forEach(input => input.addEventListener("change", markDirty));
+        updateProjectEnabled();
+        updateScopeSummary();
+    }
     document.addEventListener("keydown", event => {
         if (event.key !== "Escape" || ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
         if (!inspector.hidden) closeInspector(); else if (!evidencePanel.hidden) closeEvidence();

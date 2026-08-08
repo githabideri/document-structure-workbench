@@ -383,7 +383,7 @@ def chat_view(request):
 def chat_thread_view(request, thread_id):
     from .policy import ProjectAccessPolicy
     from .models import ChatRun, ChatThread, SourceDocument
-    from .chat import render_message_with_citations
+    from .chat import create_chat_run, resolve_followup_scope, _default_followup_scope, render_message_with_citations
     thread_queryset = ChatThread.objects.prefetch_related("selected_sources", "messages")
     if not is_admin(request.user):
         thread_queryset = thread_queryset.filter(created_by=request.user)
@@ -393,15 +393,33 @@ def chat_thread_view(request, thread_id):
         return redirect("chat")
     if not thread.project_id and not set((thread.scope_config or {}).get("project_ids", [])) & set(policy.visible_projects().values_list("id", flat=True)):
         return redirect("chat")
+    error = None
     if request.method == "POST":
         question = request.POST.get("question", "").strip()
         if question:
-            from .chat import create_chat_run
-            create_chat_run(thread, question)
-        return redirect("chat_thread", thread_id=thread.id)
+            # A collapsed, untouched source editor submits scope_inherit=1 and
+            # inherits the previous run's frozen scope verbatim. Changing any
+            # scope control clears the flag so the edited configuration is
+            # re-resolved (and re-authorized) before the run is frozen.
+            inherit = request.POST.get("scope_inherit") == "1"
+            posted_scope = None if inherit else {
+                "mode": request.POST.get("scope_mode"),
+                "project_id": request.POST.get("project_id") or None,
+                "attachment_ids": [int(value) for value in request.POST.getlist("source") if value],
+            }
+            try:
+                scope = resolve_followup_scope(policy, thread, scope=posted_scope)
+            except (ValueError, PermissionError):
+                error = _("The selected scope or documents are not accessible.")
+            else:
+                create_chat_run(thread, question, scope=scope)
+                return redirect("chat_thread", thread_id=thread.id)
     sources = list(thread.selected_sources.select_related("collection"))
     visible_projects = policy.visible_projects()
     visible_project_ids = set(visible_projects.values_list("id", flat=True))
+    projects = list(visible_projects)
+    source_options = list(SourceDocument.objects.filter(collection__in=visible_projects, is_archived=False).select_related("collection", "active_document")[:200])
+    default_scope = _default_followup_scope(thread)
     thread_queryset = [thread for thread in ChatThread.objects.filter(is_archived=False).select_related("project")
                        if thread.project_id in visible_project_ids or
                        visible_project_ids.intersection((thread.scope_config or {}).get("project_ids", []))]
@@ -422,12 +440,14 @@ def chat_thread_view(request, thread_id):
     latest_run = thread.runs.prefetch_related("evidence_items").order_by("-created_at").first()
     selected_run = thread.runs.filter(pk=request.GET.get("run", "0")).prefetch_related("evidence_items").first() if request.GET.get("run") else latest_run
     evidence_items = list(selected_run.evidence_items.select_related("source_document", "page") if selected_run else [])
+    run_error = selected_run.error_message if selected_run and selected_run.state == "failed" else None
     return render(request, "workbench/chat.html", {
-        "sources": sources, "selected_ids": {str(source.id) for source in sources},
+        "sources": sources, "source_options": source_options, "projects": projects,
+        "default_scope": default_scope, "selected_ids": {str(source.id) for source in sources},
         "thread": thread, "chat_messages": messages, "latest_run": latest_run, "selected_run": selected_run,
         "evidence_items": evidence_items,
         "selected_evidence_marker": request.GET.get("evidence", ""),
-        "error": selected_run.error_message if selected_run and selected_run.state == "failed" else None,
+        "error": error or run_error,
         "threads": threads, "is_admin": is_admin(request.user),
     })
 

@@ -1306,7 +1306,8 @@ def _chat_run_json(run, include_evidence=False):
               "error": {"code": getattr(run, "error_code", ""), "message": run.error_message} if run.error_message else None,
               "timestamps": {"created_at": run.created_at.isoformat(), "started_at": run.started_at.isoformat() if run.started_at else None, "finished_at": run.finished_at.isoformat() if run.finished_at else None},
               "answer": answer, "token_budget": run.token_budget, "model": run.thread.model,
-              "request_id": getattr(run, "request_id", None)}
+              "request_id": getattr(run, "request_id", None),
+              "scope": run.scope_snapshot or None}
     if include_evidence:
         result["evidence"] = [{"marker": item.marker, "source_document_id": item.source_document_id, "revision_id": item.processed_revision_id,
                                 "page": item.page.page_number if item.page else None, "text": item.text, "page_text": item.page_text, "score": item.score, "reason": item.selection_reason}
@@ -1448,19 +1449,14 @@ def api_chat_thread_runs(request, thread_id):
         question = str(data.get("question", "")).strip()
         if not question:
             raise ValueError("question is required")
-        from .chat import create_chat_run
-        scope_data = data.get("scope")
-        scope = None
-        if scope_data is not None:
-            try:
-                scope = policy.resolve_chat_scope(
-                    mode=scope_data.get("mode", thread.scope_mode),
-                    project_id=scope_data.get("project_id", thread.project_id),
-                    source_ids=scope_data.get("attachment_ids", scope_data.get("source_ids", [])),
-                    revision_ids=scope_data.get("revision_ids"), filters=scope_data.get("filters"),
-                )
-            except (ValueError, PermissionError) as exc:
-                return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": str(exc)}}, status=403)
+        from .chat import create_chat_run, resolve_followup_scope
+        try:
+            # Omitted scope inherits the previous run's frozen scope; a
+            # supplied scope is resolved (and re-authorized) via the same
+            # shared path the WebUI follow-up form uses.
+            scope = resolve_followup_scope(policy, thread, scope=data.get("scope"))
+        except (ValueError, PermissionError) as exc:
+            return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": str(exc)}}, status=403)
         run = create_chat_run(thread, question, scope=scope)
         run.request_id = request._request_id
         run.save(update_fields=["request_id"])

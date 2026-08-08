@@ -143,12 +143,65 @@ def _legacy_scope(thread):
     }
 
 
+def _default_followup_scope(thread):
+    """Authoritative default scope for a follow-up run.
+
+    The most recent run's frozen ``scope_snapshot`` is the authoritative
+    default for the next turn.  Legacy thread-level fields are only a
+    compatibility fallback for threads whose runs predate scoped chat and have
+    no recorded snapshot; they are never consulted when an authoritative run
+    snapshot exists.
+    """
+    last = thread.runs.order_by("-created_at").first()
+    if last and last.scope_snapshot:
+        return dict(last.scope_snapshot)
+    return _legacy_scope(thread)
+
+
+def resolve_followup_scope(policy, thread, *, scope=None):
+    """Resolve the frozen scope for a follow-up run.
+
+    Single shared path used by both the WebUI follow-up form and the API
+    follow-up endpoint so the two surfaces apply identical defaults and the
+    same authorization checks at scope-freeze time.
+
+    ``scope`` is a raw, user-supplied mapping:
+        {"mode", "project_id", "attachment_ids"/"source_ids",
+         "revision_ids", "filters"}
+    When ``scope`` is None the previous run's frozen scope is inherited
+    verbatim (returned as-is) so an unmodified submission does not re-derive a
+    different snapshot from changing thread-level defaults.
+
+    ``policy`` must be a :class:`ProjectAccessPolicy` bound to the current
+    identity; :meth:`resolve_chat_scope` re-checks project/source access so
+    an inaccessible project or attachment is rejected at freeze time.
+    """
+    default = _default_followup_scope(thread)
+    if scope is None:
+        return default
+    base = default or {}
+    mode = scope.get("mode") or base.get("mode") or getattr(thread, "scope_mode", None) or "project"
+    base_projects = base.get("project_ids") or []
+    project_id = scope.get("project_id")
+    if project_id is None and base_projects:
+        project_id = base_projects[0]
+    if project_id is None:
+        project_id = getattr(thread, "project_id", None)
+    return policy.resolve_chat_scope(
+        mode=mode,
+        project_id=project_id,
+        source_ids=scope.get("attachment_ids", scope.get("source_ids", [])),
+        revision_ids=scope.get("revision_ids"),
+        filters=scope.get("filters", base.get("filters")),
+    )
+
+
 def create_chat_run(thread, question, *, scope=None):
     """Persist a user message and queued run atomically."""
     with transaction.atomic():
         ordinal = thread.messages.count()
         message = ChatMessage.objects.create(thread=thread, role="user", text=question, ordinal=ordinal)
-        snapshot = scope or _legacy_scope(thread)
+        snapshot = scope or _default_followup_scope(thread)
         run = ChatRun.objects.create(
             thread=thread, user_message=message, retrieval_query=question,
             token_budget=getattr(settings, "DSW_CHAT_MAX_TOKENS", 16384),

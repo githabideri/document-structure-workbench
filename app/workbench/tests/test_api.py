@@ -193,6 +193,50 @@ class ApiContractTests(TestCase):
         retry = self.client.post(reverse("api_chat_run_retry", args=[run_id]), data="{}", content_type="application/json", **self.auth())
         self.assertEqual(retry.status_code, 201)
 
+    # ------------------------------------------------------------------
+    # Research workflow V2 — API/WebUI scope parity (Milestone 1)
+    # ------------------------------------------------------------------
+
+    def test_api_followup_inherits_previous_scope_and_exposes_scope(self):
+        from workbench.chat import create_chat_run
+        from workbench.policy import ProjectAccessPolicy
+        policy = ProjectAccessPolicy(user=self.user)
+        source = self.make_source()
+        scope_a = policy.resolve_chat_scope(mode="project", project_id=self.project.pk, source_ids=[source.pk])
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        create_chat_run(thread, "first", scope=scope_a)
+        follow = self.client.post(reverse("api_chat_thread_runs", args=[thread.pk]),
+                                  data={"question": "Follow"}, content_type="application/json", **self.auth())
+        self.assertEqual(follow.status_code, 201)
+        self.assertEqual(follow.json()["run"]["scope"], scope_a)
+        self.assertEqual(follow.json()["run"]["scope"]["mode"], "project")
+
+    def test_api_followup_changed_scope_is_frozen_and_previous_unchanged(self):
+        from workbench.chat import create_chat_run
+        from workbench.policy import ProjectAccessPolicy
+        policy = ProjectAccessPolicy(user=self.user)
+        source = self.make_source()
+        scope_a = policy.resolve_chat_scope(mode="project", project_id=self.project.pk, source_ids=[source.pk])
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        run1 = create_chat_run(thread, "first", scope=scope_a)
+        follow = self.client.post(reverse("api_chat_thread_runs", args=[thread.pk]),
+                                  data={"question": "all now", "scope": {"mode": "all", "attachment_ids": []}},
+                                  content_type="application/json", **self.auth())
+        self.assertEqual(follow.status_code, 201)
+        self.assertEqual(follow.json()["run"]["scope"]["mode"], "all")
+        run1.refresh_from_db()
+        self.assertEqual(run1.scope_snapshot["mode"], "project")
+
+    def test_api_followup_rejects_inaccessible_project_scope(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        other_owner = User.objects.create_user("api-other-owner", password="pass")
+        other = Collection.objects.create(name="API hidden", created_by=other_owner)
+        response = self.client.post(reverse("api_chat_thread_runs", args=[thread.pk]),
+                                    data={"question": "q", "scope": {"mode": "project", "project_id": other.pk, "attachment_ids": []}},
+                                    content_type="application/json", **self.auth())
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(thread.runs.count(), 0)
+
     def test_chat_and_support_bundle_cannot_cross_projects(self):
         thread = self.make_thread()
         other = Collection.objects.create(name="Other archive", created_by=self.user)

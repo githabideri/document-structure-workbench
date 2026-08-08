@@ -1,0 +1,120 @@
+{
+  "_meta": {
+    "title": "DSW research/chat workflow V2 — Phase 0 baseline characterization set",
+    "description": "Repeatable, hand-authored research questions over the real processed archival corpus (Korrespondenz project: Felix-Fasching letters FV_0100, BH_Fr-592_6931, Brief_1946_07, etc.). Every question is designed to be answerable from or deliberately unsupported by the existing immutable evidence, so retrieval behavior is comparable across milestones.",
+    "scope_note": "'scope' and 'attached_documents' name the configuration a human operator would set for this turn. Runtime-recorded fields (retrieval_queries, retrieval_result_count, new_evidence_count, evidence_markers, provider_calls, prompt_tokens, run_duration_ms, final_answer, citations, useful_by_inspection) are filled by the Phase 0/3 rehearsal runner; they are empty here.",
+    "usage": "For each case: ask the question in the configured scope/attachments, record the runtime fields, then judge useful_by_inspection manually. Re-run the identical set against each retriever variant (deterministic_lexical vs new fuzzy) in Phase 3 and compare top-3/top-8 relevant hits."
+  },
+  "cases": [
+    {
+      "id": "baseline-01",
+      "category": 1,
+      "category_label": "direct question about attached document",
+      "question": "Welche Stempel und Vermerke stehen auf dem Schreiben von Felix Fasching (FV_0100)?",
+      "scope": {"mode": "project", "project_id": "Korrespondenz"},
+      "attached_documents": ["FV_0100"],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-02",
+      "category": 2,
+      "category_label": "search across one project",
+      "question": "Welches Datum hat der Brief an das Fremdenverkehrsamt in Freistadt?",
+      "scope": {"mode": "project", "project_id": "Korrespondenz"},
+      "attached_documents": [],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-03",
+      "category": 3,
+      "category_label": "search across all accessible projects",
+      "question": "In welchen zugänglichen Projekten kommt der Name 'Fasching' vor?",
+      "scope": {"mode": "all"},
+      "attached_documents": [],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-04",
+      "category": 4,
+      "category_label": "historical spelling / OCR-imperfect term",
+      "question": "Was steht über den 'Zweck' des Urlaubs im Juni 1946 und wie ist es im Original geschrieben?",
+      "scope": {"mode": "project", "project_id": "Korrespondenz"},
+      "attached_documents": ["FV_0100"],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-05",
+      "category": 5,
+      "category_label": "conceptual question, answer vocabulary differs from query",
+      "question": "Wurde in der Korrespondenz ein Reiseanliegen für eine bestimmte Jahreszeit erwähnt?",
+      "scope": {"mode": "project", "project_id": "Korrespondenz"},
+      "attached_documents": [],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-06",
+      "category": 6,
+      "category_label": "multi-document comparison",
+      "question": "Unterscheiden sich die Eingangsstempel auf FV_0100 und auf BH_Fr-592_6931 voneinander?",
+      "scope": {"mode": "project", "project_id": "Korrespondenz"},
+      "attached_documents": ["FV_0100", "BH_Fr-592_6931"],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-07",
+      "category": 7,
+      "category_label": "no-answer / insufficient-evidence case",
+      "question": "Wer war der Bürgermeister von Freistadt im Jahr 1820?",
+      "scope": {"mode": "project", "project_id": "Korrespondenz"},
+      "attached_documents": [],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-08",
+      "category": 8,
+      "category_label": "follow-up reusing previous scope",
+      "question": "Und welches Reiseziel wird angeführt?",
+      "scope": {"mode": "inherit", "note": "must reuse the frozen scope of the previous run"},
+      "attached_documents": [],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-09",
+      "category": 9,
+      "category_label": "follow-up using a different scope",
+      "question": "Vergleiche das nun mit einem anderen zugänglichen Projekt.",
+      "scope": {"mode": "project", "project_id": "anderes-Projekt"},
+      "attached_documents": [],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    },
+    {
+      "id": "baseline-10",
+      "category": 10,
+      "category_label": "query that risks repeated retrieval",
+      "question": "Suche erneut nach der Restaurierung im Jahr 1957 und fasse zusammen.",
+      "scope": {"mode": "project", "project_id": "Korrespondenz"},
+      "attached_documents": [],
+      "retrieval_queries": [], "retrieval_result_count": null, "new_evidence_count": null,
+      "evidence_markers": [], "provider_calls": null, "prompt_tokens": null,
+      "run_duration_ms": null, "final_answer": null, "citations": [], "useful_by_inspection": null
+    }
+  ]
+}

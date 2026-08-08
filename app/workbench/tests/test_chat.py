@@ -281,6 +281,164 @@ class ChatTests(TestCase):
         response = self.client.get(reverse("document_detail", args=[self.document.pk]), {"thread": thread.pk})
         self.assertContains(response, f"/chat/{thread.pk}/")
 
+    # ------------------------------------------------------------------
+    # Research workflow V2 — per-turn scope controls (Milestone 1)
+    # ------------------------------------------------------------------
+
+    def resolved_project_scope(self):
+        from workbench.policy import ProjectAccessPolicy
+        return ProjectAccessPolicy(user=self.user).resolve_chat_scope(
+            mode="project", project_id=self.project.pk, source_ids=[self.source.pk],
+        )
+
+    @staticmethod
+    def newest_run(thread):
+        return thread.runs.order_by("-id").first()
+
+    def test_thread_view_renders_followup_scope_editor(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user, title="Scope editor")
+        thread.selected_sources.set([self.source])
+        from workbench.chat import create_chat_run
+        create_chat_run(thread, "What year?", scope=self.resolved_project_scope())
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("chat_thread", args=[thread.pk]))
+        self.assertContains(response, "data-scope-editor")
+        self.assertContains(response, 'name="scope_inherit"')
+        self.assertContains(response, 'data-scope-mode')
+        # The editor pre-fills the inherited attachment so the summary matches
+        # what will actually be sent.
+        self.assertContains(response, f'value="{self.source.pk}"')
+
+    def test_followup_inherits_previous_run_scope(self):
+        from workbench.chat import create_chat_run
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        scope_a = self.resolved_project_scope()
+        create_chat_run(thread, "first", scope=scope_a)
+        second = create_chat_run(thread, "second")
+        self.assertEqual(second.scope_snapshot, scope_a)
+        self.assertEqual(second.scope_snapshot["mode"], "project")
+
+    def test_followup_changed_scope_leaves_previous_run_unchanged(self):
+        from workbench.chat import create_chat_run
+        from workbench.policy import ProjectAccessPolicy
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        scope_a = self.resolved_project_scope()
+        first = create_chat_run(thread, "first", scope=scope_a)
+        scope_b = ProjectAccessPolicy(user=self.user).resolve_chat_scope(mode="all")
+        second = create_chat_run(thread, "second", scope=scope_b)
+        first.refresh_from_db()
+        self.assertEqual(first.scope_snapshot["mode"], "project")
+        self.assertEqual(second.scope_snapshot, scope_b)
+        self.assertNotEqual(second.scope_snapshot, first.scope_snapshot)
+
+    def test_followup_prefers_run_snapshot_over_legacy_thread_fields(self):
+        from workbench.chat import create_chat_run
+        from workbench.policy import ProjectAccessPolicy
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        thread.selected_sources.set([self.source])  # legacy fields diverge from the run scope
+        scope_all = ProjectAccessPolicy(user=self.user).resolve_chat_scope(mode="all")
+        create_chat_run(thread, "first", scope=scope_all)
+        second = create_chat_run(thread, "second")  # no scope -> inherit run snapshot, not legacy
+        self.assertEqual(second.scope_snapshot, scope_all)
+
+    def test_run_scope_snapshot_is_immutable_to_later_thread_changes(self):
+        from workbench.chat import create_chat_run
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        scope_a = self.resolved_project_scope()
+        first = create_chat_run(thread, "first", scope=scope_a)
+        thread.scope_mode = "all"
+        thread.scope_config = {"mode": "all"}
+        thread.save(update_fields=["scope_mode", "scope_config"])
+        first.refresh_from_db()
+        self.assertEqual(first.scope_snapshot, scope_a)
+
+    def test_evidence_persists_after_run(self):
+        from workbench.chat import create_chat_run, select_attached_context
+        from workbench.models import EvidenceItem
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        run = create_chat_run(thread, "evidence persistence", scope=self.resolved_project_scope())
+        selected = select_attached_context([self.source.pk], [self.project.pk])
+        self.assertEqual(len(selected), 1)
+        _, passage, reason = selected[0]
+        EvidenceItem.objects.create(run=run, marker="S1", source_document=passage.source_document,
+                                    processed_revision=passage.processed_revision, processing_job=passage.processing_job,
+                                    page=passage.page, page_region=passage.page_region, passage=passage,
+                                    text=passage.text, page_text=passage.text, retrieval_method="direct-attachment",
+                                    selection_reason="attached-document/context", ordinal=1)
+        self.assertEqual(run.evidence_items.count(), 1)
+        self.assertEqual(run.evidence_items.first().marker, "S1")
+
+    def test_invalid_citation_marker_fails_run(self):
+        from unittest.mock import Mock, patch
+        from workbench.chat import create_chat_run, process_chat_run, ChatProviderError
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        run = create_chat_run(thread, "invalid citation", scope=self.resolved_project_scope())
+        with patch("workbench.chat.requests.post") as post, self.settings(DSW_CHAT_TOOL_MODE="native"):
+            post.return_value = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "Claim. [S9]"}}]})
+            with self.assertRaises(ChatProviderError):
+                process_chat_run(run)
+        self.assertTrue(run.events.filter(name="citation_rejected").exists())
+
+    def test_resolve_followup_scope_rejects_inaccessible_project(self):
+        from workbench.chat import resolve_followup_scope
+        from workbench.policy import ProjectAccessPolicy
+        other_owner = User.objects.create_user("other-owner", password="pass")
+        other = Collection.objects.create(name="Hidden", created_by=other_owner)
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        with self.assertRaises(PermissionError):
+            resolve_followup_scope(ProjectAccessPolicy(user=self.user), thread, scope={
+                "mode": "project", "project_id": other.pk, "attachment_ids": [],
+            })
+
+    def test_resolve_followup_scope_rejects_inaccessible_source(self):
+        from workbench.chat import resolve_followup_scope
+        from workbench.policy import ProjectAccessPolicy
+        other_owner = User.objects.create_user("other-owner-2", password="pass")
+        other = Collection.objects.create(name="Other", created_by=other_owner)
+        hidden_source = SourceDocument.objects.create(collection=other, filename="hidden.pdf", uploaded_by=other_owner)
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        with self.assertRaises(PermissionError):
+            resolve_followup_scope(ProjectAccessPolicy(user=self.user), thread, scope={
+                "mode": "project", "project_id": self.project.pk, "attachment_ids": [hidden_source.pk],
+            })
+
+    def test_webui_followup_inherits_previous_scope(self):
+        from workbench.chat import create_chat_run
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        run1 = create_chat_run(thread, "first", scope=self.resolved_project_scope())
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("chat_thread", args=[thread.pk]), {"question": "follow", "scope_inherit": "1"})
+        self.assertEqual(response.status_code, 302)
+        run2 = self.newest_run(thread)
+        self.assertEqual(run1.scope_snapshot, run2.scope_snapshot)
+
+    def test_webui_followup_changed_scope_is_frozen(self):
+        from workbench.chat import create_chat_run
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        run1 = create_chat_run(thread, "first", scope=self.resolved_project_scope())
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("chat_thread", args=[thread.pk]), {
+            "question": "follow all", "scope_inherit": "0", "scope_mode": "all", "project_id": "",
+        })
+        self.assertEqual(response.status_code, 302)
+        run2 = self.newest_run(thread)
+        run1.refresh_from_db()
+        self.assertEqual(run2.scope_snapshot["mode"], "all")
+        self.assertEqual(run1.scope_snapshot["mode"], "project")  # previous run untouched
+
+    def test_webui_followup_rejects_inaccessible_scope(self):
+        thread = ChatThread.objects.create(project=self.project, created_by=self.user)
+        other_owner = User.objects.create_user("hidden-owner", password="pass")
+        other = Collection.objects.create(name="Hidden", created_by=other_owner)
+        self.client.force_login(self.user)
+        before = thread.runs.count()
+        response = self.client.post(reverse("chat_thread", args=[thread.pk]), {
+            "question": "q", "scope_inherit": "0", "scope_mode": "project", "project_id": str(other.pk),
+        })
+        self.assertEqual(response.status_code, 200)  # re-render with error, no new run
+        self.assertContains(response, "not accessible")
+        self.assertEqual(thread.runs.count(), before)
+
     def make_evidence(self, *, thread, source=None, marker="S1"):
         source = source or self.source
         message = ChatMessage.objects.create(thread=thread, role="user", text="Find the source", ordinal=0)

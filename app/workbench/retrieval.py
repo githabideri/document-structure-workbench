@@ -106,6 +106,7 @@ class DeterministicLexicalRetriever(EvidenceRetriever):
 
     def search(self, *, query, source_ids, project_ids, revision_ids=None, limit=24):
         """Rank matching passages deterministically with page-diversity coverage."""
+        started = time.monotonic()
         normalized_question = normalize_text(query)
         tokens = [token for token in re.findall(r"[\w-]{3,}", normalized_question)]
         queryset = SearchPassage.objects.filter(
@@ -146,6 +147,11 @@ class DeterministicLexicalRetriever(EvidenceRetriever):
                 break
             if not any(existing.passage.id == hit.passage.id for existing in selected):
                 selected.append(EvidenceHit(score=hit.score, passage=hit.passage, method="deterministic_lexical", reason="query-match"))
+        self.last_stats = {
+            "passages_scanned": len(passages),
+            "scope_count": len(passages),
+            "retrieval_ms": round((time.monotonic() - started) * 1000, 3),
+        }
         return selected
 
 

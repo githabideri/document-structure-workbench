@@ -9,28 +9,28 @@
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-value">{{ total_documents }}</div>
-            <div class="stat-label">Documents</div>
+            <div class="stat-label">{% trans "Documents" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ total_tables }}</div>
-            <div class="stat-label">Tables</div>
+            <div class="stat-label">{% trans "Tables" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ total_reviews }}</div>
-            <div class="stat-label">Reviews Completed</div>
+            <div class="stat-label">{% trans "Reviews completed" %}</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ pending_reviews }}</div>
-            <div class="stat-label">Awaiting Review</div>
+            <div class="stat-label">{% trans "Awaiting review" %}</div>
         </div>
     </div>
 
-    <h2>Preference Distribution</h2>
+    <h2>{% trans "Preference distribution" %}</h2>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Preference</th>
-                <th>Count</th>
+                <th>{% trans "Preference" %}</th>
+                <th>{% trans "Count" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -40,17 +40,17 @@
                 <td>{{ pref.count }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="2">No reviews yet.</td></tr>
+            <tr><td colspan="2">{% trans "No reviews yet." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>
 
-    <h2>Error Category Totals</h2>
+    <h2>{% trans "Error category totals" %}</h2>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Error</th>
-                <th>Count</th>
+                <th>{% trans "Error" %}</th>
+                <th>{% trans "Count" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -60,16 +60,16 @@
                 <td>{{ count }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="2">No errors reported.</td></tr>
+            <tr><td colspan="2">{% trans "No errors reported." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>
 
     <div class="actions">
-        <a href="{% url 'technical_report' %}" class="btn btn-secondary">Technical Report</a>
-        <a href="{% url 'export_reviews' %}" class="btn btn-secondary">Export Reviews</a>
-        <a href="{% url 'export_decisions' %}" class="btn btn-secondary">Export Decisions</a>
-        <a href="{% url 'export_summary' %}" class="btn btn-secondary">Export Summary</a>
+        <a href="{% url 'technical_report' %}" class="btn btn-secondary">{% trans "Technical report" %}</a>
+        <a href="{% url 'export_reviews' %}" class="btn btn-secondary">{% trans "Export reviews" %}</a>
+        <a href="{% url 'export_decisions' %}" class="btn btn-secondary">{% trans "Export decisions" %}</a>
+        <a href="{% url 'export_summary' %}" class="btn btn-secondary">{% trans "Export summary" %}</a>
     </div>
 </div>
 {% endblock %}

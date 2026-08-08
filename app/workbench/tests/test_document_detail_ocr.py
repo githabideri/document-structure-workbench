@@ -45,10 +45,13 @@ class DocumentDetailOcrFragmentTests(TestCase):
         return self.client.get(reverse("document_detail", args=[self.source.pk]) + "?" + "&".join(f"{k}={v}" for k, v in params.items()))
 
     def test_detail_renders_region_and_back_link(self):
+        # A pending candidate is present so the OCR-history include executes.
+        OcrService.create(page=self.page, region=self.region, provider="qwen", model="m", user=self.user)
         response = self._detail()
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Back to page")
         self.assertContains(response, f"region-{self.region.pk}")
+        self.assertContains(response, "Visual OCR candidates")
 
     def test_fragment_endpoint_returns_candidate_history(self):
         OcrService.create(page=self.page, region=self.region, provider="qwen", model="m", user=self.user)

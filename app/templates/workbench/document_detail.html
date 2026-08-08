@@ -163,7 +163,7 @@
                     {% endif %}
                 </details>
                 {% endif %}
-                {% if visual_ocr_requests %}{% include "_ocr_history_fragment.html" with ocr_candidates=visual_ocr_requests ocr_kind="region" ocr_title=_("Visual OCR candidates") fragment_url=region_ocr_fragment_url any_pending=region_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
+                {% if visual_ocr_requests %}{% include "workbench/_ocr_history_fragment.html" with ocr_candidates=visual_ocr_requests ocr_kind="region" ocr_title=_("Visual OCR candidates") fragment_url=region_ocr_fragment_url any_pending=region_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
                 {% if selected_region.corrections.all %}<details class="correction-history"><summary>{% trans "Correction history" %}</summary>
                     {% for correction in selected_region.corrections.all %}<div class="history-item"><span>{{ correction.get_operation_display }} · {{ correction.created_at|date:"SHORT_DATETIME_FORMAT" }} · {{ correction.get_status_display }}</span>{% if can_edit_document and correction.status == "active" %}<form method="post" action="{% url 'revert_region_correction' correction.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-secondary" type="submit">{% trans "Undo" %}</button></form>{% endif %}</div>{% empty %}<p class="empty-state">{% trans "No corrections yet." %}</p>{% endfor %}
                 </details>{% endif %}
@@ -188,7 +188,7 @@
                     <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
                 </select></label><button class="btn btn-secondary" type="submit">{% trans "Re-run full page with visual OCR" %}</button></form>{% endif %}
                 {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
-                {% if page_ocr_requests %}{% include "_ocr_history_fragment.html" with ocr_candidates=page_ocr_requests ocr_kind="page" ocr_title=_("Page OCR candidates") fragment_url=page_ocr_fragment_url any_pending=page_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
+                {% if page_ocr_requests %}{% include "workbench/_ocr_history_fragment.html" with ocr_candidates=page_ocr_requests ocr_kind="page" ocr_title=_("Page OCR candidates") fragment_url=page_ocr_fragment_url any_pending=page_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
             </section>
             {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.safe_html %}<div class="table-preview">{{ extraction.safe_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
         </aside>

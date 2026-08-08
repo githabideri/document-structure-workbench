@@ -2,8 +2,23 @@ from django.contrib import admin
 from .models import (
     Collection, Document, Page, TableCandidate,
     ExtractionRun, TableExtraction, ReviewTask, Review,
-    Decision, AuditEvent,
+    Decision, AuditEvent, ProjectMembership,
 )
+
+
+class ProjectMembershipInline(admin.TabularInline):
+    """Manage a project's member roles directly on the project page."""
+
+    model = ProjectMembership
+    extra = 0
+    fk_name = "project"
+    autocomplete_fields = ["user"]
+    fields = ["user", "role", "invited_by", "joined_at"]
+    readonly_fields = ["joined_at"]
+
+    def has_add_permission(self, request, obj=None):
+        # Allow adding members from the project page.
+        return True
 
 
 @admin.register(Collection)
@@ -11,6 +26,22 @@ class CollectionAdmin(admin.ModelAdmin):
     list_display = ["name", "source_type", "created_at", "is_archived"]
     list_filter = ["source_type", "is_archived"]
     search_fields = ["name", "description"]
+    inlines = [ProjectMembershipInline]
+
+
+@admin.register(ProjectMembership)
+class ProjectMembershipAdmin(admin.ModelAdmin):
+    list_display = ["user", "project", "role", "joined_at"]
+    list_filter = ["role", "project"]
+    search_fields = ["user__username", "user__email", "project__name"]
+    autocomplete_fields = ["user", "project"]
+    readonly_fields = ["joined_at"]
+    fields = ["user", "project", "role", "invited_by", "joined_at"]
+    list_select_related = ["user", "project", "invited_by"]
+
+    def get_search_results(self, request, queryset, search_term):
+        # Usernames are case-insensitive in this deployment; keep default search.
+        return super().get_search_results(request, queryset, search_term)
 
 
 @admin.register(Document)

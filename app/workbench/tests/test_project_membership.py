@@ -67,6 +67,32 @@ class AddProjectMembershipCommandTests(TestCase):
         with self.assertRaises(CommandError):
             _run("add_project_membership", "--username", "martin", "--project", "Nope")
 
+    def test_creates_user_and_membership_in_one_call(self):
+        User = get_user_model()
+        self.assertFalse(User.objects.filter(username="eva").exists())
+        out = _run(
+            "add_project_membership",
+            "--username", "eva",
+            "--project", "Alpha",
+            "--role", "editor",
+            "--create-user",
+            "--password", "temp-pass-123",
+        )
+        self.assertIn("Created user 'eva'", out)
+        self.assertIn("role=editor", out)
+        eva = User.objects.get(username="eva")
+        self.assertTrue(eva.is_active)
+        self.assertTrue(eva.check_password("temp-pass-123"))
+        self.assertTrue(
+            ProjectMembership.objects.filter(
+                project=self.project, user=eva, role="editor"
+            ).exists()
+        )
+
+    def test_create_user_requires_flag_when_user_missing(self):
+        with self.assertRaises(CommandError):
+            _run("add_project_membership", "--username", "nova", "--project", "Alpha")
+
 
 class RemoveProjectMembershipCommandTests(TestCase):
     def setUp(self):

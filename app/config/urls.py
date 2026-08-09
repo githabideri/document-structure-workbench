@@ -54,6 +54,10 @@ urlpatterns = [
     path("tables/<int:table_id>/crop/", views.table_crop, name="table_crop"),
     path("artifacts/<int:artifact_id>/content/", views.artifact_content, name="artifact_content"),
 
+    # Document / project text export (plain text / Markdown)
+    path("export/revisions/<int:revision_id>/", views.export_revision, name="export_revision"),
+    path("export/projects/<int:project_id>/", views.export_project, name="export_project"),
+
     # Reviews
     path("reviews/", views.review_list, name="review_list"),
     path("reviews/next/", views.review_next, name="review_next"),
@@ -90,11 +94,13 @@ urlpatterns = [
     path("api/v1/projects/<int:project_id>/", api.api_project_detail, name="api_project_detail"),
     path("api/v1/projects/<int:project_id>/archive/", api.api_project_archive, name="api_project_archive"),
     path("api/v1/projects/<int:project_id>/documents/", api.api_documents, name="api_documents"),
+    path("api/v1/projects/<int:project_id>/export/", api.api_project_export, name="api_project_export"),
     path("api/v1/documents/", api.api_documents_all, name="api_documents_all"),
     path("api/v1/documents/<int:document_id>/", api.api_document_detail, name="api_document_detail"),
     path("api/v1/documents/<int:document_id>/revisions/", api.api_document_revisions, name="api_document_revisions"),
     path("api/v1/documents/<int:document_id>/revisions/<int:revision_id>/", api.api_revision_detail, name="api_revision_detail"),
     path("api/v1/documents/<int:document_id>/revisions/<int:revision_id>/pages/", api.api_revision_pages, name="api_revision_pages"),
+    path("api/v1/documents/<int:document_id>/revisions/<int:revision_id>/export/", api.api_revision_export, name="api_revision_export"),
     path("api/v1/documents/<int:document_id>/revisions/<int:revision_id>/pages/<int:page_number>/", api.api_revision_page, name="api_revision_page"),
     path("api/v1/pages/<int:page_id>/regions/", api.api_page_regions, name="api_page_regions"),
     path("api/v1/pages/<int:page_id>/image/", api.api_page_image, name="api_page_image"),

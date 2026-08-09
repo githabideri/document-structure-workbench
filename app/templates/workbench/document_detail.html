@@ -14,6 +14,13 @@
             </p>
         </div>
         {% if thread_id %}<a href="{% url 'chat_thread' thread_id %}" class="btn btn-secondary">← {% trans "Return to conversation" %}</a>{% else %}<a href="{% url 'collection_detail' document.collection.id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>{% endif %}
+        <details class="export-menu">
+            <summary class="btn btn-secondary" aria-label="{% trans 'Export document' %}">{% trans "Export" %}</summary>
+            <div class="export-menu-items">
+                <a href="{% url 'export_revision' workspace_revision_id %}?format=md">{% trans "Markdown (.md)" %}</a>
+                <a href="{% url 'export_revision' workspace_revision_id %}?format=txt">{% trans "Plain text (.txt)" %}</a>
+            </div>
+        </details>
     </header>
 
     <div class="workspace-grid">

@@ -6,7 +6,16 @@
 <div class="collection-detail">
     <div class="page-header">
         <div><p class="eyebrow">{% trans "Project" %}</p><h1>{{ collection.name }}</h1><p class="page-intro">{{ collection.description }}</p></div>
-        {% if can_edit_project %}<a href="{% url 'document_new' %}?project={{ collection.id }}" class="btn btn-primary">{% trans "Add document" %}</a>{% endif %}
+        <div>
+            {% if can_edit_project %}<a href="{% url 'document_new' %}?project={{ collection.id }}" class="btn btn-primary">{% trans "Add document" %}</a>{% endif %}
+            <details class="export-menu">
+                <summary class="btn btn-secondary" aria-label="{% trans 'Export project' %}">{% trans "Export project" %}</summary>
+                <div class="export-menu-items">
+                    <a href="{% url 'export_project' collection.id %}?format=md">{% trans "Markdown (.md) ZIP" %}</a>
+                    <a href="{% url 'export_project' collection.id %}?format=txt">{% trans "Plain text (.txt) ZIP" %}</a>
+                </div>
+            </details>
+        </div>
     </div>
 
     <div class="stats-grid">

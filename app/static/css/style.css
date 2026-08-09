@@ -782,3 +782,26 @@ a.item-row:hover { background: var(--bg); }
 .htr-line:hover .htr-line-box, .htr-line:focus .htr-line-box { fill: rgba(217,119,6,.30); stroke-width: .006; }
 .htr-line.is-selected .htr-line-box { fill: rgba(217,119,6,.40); stroke: #b45309; stroke-width: .007; }
 .htr-line-order { fill: #b45309; font-size: .02px; font-weight: 700; pointer-events: none; }
+
+/* ----- Export menu (document / project text export) ----- */
+.export-menu { position: relative; display: inline-block; }
+.export-menu > summary { list-style: none; cursor: pointer; }
+.export-menu > summary::-webkit-details-marker { display: none; }
+.export-menu-items {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: .25rem;
+    min-width: 12rem;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg, #fff);
+    border: 1px solid #d1d5db;
+    border-radius: .375rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .08);
+    z-index: 20;
+    overflow: hidden;
+}
+.export-menu-items a { padding: .5rem .75rem; color: var(--text, #111); text-decoration: none; }
+.export-menu-items a:hover { background: #f3f4f6; }
+.export-menu:not([open]) .export-menu-items { display: none; }

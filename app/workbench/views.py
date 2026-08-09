@@ -16,7 +16,7 @@ from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q, Avg, F
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
@@ -30,6 +30,7 @@ from .models import (
     TableExtraction, OcrRequest,
 )
 from .models import LANGUAGES
+from .export import DEFAULT_FORMAT, FORMATS, DocumentExportService
 
 
 # --- Permission helpers ---
@@ -1452,6 +1453,54 @@ def technical_report(request):
 
 
 # --- Exports ---
+
+@login_required
+def export_revision(request, revision_id):
+    """Download the effective (corrected) text of one processed revision."""
+    from .policy import ProjectAccessPolicy
+
+    fmt = request.GET.get("format", DEFAULT_FORMAT)
+    if fmt not in FORMATS:
+        return HttpResponseBadRequest(
+            _(f"Unsupported export format '{fmt}'. Use one of: {', '.join(sorted(FORMATS))}.")
+        )
+    revision = get_object_or_404(
+        Document.objects.select_related("collection", "processing_job__source_document"),
+        pk=revision_id,
+    )
+    if not ProjectAccessPolicy(user=request.user).can_view(revision.collection):
+        raise PermissionDenied
+    data = DocumentExportService.revision_data(revision)
+    renderer = DocumentExportService.to_markdown if fmt == "md" else DocumentExportService.to_text
+    response = HttpResponse(renderer(data), content_type=FORMATS[fmt][0])
+    response["Content-Disposition"] = (
+        f'attachment; filename="{DocumentExportService.revision_filename(data, fmt)}"'
+    )
+    log_audit(request, "document_exported", "Document", revision.pk, after={"format": fmt})
+    return response
+
+
+@login_required
+def export_project(request, project_id):
+    """Download a ZIP of the active revision text for every document in a project."""
+    from .policy import ProjectAccessPolicy
+
+    fmt = request.GET.get("format", DEFAULT_FORMAT)
+    if fmt not in FORMATS:
+        return HttpResponseBadRequest(
+            _(f"Unsupported export format '{fmt}'. Use one of: {', '.join(sorted(FORMATS))}.")
+        )
+    project = get_object_or_404(Collection, pk=project_id)
+    if not ProjectAccessPolicy(user=request.user).can_view(project):
+        raise PermissionDenied
+    payload = DocumentExportService.render_zip(project, fmt)
+    response = HttpResponse(payload, content_type="application/zip")
+    response["Content-Disposition"] = (
+        f'attachment; filename="{DocumentExportService.project_filename(project, fmt)}"'
+    )
+    log_audit(request, "project_exported", "Collection", project.pk, after={"format": fmt})
+    return response
+
 
 @login_required
 @user_passes_test(is_curator)

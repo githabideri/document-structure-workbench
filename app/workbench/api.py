@@ -600,6 +600,45 @@ def api_revision_detail(request, document_id, revision_id):
 
 @require_http_methods(["GET"])
 @require_scope("documents:read")
+def api_revision_export(request, document_id, revision_id):
+    """Export the effective text of one revision as plain text or Markdown."""
+    from django.http import HttpResponse
+    from .export import DEFAULT_FORMAT, FORMATS, DocumentExportService
+
+    source, revision = _revision_or_404(request._api_token, document_id, revision_id)
+    fmt = request.GET.get("format", DEFAULT_FORMAT)
+    if fmt not in FORMATS:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "bad_format", "message": f"Unsupported format '{fmt}'. Use one of: {', '.join(sorted(FORMATS))}."}}, status=400)
+    data = DocumentExportService.revision_data(revision)
+    renderer = DocumentExportService.to_markdown if fmt == "md" else DocumentExportService.to_text
+    AuditEvent.objects.create(actor=request._api_token.user if request._api_token.user_id else None, event_type="document_exported", object_type="Document", object_id=str(revision.pk), after={"format": fmt}, request_id=request._request_id)
+    response = HttpResponse(renderer(data), content_type=FORMATS[fmt][0])
+    response["Content-Disposition"] = f'attachment; filename="{DocumentExportService.revision_filename(data, fmt)}"'
+    return response
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
+def api_project_export(request, project_id):
+    """Export the active revision of every document in a project as a ZIP."""
+    from django.http import HttpResponse
+    from .export import DEFAULT_FORMAT, FORMATS, DocumentExportService
+
+    project = get_object_or_404(Collection, pk=project_id)
+    if not ProjectAccessPolicy(token=request._api_token).can_view(project):
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "forbidden", "message": "Access denied"}}, status=403)
+    fmt = request.GET.get("format", DEFAULT_FORMAT)
+    if fmt not in FORMATS:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "bad_format", "message": f"Unsupported format '{fmt}'. Use one of: {', '.join(sorted(FORMATS))}."}}, status=400)
+    payload = DocumentExportService.render_zip(project, fmt)
+    AuditEvent.objects.create(actor=request._api_token.user if request._api_token.user_id else None, event_type="project_exported", object_type="Collection", object_id=str(project.pk), after={"format": fmt}, request_id=request._request_id)
+    response = HttpResponse(payload, content_type="application/zip")
+    response["Content-Disposition"] = f'attachment; filename="{DocumentExportService.project_filename(project, fmt)}"'
+    return response
+
+
+@require_http_methods(["GET"])
+@require_scope("documents:read")
 def api_revision_pages(request, document_id, revision_id):
     source, revision = _revision_or_404(request._api_token, document_id, revision_id)
     pages = revision.pages.prefetch_related("regions", "ocr_requests")

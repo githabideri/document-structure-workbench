@@ -33,6 +33,11 @@ FORMATS = {
 }
 DEFAULT_FORMAT = "md"
 
+# How a project export is packaged: a ZIP of one file per document, or a single
+# concatenated file (index + every document).
+BUNDLES = {"zip", "single"}
+DEFAULT_BUNDLE = "zip"
+
 
 class DocumentExportService:
     """Assemble exportable revision content and render it to text or markdown."""
@@ -165,9 +170,13 @@ class DocumentExportService:
         return f"{base}{FORMATS[fmt][1]}"
 
     @staticmethod
-    def project_filename(project, fmt):
+    def project_filename(project, fmt, bundle=DEFAULT_BUNDLE):
         base = slugify(project.name) or f"project-{project.pk}"
-        return f"{base}{FORMATS[fmt][1]}"
+        if bundle == "single":
+            return f"{base}{FORMATS[fmt][1]}"
+        # The project export is always a ZIP archive; ``fmt`` only controls the
+        # file extension of the documents *inside* it.
+        return f"{base}.zip"
 
     @staticmethod
     def render_zip(project, fmt):
@@ -198,6 +207,34 @@ class DocumentExportService:
             archive.writestr(f"INDEX{ext}", "\n".join(manifest).rstrip() + "\n")
         buffer.seek(0)
         return buffer.getvalue()
+
+    @staticmethod
+    def render_singlefile(project, fmt):
+        """Render a project export as one concatenated file (index + every document).
+
+        The mirror of ``render_zip`` for the "I want one greppable file" case:
+        a table of contents followed by every document's rendered text, separated
+        by clear dividers.
+        """
+        renderer = DocumentExportService.to_markdown if fmt == "md" else DocumentExportService.to_text
+        documents = DocumentExportService.project_data(project)
+        divider = "\n\n---\n\n" if fmt == "md" else "\n\n" + ("=" * 60) + "\n\n"
+        parts = []
+        if fmt == "md":
+            parts.append(f"# {project.name}\n\n")
+            parts.append(f"*{len(documents)} {_('documents')} · {_('combined export')}*\n\n")
+        else:
+            parts.append(f"{project.name}\n{len(documents)} {_('documents')}\n\n")
+        if documents:
+            label = _("Contents") if fmt == "md" else _("CONTENTS")
+            parts.append(f"## {label}\n\n" if fmt == "md" else f"==== {label} ====\n\n")
+            for index, data in enumerate(documents, start=1):
+                parts.append(f"{index}. {data['source_filename']} ({_('revision')} {data['revision_id']})\n")
+            parts.append(divider)
+        for data in documents:
+            parts.append(renderer(data))
+            parts.append(divider)
+        return "".join(parts)
 
 
 # ----------------------------------------------------------------------

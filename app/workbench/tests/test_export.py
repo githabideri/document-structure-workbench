@@ -191,12 +191,36 @@ class ExportApiTests(TestCase):
         response = self.client.get(reverse("api_project_export", args=[self.project.pk]), {"format": "md"}, **self.auth())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
+        # The project export is a ZIP archive: filename must end in .zip and the
+        # bytes must be a real ZIP (not markdown mislabeled as .zip).
+        self.assertIn('.zip"', response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"PK\x03\x04"))
         archive = zipfile.ZipFile(io.BytesIO(response.content))
         joined = "\n".join(archive.read(n).decode() for n in archive.namelist())
         self.assertIn("Original title", joined)
         self.assertIn("Second title", joined)
         audit = AuditEvent.objects.get(object_id=str(self.project.pk), event_type="project_exported")
         self.assertEqual(audit.after["format"], "md")
+        self.assertEqual(audit.after["bundle"], "zip")
+
+    def test_project_export_single_file_is_one_concatenated_document(self):
+        build_revision(
+            self.project, self.user, external_id="doc-b", filename="letter-b.pdf",
+            title_text="Second title", body_text="Second body",
+        )
+        response = self.client.get(
+            reverse("api_project_export", args=[self.project.pk]),
+            {"format": "md", "bundle": "single"}, **self.auth(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/markdown; charset=utf-8")
+        self.assertIn(".md\"", response["Content-Disposition"])
+        body = response.content.decode()
+        self.assertIn("## Contents", body)  # index present
+        self.assertIn("Original title", body)
+        self.assertIn("Second title", body)
+        audit = AuditEvent.objects.get(object_id=str(self.project.pk), event_type="project_exported")
+        self.assertEqual(audit.after["bundle"], "single")
 
     def test_project_export_denies_non_members(self):
         response = self.client.get(reverse("api_project_export", args=[self.project.pk]), {"format": "md"}, **self.auth())

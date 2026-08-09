@@ -1482,23 +1482,33 @@ def export_revision(request, revision_id):
 
 @login_required
 def export_project(request, project_id):
-    """Download a ZIP of the active revision text for every document in a project."""
+    """Download a ZIP (or single concatenated file) of every document in a project."""
     from .policy import ProjectAccessPolicy
+    from .export import BUNDLES, DEFAULT_BUNDLE
 
     fmt = request.GET.get("format", DEFAULT_FORMAT)
     if fmt not in FORMATS:
         return HttpResponseBadRequest(
             _(f"Unsupported export format '{fmt}'. Use one of: {', '.join(sorted(FORMATS))}.")
         )
+    bundle = request.GET.get("bundle", DEFAULT_BUNDLE)
+    if bundle not in BUNDLES:
+        return HttpResponseBadRequest(
+            _(f"Unsupported bundle '{bundle}'. Use one of: {', '.join(sorted(BUNDLES))}.")
+        )
     project = get_object_or_404(Collection, pk=project_id)
     if not ProjectAccessPolicy(user=request.user).can_view(project):
         raise PermissionDenied
-    payload = DocumentExportService.render_zip(project, fmt)
-    response = HttpResponse(payload, content_type="application/zip")
+    if bundle == "single":
+        payload = DocumentExportService.render_singlefile(project, fmt)
+        response = HttpResponse(payload, content_type=FORMATS[fmt][0])
+    else:
+        payload = DocumentExportService.render_zip(project, fmt)
+        response = HttpResponse(payload, content_type="application/zip")
     response["Content-Disposition"] = (
-        f'attachment; filename="{DocumentExportService.project_filename(project, fmt)}"'
+        f'attachment; filename="{DocumentExportService.project_filename(project, fmt, bundle)}"'
     )
-    log_audit(request, "project_exported", "Collection", project.pk, after={"format": fmt})
+    log_audit(request, "project_exported", "Collection", project.pk, after={"format": fmt, "bundle": bundle})
     return response
 
 

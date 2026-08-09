@@ -25,6 +25,10 @@ Commands:
   chat inspect|evidence|retry --run ID    Inspect or retry a run.
   support-bundle --run ID [--format FMT] [--output PATH]
                                            Export and save an audited bundle.
+  export project --project ID [--format md|txt] [--bundle zip|single] [--output PATH]
+                                           Download a project export (ZIP or one file).
+  export revision --source ID --revision ID [--format md|txt] [--output PATH]
+                                           Download one revision's text.
   smoke --fake                            Run real local fake-provider integration.
   smoke --live --project ID --source ID --question TEXT
                                            Run explicit live-provider smoke.
@@ -108,6 +112,52 @@ PY
       echo "support bundle saved: $output"
     fi
     ;;
+  export)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      project)
+        project=""; format="md"; bundle="zip"; output=""
+        while (($#)); do
+          case "$1" in
+            --project) project="${2:?missing project id}"; shift 2;;
+            --format) format="${2:?missing format}"; shift 2;;
+            --bundle) bundle="${2:?missing bundle}"; shift 2;;
+            --output) output="${2:?missing output path}"; shift 2;;
+            *) die "unknown option $1";;
+          esac
+        done
+        [[ -n "$project" ]] || die "usage: dsw export project --project ID [--format md|txt] [--bundle zip|single] [--output PATH]"
+        [[ "$format" == md || "$format" == txt ]] || die "format must be md or txt"
+        [[ "$bundle" == zip || "$bundle" == single ]] || die "bundle must be zip or single"
+        ext="zip"; [[ "$bundle" == single ]] && ext="$format"
+        output="${output:-./project-${project}.${ext}}"
+        mkdir -p "$(dirname "$output")"
+        http_code="$(curl -fsS -X GET -H "Authorization: Bearer $token" "$base/projects/$project/export/?format=$format&bundle=$bundle" -o "$output" -w '%{http_code}')"
+        [[ "$http_code" == 2* ]] || die "project export failed with HTTP $http_code"
+        echo "export saved: $output"
+        ;;
+      revision)
+        source=""; revision=""; format="md"; output=""
+        while (($#)); do
+          case "$1" in
+            --source) source="${2:?missing source id}"; shift 2;;
+            --revision) revision="${2:?missing revision id}"; shift 2;;
+            --format) format="${2:?missing format}"; shift 2;;
+            --output) output="${2:?missing output path}"; shift 2;;
+            *) die "unknown option $1";;
+          esac
+        done
+        [[ -n "$source" && -n "$revision" ]] || die "usage: dsw export revision --source ID --revision ID [--format md|txt] [--output PATH]"
+        [[ "$format" == md || "$format" == txt ]] || die "format must be md or txt"
+        output="${output:-./revision-${revision}.${format}}"
+        mkdir -p "$(dirname "$output")"
+        http_code="$(curl -fsS -X GET -H "Authorization: Bearer $token" "$base/documents/$source/revisions/$revision/export/?format=$format" -o "$output" -w '%{http_code}')"
+        [[ "$http_code" == 2* ]] || die "revision export failed with HTTP $http_code"
+        echo "export saved: $output"
+        ;;
+      *) die "usage: dsw export project|revision";;
+    esac
+    ;;
   smoke)
     [[ "${1:-}" == --fake ]] && exec "$(dirname "$0")/../.venv/bin/pytest" -q app/workbench/tests/test_fake_provider.py
     [[ "${1:-}" == --live ]] || die "use --fake or --live"
@@ -174,5 +224,5 @@ PY
   fake-provider)
     exec "$(dirname "$0")/dsw-fake-provider" "$@"
     ;;
-  *) die "usage: dsw doctor|api|chat|support-bundle|smoke";;
+  *) die "usage: dsw doctor|api|chat|support-bundle|export|smoke";;
 esac

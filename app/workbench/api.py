@@ -620,9 +620,9 @@ def api_revision_export(request, document_id, revision_id):
 @require_http_methods(["GET"])
 @require_scope("documents:read")
 def api_project_export(request, project_id):
-    """Export the active revision of every document in a project as a ZIP."""
+    """Export the active revision of every document in a project as a ZIP or single file."""
     from django.http import HttpResponse
-    from .export import DEFAULT_FORMAT, FORMATS, DocumentExportService
+    from .export import DEFAULT_BUNDLE, BUNDLES, DEFAULT_FORMAT, FORMATS, DocumentExportService
 
     project = get_object_or_404(Collection, pk=project_id)
     if not ProjectAccessPolicy(token=request._api_token).can_view(project):
@@ -630,10 +630,17 @@ def api_project_export(request, project_id):
     fmt = request.GET.get("format", DEFAULT_FORMAT)
     if fmt not in FORMATS:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "bad_format", "message": f"Unsupported format '{fmt}'. Use one of: {', '.join(sorted(FORMATS))}."}}, status=400)
-    payload = DocumentExportService.render_zip(project, fmt)
-    AuditEvent.objects.create(actor=request._api_token.user if request._api_token.user_id else None, event_type="project_exported", object_type="Collection", object_id=str(project.pk), after={"format": fmt}, request_id=request._request_id)
-    response = HttpResponse(payload, content_type="application/zip")
-    response["Content-Disposition"] = f'attachment; filename="{DocumentExportService.project_filename(project, fmt)}"'
+    bundle = request.GET.get("bundle", DEFAULT_BUNDLE)
+    if bundle not in BUNDLES:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "bad_bundle", "message": f"Unsupported bundle '{bundle}'. Use one of: {', '.join(sorted(BUNDLES))}."}}, status=400)
+    if bundle == "single":
+        payload = DocumentExportService.render_singlefile(project, fmt)
+        response = HttpResponse(payload, content_type=FORMATS[fmt][0])
+    else:
+        payload = DocumentExportService.render_zip(project, fmt)
+        response = HttpResponse(payload, content_type="application/zip")
+    AuditEvent.objects.create(actor=request._api_token.user if request._api_token.user_id else None, event_type="project_exported", object_type="Collection", object_id=str(project.pk), after={"format": fmt, "bundle": bundle}, request_id=request._request_id)
+    response["Content-Disposition"] = f'attachment; filename="{DocumentExportService.project_filename(project, fmt, bundle)}"'
     return response
 
 

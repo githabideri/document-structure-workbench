@@ -33,16 +33,38 @@ class SearchTests(TestCase):
         self.assertEqual(rebuild_revision_index(self.document), 1)
         self.assertEqual(SearchPassage.objects.filter(processed_revision=self.document).count(), 1)
 
-    def test_search_returns_revision_aware_citation(self):
+    def test_search_result_links_to_inline_reader(self):
         rebuild_revision_index(self.document)
         self.client.force_login(self.user)
+        passage = SearchPassage.objects.get(processed_revision=self.document)
         response = self.client.get(reverse("search"), {"q": "R-184"})
         self.assertEqual(response.status_code, 200)
         # The matching passage is shown with the query highlighted.
         self.assertContains(response, "<mark>R-184</mark>")
         self.assertContains(response, "was restored")
+        # Each card targets the inline reader endpoint for its passage.
+        self.assertContains(response, reverse("search_reader", args=[passage.pk]))
+
+    def test_search_reader_returns_scan_highlight_and_citation(self):
+        rebuild_revision_index(self.document)
+        self.page.image_path = "pages/test.png"
+        self.page.save(update_fields=["image_path"])
+        passage = SearchPassage.objects.get(processed_revision=self.document)
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("search_reader", args=[passage.pk]), {"q": "R-184"})
+        self.assertEqual(response.status_code, 200)
+        # Scan image + highlighted full passage + revision-aware deep link.
+        self.assertContains(response, reverse("page_image", args=[self.page.pk]))
+        self.assertContains(response, "<mark>R-184</mark>")
         self.assertContains(response, f"revision={self.document.pk}")
         self.assertContains(response, f"region={self.region.pk}")
+
+    def test_search_reader_denies_other_projects(self):
+        rebuild_revision_index(self.document)
+        passage = SearchPassage.objects.get(processed_revision=self.document)
+        other = User.objects.create_user("reader-outsider", password="pass")
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(reverse("search_reader", args=[passage.pk])).status_code, 403)
 
     def test_search_groups_results_by_document_and_shows_counts(self):
         rebuild_revision_index(self.document)

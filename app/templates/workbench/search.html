@@ -24,14 +24,22 @@
       </summary>
       <div class="search-hits">
         {% for result in group.list %}
-          <a class="search-hit" href="{{ result.citation_url }}">
-            <div class="search-hit-meta">
-              <span class="search-hit-page">{% trans "Page" %} {{ result.page.page_number }}</span>
-              <span class="search-hit-type">{{ result.get_passage_type_display }}</span>
-            </div>
-            <p class="search-hit-text">{{ result.snippet|highlight:query }}</p>
-            <span class="search-hit-open">{% trans "Open evidence" %} →</span>
-          </a>
+          <div class="search-hit">
+            <button type="button" class="search-hit-body"
+                    hx-get="{% url 'search_reader' result.id %}?q={{ query }}"
+                    hx-target=".reader-slot-{{ result.id }}"
+                    hx-swap="innerHTML"
+                    hx-on::after-request="this.setAttribute('aria-expanded','true')"
+                    aria-expanded="false" aria-controls="slot-{{ result.id }}">
+              <div class="search-hit-meta">
+                <span class="search-hit-page">{% trans "Page" %} {{ result.page.page_number }}</span>
+                <span class="search-hit-type">{{ result.get_passage_type_display }}</span>
+              </div>
+              <p class="search-hit-text">{{ result.snippet|highlight:query }}</p>
+              <span class="search-hit-chev" aria-hidden="true">▾</span>
+            </button>
+            <div class="reader-slot reader-slot-{{ result.id }}" id="slot-{{ result.id }}"></div>
+          </div>
         {% endfor %}
       </div>
     </details>

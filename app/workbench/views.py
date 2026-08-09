@@ -353,6 +353,41 @@ def _search_snippet(text, query, window=240):
 
 
 @login_required
+def search_reader(request, passage_id):
+    """Return an inline reader fragment (scan + highlighted text) for one passage.
+
+    HTMX target of the search result cards. Kept as its own partial so the same
+    scan-left/text-right rendering can later back the HTML export.
+    """
+    from .policy import ProjectAccessPolicy
+    from .models import SearchPassage
+    passage = get_object_or_404(
+        SearchPassage.objects.select_related(
+            "page", "page_region", "source_document", "processed_revision", "project",
+        ),
+        pk=passage_id,
+    )
+    if not ProjectAccessPolicy(user=request.user).can_view(passage.project):
+        raise PermissionDenied
+    region = passage.page_region
+    citation_url = (
+        f"{reverse('document_detail', args=[passage.source_document_id])}"
+        f"?revision={passage.processed_revision_id}"
+        f"&page={passage.page.page_number if passage.page else 1}"
+        f"&region={passage.page_region_id or ''}"
+    )
+    return render(request, "workbench/_search_reader.html", {
+        "passage": passage,
+        "query": request.GET.get("q", "").strip(),
+        "citation_url": citation_url,
+        "region_left": region.left if region else 0,
+        "region_top": region.top if region else 0,
+        "region_width": (region.right - region.left) if region else 0,
+        "region_height": (region.bottom - region.top) if region else 0,
+    })
+
+
+@login_required
 def chat_view(request):
     from .policy import ProjectAccessPolicy
     from .chat import create_chat_run

@@ -1,0 +1,27 @@
+{% load i18n dsw_tags %}
+<div class="search-reader">
+  <button type="button" class="search-reader-close"
+          hx-on:click="var slot=this.closest('.reader-slot'); if(slot){ slot.innerHTML=''; var body=slot.parentElement.querySelector('.search-hit-body'); if(body){ body.setAttribute('aria-expanded','false'); } }"
+          aria-label="{% trans 'Close preview' %}">✕</button>
+  <div class="search-reader-grid">
+    <div class="search-reader-scan">
+      {% if passage.page and passage.page.image_path %}
+        <img src="{% url 'page_image' passage.page.id %}" alt="{% blocktrans with n=passage.page.page_number %}Scan of page {{ n }}{% endblocktrans %}">
+        {% if passage.page_region %}
+        <svg class="search-reader-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+          <rect class="search-reader-box"
+                x="{{ region_left|floatformat:'6u' }}" y="{{ region_top|floatformat:'6u' }}"
+                width="{{ region_width|floatformat:'6u' }}" height="{{ region_height|floatformat:'6u' }}"></rect>
+        </svg>
+        {% endif %}
+      {% else %}
+        <p class="empty-state">{% trans "No page image is available for this passage." %}</p>
+      {% endif %}
+    </div>
+    <div class="search-reader-text">
+      <p class="search-reader-meta">{% if passage.page %}{% trans "Page" %} {{ passage.page.page_number }} · {% endif %}{{ passage.get_passage_type_display }}</p>
+      <p class="search-reader-passage">{{ passage.text|highlight:query }}</p>
+      <a class="btn btn-sm" href="{{ citation_url }}">{% trans "Open in workspace" %} →</a>
+    </div>
+  </div>
+</div>

@@ -22,6 +22,7 @@ urlpatterns = [
     # Documents
     path("documents/", views.document_list, name="document_list"),
     path("search/", views.search_view, name="search"),
+    path("search/reader/<int:passage_id>/", views.search_reader, name="search_reader"),
     path("chat/", views.chat_view, name="chat"),
     path("chat/<int:thread_id>/", views.chat_thread_view, name="chat_thread"),
     path("chat/<int:thread_id>/rename/", views.chat_thread_rename, name="chat_thread_rename"),

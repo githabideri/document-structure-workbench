@@ -9,7 +9,8 @@
     <p class="page-intro">{% trans "Choose where this document belongs, then upload the original document for analysis." %}</p>
 
     {% if editable_projects %}
-    <form method="post" enctype="multipart/form-data" id="upload-form" class="upload-form">
+    <form method="post" enctype="multipart/form-data" id="upload-form" class="upload-form"
+          data-upload-endpoint="{% url 'document_upload_file' %}">
         {% csrf_token %}
 
         <section class="form-step">
@@ -29,18 +30,18 @@
         <section class="form-step">
             <div class="step-number">2</div>
             <div class="step-content">
-                <label for="file-input">{% trans "Document" %}</label>
-                <label class="file-drop" id="file-drop" for="file-input">
-                    <input type="file" name="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,application/pdf,image/jpeg,image/png,image/tiff" required>
-                    <strong>{% trans "Choose a PDF or drop it here" %}</strong>
+                <label for="file-input">{% trans "Documents" %}</label>
+                <div class="file-drop" id="file-drop"
+                     data-max-bytes="{{ upload_max_bytes }}"
+                     data-max-files="{{ upload_max_files }}">
+                    <input type="file" name="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,application/pdf,image/jpeg,image/png,image/tiff" multiple>
+                    <strong>{% trans "Choose files or drop them here" %}</strong>
                     <small>PDF, JPG, PNG, TIFF</small>
-                    <span id="file-info">{% trans "Maximum file size: 50 MB" %}</span>
-                    <span id="file-selected" class="file-selected" hidden>
-                        <span class="file-selected-name" data-file-name></span>
-                        <span class="file-selected-meta" data-file-meta></span>
-                        <span class="file-selected-ok" data-file-ok></span>
-                    </span>
-                </label>
+                    <span id="file-info">{% blocktrans with max=upload_max_files mb=upload_max_mb %}Up to {{ max }} files per upload · {{ mb }} MB each{% endblocktrans %}</span>
+                    <button type="button" class="btn btn-secondary" id="file-pick">{% trans "Choose files" %}</button>
+                </div>
+                <ul id="file-list" class="file-list" hidden></ul>
+                <p id="file-summary" class="file-summary" hidden></p>
             </div>
         </section>
 

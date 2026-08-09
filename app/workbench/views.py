@@ -181,14 +181,15 @@ def collection_list(request):
     return render(request, "workbench/collection_list.html", {
         "collections": collections,
         "can_add_document": any(project.user_can_edit for project in collections),
+        "can_create_project": True,
         "is_admin": is_admin(request.user),
     })
 
 
 @login_required
 def project_create(request):
-    if not is_admin(request.user):
-        raise PermissionDenied
+    # Any signed-in user may create a project; the creator becomes its owner.
+    # Archiving remains an administrator-only lifecycle action.
     if request.method == "POST":
         name = request.POST.get("name", "").strip()
         source_type = request.POST.get("source_type", "corpus")
@@ -1847,7 +1848,7 @@ def forced_password_change(request):
 def document_new(request, project_id=None):
     """Choose an editable project, upload a PDF, and start processing."""
     from .policy import ProjectAccessPolicy
-    from .services import DocumentIngestionService, IngestionError
+    from .services import DocumentIngestionService
     from .models import ProcessingPreset
 
     policy = ProjectAccessPolicy(user=request.user)
@@ -1886,33 +1887,49 @@ def document_new(request, project_id=None):
     if request.method == "POST":
         if collection is None:
             messages.error(request, _("Choose a project you can edit."))
-        elif "file" not in request.FILES:
-            messages.error(request, _("Choose a PDF or image to upload."))
         else:
-            uploaded_file = request.FILES["file"]
-            service = DocumentIngestionService(user=request.user, policy=policy)
-            try:
-                job = service.create_upload(
+            uploaded_files = request.FILES.getlist("file")
+            if not uploaded_files:
+                messages.error(request, _("Choose a PDF or image to upload."))
+            else:
+                service = DocumentIngestionService(user=request.user, policy=policy)
+                jobs, errors = service.create_uploads(
                     project=collection,
-                    uploaded_file=uploaded_file,
+                    uploaded_files=uploaded_files,
                     preset_slug=selected_preset_slug,
                 )
-            except IngestionError as error:
-                messages.error(request, str(error))
-            else:
-                log_audit(request, "document_uploaded", "SourceDocument", job.source_document_id)
-                messages.success(
-                    request,
-                    _("Upload received. The document has been queued for analysis."),
-                )
-                return redirect("job_status", job_id=job.pk)
+                for job in jobs:
+                    log_audit(request, "document_uploaded", "SourceDocument", job.source_document_id)
+                # Surface per-file failures without aborting the good ones.
+                for err in errors[:10]:
+                    messages.error(request, _("{filename}: {error}").format(
+                        filename=err["filename"], error=err["error"]))
+                if len(jobs) == 1:
+                    messages.success(
+                        request,
+                        _("Upload received. The document has been queued for analysis."),
+                    )
+                    return redirect("job_status", job_id=jobs[0].pk)
+                if len(jobs) > 1:
+                    messages.success(
+                        request,
+                        _("Upload received. {count} documents have been queued for analysis.").format(
+                            count=len(jobs)),
+                    )
+                    return redirect("collection_detail", collection_id=collection.pk)
+                # Every file failed: no redirect; re-render the form with the
+                # error messages so the user can retry.
 
+    upload_max_bytes = settings.DSW_UPLOAD_MAX_FILE_SIZE_BYTES
     return render(request, "workbench/document_new.html", {
         "editable_projects": editable_projects,
         "selected_project": collection,
         "standard_preset": standard_preset,
         "advanced_presets": advanced_presets,
         "selected_preset_slug": selected_preset_slug,
+        "upload_max_bytes": upload_max_bytes,
+        "upload_max_mb": upload_max_bytes // (1024 * 1024),
+        "upload_max_files": settings.DSW_UPLOAD_MAX_FILES_PER_REQUEST,
     })
 
 
@@ -1922,6 +1939,66 @@ def project_process(request, project_id):
     if request.method == "GET":
         return redirect(f"{reverse('document_new')}?project={project_id}")
     return document_new(request, project_id=project_id)
+
+
+@login_required
+@require_POST
+def document_upload_file(request):
+    """Single-file XHR upload endpoint for the multi-file drop zone.
+
+    The drop zone posts each accepted file here, one request at a time, so a
+    large batch becomes many small multipart requests instead of one giant one
+    (which would tie up a worker and risk the Gunicorn timeout). Session + CSRF
+    authenticated; returns JSON. Mirrors the bearer-authenticated API upload
+    endpoint for the browser flow.
+    """
+    from .policy import ProjectAccessPolicy
+    from .services import DocumentIngestionService
+
+    def error(message, status=400):
+        return JsonResponse({"error": str(message)}, status=status)
+
+    project_id = request.POST.get("project")
+    try:
+        project = Collection.objects.get(pk=project_id)
+    except (TypeError, ValueError, Collection.DoesNotExist):
+        return error(_("Choose a project you can edit."))
+
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_edit(project):
+        return error(_("You do not have edit access to this project."), status=403)
+
+    uploaded_files = request.FILES.getlist("file")
+    if not uploaded_files:
+        return error(_("Choose a PDF or image to upload."))
+
+    preset_slug = request.POST.get("preset", "quick-extraction")
+    service = DocumentIngestionService(user=request.user, policy=policy)
+    jobs, errors = service.create_uploads(
+        project=project,
+        uploaded_files=uploaded_files,
+        preset_slug=preset_slug,
+    )
+
+    collection_url = reverse("collection_detail", kwargs={"collection_id": project.pk})
+    if not jobs:
+        return JsonResponse(
+            {"error": errors[0]["error"] if errors else str(_("Upload failed.")), "collection_url": collection_url},
+            status=400,
+        )
+
+    job = jobs[0]
+    log_audit(request, "document_uploaded", "SourceDocument", job.source_document_id)
+    source_doc = job.source_document
+    return JsonResponse({
+        "status": "queued",
+        "job_id": job.pk,
+        "source_document_id": source_doc.pk,
+        "filename": source_doc.filename,
+        "sha256": source_doc.sha256,
+        "job_status_url": reverse("job_status", kwargs={"job_id": job.pk}),
+        "collection_url": collection_url,
+    }, status=201)
 
 
 @login_required

@@ -20,6 +20,7 @@ Design:
     - Service accounts are scoped to their token's project (if any).
     - Unscoped service accounts see nothing unless globally admin (deliberate).
 """
+from django.conf import settings
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -59,6 +60,15 @@ class ProjectAccessPolicy:
         return self._is_global_admin
 
     # ------------------------------------------------------------------
+    # Shared-workspace mode
+    # ------------------------------------------------------------------
+
+    def _shared_workspace(self):
+        """True when the deployment opts into a single shared workspace where
+        every signed-in user can view and edit every non-archived project."""
+        return getattr(settings, "DSW_PROJECT_VISIBILITY", "membership") == "all_users"
+
+    # ------------------------------------------------------------------
     # Visible projects
     # ------------------------------------------------------------------
 
@@ -70,6 +80,8 @@ class ProjectAccessPolicy:
             return Collection.objects.filter(is_archived=False)
 
         if self.user:
+            if self._shared_workspace():
+                return Collection.objects.filter(is_archived=False)
             return Collection.objects.filter(
                 memberships__user=self.user, is_archived=False
             ).distinct()
@@ -97,6 +109,9 @@ class ProjectAccessPolicy:
             return True
 
         if self.user:
+            if self._shared_workspace():
+                # Archived projects were rejected above.
+                return True
             return self._get_membership(project) is not None
         elif self.token:
             return self._check_token_access(project, min_role="viewer")
@@ -161,6 +176,9 @@ class ProjectAccessPolicy:
             return True
 
         if self.user:
+            if self._shared_workspace():
+                # Archived projects were rejected above.
+                return True
             membership = self._get_membership(project)
             return membership is not None and membership.can_edit
         elif self.token:

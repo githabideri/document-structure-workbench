@@ -878,54 +878,69 @@ def api_ui_diagnostics(request):
 def api_upload_document(request, project_id):
     """Upload a PDF document to a project and create a processing job."""
     from .policy import ProjectAccessPolicy
-    from .services import DocumentIngestionService, IngestionError
+    from .services import DocumentIngestionService
 
     token = request._api_token  # noqa: SLF001
     request_id = request._request_id  # noqa: SLF001
 
     project = get_object_or_404(Collection, pk=project_id)
 
-    # Check for uploaded file
-    if "file" not in request.FILES:
-        return JsonResponse({"error": "No file uploaded. Use multipart/form-data with 'file' field."}, status=400)
+    # Accept one or more 'file' parts so a single request can enqueue several
+    # documents. The single-file response shape is preserved for backward
+    # compatibility with existing consumers.
+    uploaded_files = request.FILES.getlist("file")
+    if not uploaded_files:
+        return JsonResponse(
+            {"error": "No file uploaded. Use multipart/form-data with one or more 'file' fields."},
+            status=400,
+        )
 
-    uploaded_file = request.FILES["file"]
     preset_slug = request.POST.get("preset", "quick-extraction")
 
     # Use shared ingestion service
     policy = ProjectAccessPolicy(token=token)
     service = DocumentIngestionService(user=(token.user if token.user_id else None), policy=policy)
 
-    try:
-        job = service.create_upload(
-            project=project,
-            uploaded_file=uploaded_file,
-            preset_slug=preset_slug,
-        )
-    except IngestionError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    owner = token.user if token.user_id else None
-    source_doc = job.source_document
-
-    # Audit
-    AuditEvent.objects.create(
-        actor=owner,
-        event_type="document_uploaded",
-        object_type="SourceDocument",
-        object_id=str(source_doc.pk),
-        after={"filename": source_doc.filename, "sha256": source_doc.sha256, "size": source_doc.file_size},
-        request_id=request_id,
+    jobs, errors = service.create_uploads(
+        project=project,
+        uploaded_files=uploaded_files,
+        preset_slug=preset_slug,
     )
 
-    return JsonResponse({
-        "status": "queued",
-        "source_document_id": source_doc.pk,
-        "job_id": job.pk,
-        "filename": source_doc.filename,
-        "sha256": source_doc.sha256,
-        "preset": job.preset.slug,
-    }, status=201)
+    owner = token.user if token.user_id else None
+
+    results = []
+    for job in jobs:
+        source_doc = job.source_document
+        AuditEvent.objects.create(
+            actor=owner,
+            event_type="document_uploaded",
+            object_type="SourceDocument",
+            object_id=str(source_doc.pk),
+            after={"filename": source_doc.filename, "sha256": source_doc.sha256, "size": source_doc.file_size},
+            request_id=request_id,
+        )
+        results.append({
+            "status": "queued",
+            "source_document_id": source_doc.pk,
+            "job_id": job.pk,
+            "filename": source_doc.filename,
+            "sha256": source_doc.sha256,
+            "preset": job.preset.slug,
+        })
+    for err in errors:
+        results.append({"status": "error", "filename": err["filename"], "error": err["error"]})
+
+    if len(uploaded_files) == 1:
+        # Backward-compatible single-object response.
+        if jobs:
+            return JsonResponse(results[0], status=201)
+        return JsonResponse({"error": results[0]["error"]}, status=400)
+
+    return JsonResponse(
+        {"results": results, "accepted": len(jobs), "rejected": len(errors)},
+        status=201,
+    )
 
 
 @require_http_methods(["GET"])

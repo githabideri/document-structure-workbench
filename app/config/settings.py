@@ -147,6 +147,30 @@ LOGIN_THROTTLE_COOLDOWN_SECONDS = int(os.environ.get("DSW_LOGIN_THROTTLE_COOLDOW
 # Paths (overridable for deployment)
 ARTIFACTS_BASE_DIR = Path(os.environ.get("DSW_ARTIFACTS_DIR", os.environ.get("DSW_ARTIFACTS_ROOT", "/var/lib/dsw/artifacts")))
 
+# --- Upload limits ---
+# Per-file size cap and per-request file-count cap for document uploads. Both
+# the ingestion service and the upload UI read these so the limit lives in one
+# place. When raising these in production, also bump the reverse-proxy
+# (Caddy) request_body max_length and the Gunicorn --timeout in dsw-ops:
+# a large multi-file POST is received and ingested synchronously by one worker.
+DSW_UPLOAD_MAX_FILE_SIZE_BYTES = int(
+    os.environ.get("DSW_UPLOAD_MAX_FILE_SIZE_BYTES", str(256 * 1024 * 1024))
+)
+DSW_UPLOAD_MAX_FILES_PER_REQUEST = int(
+    os.environ.get("DSW_UPLOAD_MAX_FILES_PER_REQUEST", "200")
+)
+# Raise Django's per-request form-field cap so large multi-file posts are not
+# rejected before the view runs (Django default is 1000 parts total).
+DATA_UPLOAD_MAX_NUMBER_FIELDS = int(os.environ.get("DSW_DATA_UPLOAD_MAX_NUMBER_FIELDS", "10000"))
+
+# Project visibility model.
+#   "membership" (default) restricts each project to its members.
+#   "all_users" makes every non-archived project visible and editable by every
+#   signed-in user — a single shared workspace for trusted small teams.
+# Review and curate remain membership-gated and API tokens keep their own
+# scoping in both modes. Enable per deployment via DSW_PROJECT_VISIBILITY.
+DSW_PROJECT_VISIBILITY = os.environ.get("DSW_PROJECT_VISIBILITY", "membership")
+
 # --- Docling Serve integration ---
 DSW_DOCLING_API_URL = os.environ.get("DSW_DOCLING_API_URL", "")
 DSW_DOCLING_API_KEY = os.environ.get("DSW_DOCLING_API_KEY", "")

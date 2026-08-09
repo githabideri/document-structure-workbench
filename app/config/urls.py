@@ -45,6 +45,7 @@ urlpatterns = [
     path("help/", views.help_page, name="help"),
 
     # Upload / Processing
+    path("uploads/file/", views.document_upload_file, name="document_upload_file"),
     path("projects/<int:project_id>/process/", views.project_process, name="project_process"),
     path("jobs/<int:job_id>/", views.job_status, name="job_status"),
     path("jobs/<int:job_id>/recovery/", views.job_recovery_action, name="job_recovery_action"),

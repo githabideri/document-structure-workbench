@@ -134,7 +134,7 @@ The application provides a REST API for programmatic access:
 - `GET /api/v1/health/` — Health check and release information
 - `GET /api/v1/projects/` — List accessible projects
 - `GET /api/v1/projects/<id>/documents/` — List source and processed documents
-- `POST /api/v1/projects/<id>/upload/` — Upload a PDF and queue processing
+- `POST /api/v1/projects/<id>/upload/` — Upload one or more PDF/images (multipart `file` fields) and queue processing; single-file responses are backward compatible
 - `GET /api/v1/jobs/<id>/` — Processing status and result metadata
 - `GET /api/v1/tasks/` — List review tasks
 - `GET /api/v1/tasks/<id>/` — Task detail with blinded extractions

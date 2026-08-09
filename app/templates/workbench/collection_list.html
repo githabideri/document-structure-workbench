@@ -6,7 +6,7 @@
 <div class="collection-list">
     <div class="page-header">
         <div><h1>{% trans "Projects" %}</h1><p class="page-intro">{% trans "Projects keep related source documents and their processing history together." %}</p></div>
-        {% if is_admin %}<a href="{% url 'project_create' %}" class="btn btn-primary">{% trans "New project" %}</a>{% endif %}
+        {% if can_create_project %}<a href="{% url 'project_create' %}" class="btn btn-primary">{% trans "New project" %}</a>{% endif %}
         {% if can_add_document %}<a href="{% url 'document_new' %}" class="btn btn-primary">{% trans "Add document" %}</a>{% endif %}
     </div>
     <table class="data-table">

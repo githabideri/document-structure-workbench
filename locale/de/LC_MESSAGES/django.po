@@ -743,18 +743,22 @@ msgstr "Projekt auswählen"
 msgid "The project controls who can see and work with this document."
 msgstr "Das Projekt legt fest, wer dieses Dokument sehen und bearbeiten darf."
 
-#: app/templates/workbench/document_new.html:32
 #: app/templates/workbench/review_list.html:12
 msgid "Document"
 msgstr "Dokument"
 
 #: app/templates/workbench/document_new.html:35
-msgid "Choose a PDF or drop it here"
-msgstr "PDF auswählen oder hier ablegen"
+msgid "Choose files or drop them here"
+msgstr "Dateien auswählen oder hier ablegen"
 
-#: app/templates/workbench/document_new.html:36
-msgid "Maximum file size: 50 MB"
-msgstr "Maximale Dateigröße: 50 MB"
+#: app/templates/workbench/document_new.html:40
+msgid "Choose files"
+msgstr "Dateien auswählen"
+
+#: app/templates/workbench/document_new.html:38
+#, python-format
+msgid "Up to %(max)s files per upload · %(mb)s MB each"
+msgstr "Bis zu %(max)s Dateien pro Upload · je %(mb)s MB"
 
 #: app/templates/workbench/document_new.html:45
 msgid "Analysis"
@@ -1729,6 +1733,15 @@ msgstr "Wählen Sie ein PDF zum Hochladen aus."
 #: app/workbench/views.py:1283
 msgid "Upload received. The document has been queued for analysis."
 msgstr "Upload empfangen. Das Dokument wurde zur Analyse eingereiht."
+
+msgid "Upload received. {count} documents have been queued for analysis."
+msgstr "Upload empfangen. {count} Dokumente wurden zur Analyse eingereiht."
+
+msgid "{filename}: {error}"
+msgstr "{filename}: {error}"
+
+msgid "Create a project"
+msgstr "Projekt erstellen"
 
 #: app/workbench/views.py:1313
 #| msgid "You do not have an editable project"

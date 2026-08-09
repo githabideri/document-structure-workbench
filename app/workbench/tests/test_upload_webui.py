@@ -57,8 +57,14 @@ class DocumentUploadWebUITests(TestCase):
         content = response.content.decode()
         self.assertIn('id="file-drop"', content)
         self.assertIn('id="file-input"', content)
-        # The frontend mounts its selected-file summary here (drop feedback).
-        self.assertIn('id="file-selected"', content)
+        # Multi-file: the input accepts several files and the JS mounts a
+        # per-file list + summary below the drop zone.
+        self.assertIn('multiple', content)
+        self.assertIn('id="file-list"', content)
+        self.assertIn('id="file-summary"', content)
+        # The configured size cap is surfaced to the UI from settings.
+        self.assertIn('data-max-bytes=', content)
+        self.assertIn('data-max-files=', content)
 
     @staticmethod
     def _valid_image(name="FV_0100.jpg", fmt="JPEG"):
@@ -68,6 +74,80 @@ class DocumentUploadWebUITests(TestCase):
         Image.new("RGB", (64, 64), "white").save(buffer, format=fmt)
         buffer.seek(0)
         return SimpleUploadedFile(name, buffer.read(), content_type={"JPEG": "image/jpeg", "PNG": "image/png"}[fmt])
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_multiple_files_each_create_a_job_and_redirect_to_project(self):
+        """A multi-file post creates one queued job per accepted file and lands
+        on the project view; the good files still upload when one is bad."""
+        good_a = self._valid_image(name="a.jpg")
+        good_b = self._valid_image(name="b.png", fmt="PNG")
+        bad = SimpleUploadedFile("malware.exe", b"MZ...", content_type="application/x-msdownload")
+        response = self.client.post(reverse("document_new"), {
+            "project": self.collection.pk,
+            "file": [good_a, good_b, bad],
+            "preset": self.preset.slug,
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        jobs = ProcessingJob.objects.filter(source_document__collection=self.collection).order_by("pk")
+        self.assertEqual(jobs.count(), 2)
+        self.assertTrue(all(job.state == "queued" for job in jobs))
+        # Landed on the project detail page (multi-file landing), with the
+        # per-file failure surfaced as a visible message.
+        self.assertRedirects(response, reverse("collection_detail", args=[self.collection.pk]))
+        self.assertIn(b"malware.exe", response.content)
+        self.assertIn(b"Supported files are PDF, JPG, PNG, and TIFF.", response.content)
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_single_file_still_redirects_to_its_job_status(self):
+        """A single-file upload keeps the original UX: follow to job status."""
+        img = self._valid_image(name="solo.jpg")
+        response = self.client.post(reverse("document_new"), {
+            "project": self.collection.pk,
+            "file": img,
+            "preset": self.preset.slug,
+        })
+        job = ProcessingJob.objects.get(source_document__collection=self.collection)
+        self.assertRedirects(response, reverse("job_status", args=[job.pk]))
+        self.assertEqual(job.state, "queued")
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_single_file_xhr_endpoint_returns_job_urls(self):
+        """The drop zone posts one file at a time to the XHR endpoint; it returns
+        JSON with the job and redirect URLs and creates a queued job."""
+        img = self._valid_image(name="xhr.jpg")
+        response = self.client.post(
+            reverse("document_upload_file"),
+            {"project": self.collection.pk, "file": img, "preset": self.preset.slug},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        job = ProcessingJob.objects.get(source_document__collection=self.collection)
+        self.assertEqual(body["status"], "queued")
+        self.assertEqual(body["job_id"], job.pk)
+        self.assertEqual(body["job_status_url"], reverse("job_status", args=[job.pk]))
+        self.assertEqual(body["collection_url"], reverse("collection_detail", args=[self.collection.pk]))
+
+    def test_xhr_endpoint_requires_edit_access(self):
+        viewer = User.objects.create_user(username="viewer", password="pw")
+        from workbench.models import ProjectMembership
+        ProjectMembership.objects.create(project=self.collection, user=viewer, role="viewer")
+        self.client.login(username="viewer", password="pw")
+        response = self.client.post(
+            reverse("document_upload_file"),
+            {"project": self.collection.pk, "file": self._valid_image(), "preset": self.preset.slug},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_xhr_endpoint_rejects_unsupported_file_with_json_error(self):
+        bad = SimpleUploadedFile("x.exe", b"MZ", content_type="application/x-msdownload")
+        response = self.client.post(
+            reverse("document_upload_file"),
+            {"project": self.collection.pk, "file": bad, "preset": self.preset.slug},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+        self.assertEqual(ProcessingJob.objects.filter(source_document__collection=self.collection).count(), 0)
 
     @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_submit_after_selection_creates_job_and_follows_status(self):

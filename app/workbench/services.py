@@ -577,8 +577,12 @@ class IngestionError(Exception):
 class DocumentIngestionService:
     """Shared upload and ingestion logic."""
 
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
     ALLOWED_UPLOAD_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "tif", "tiff"}
+
+    @property
+    def max_file_size(self):
+        """Per-file upload cap, configurable via DSW_UPLOAD_MAX_FILE_SIZE_BYTES."""
+        return getattr(settings, "DSW_UPLOAD_MAX_FILE_SIZE_BYTES", 50 * 1024 * 1024)
 
     def __init__(self, *, user, policy=None):
         self.user = user
@@ -710,6 +714,31 @@ class DocumentIngestionService:
                 self._cleanup_final(final_path)
             raise
 
+    def create_uploads(self, *, project, uploaded_files, preset_slug="quick-extraction"):
+        """Ingest one or more files, creating a processing job per file.
+
+        Each file is ingested independently so a single bad file (wrong type,
+        too large, a duplicate with an active job, …) never aborts the rest of
+        the batch. Returns ``(jobs, errors)`` where ``errors`` is a list of
+        ``{"filename", "error"}`` dicts for files that could not be ingested.
+        Processing itself is asynchronous: this only enqueues jobs, it does not
+        run extraction.
+        """
+        jobs = []
+        errors = []
+        for uploaded_file in uploaded_files:
+            try:
+                job = self.create_upload(
+                    project=project,
+                    uploaded_file=uploaded_file,
+                    preset_slug=preset_slug,
+                )
+            except IngestionError as exc:
+                errors.append({"filename": uploaded_file.name, "error": str(exc)})
+            else:
+                jobs.append(job)
+        return jobs, errors
+
     def retry_existing(self, *, job: ProcessingJob) -> ProcessingJob:
         """Queue a new processing attempt while retaining the old job."""
         project = job.source_document.collection
@@ -744,10 +773,10 @@ class DocumentIngestionService:
         if suffix not in self.ALLOWED_UPLOAD_EXTENSIONS:
             raise IngestionError("Supported files are PDF, JPG, PNG, and TIFF.")
 
-        if uploaded_file.size > self.MAX_FILE_SIZE:
+        if uploaded_file.size > self.max_file_size:
             raise IngestionError(
                 f"File too large ({uploaded_file.size / 1024 / 1024:.1f} MB). "
-                f"Maximum {self.MAX_FILE_SIZE / 1024 / 1024:.0f} MB."
+                f"Maximum {self.max_file_size / 1024 / 1024:.0f} MB."
             )
 
         uploaded_file.seek(0)

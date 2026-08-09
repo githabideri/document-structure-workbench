@@ -431,6 +431,49 @@ class UploadServiceTest(TestCase):
             artifacts_base = Path(tempfile.gettempdir())
             # (In real test, would check specific temp dir)
 
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_create_uploads_ingests_each_file_independently(self):
+        """A batch creates one job per accepted file and isolates failures so a
+        single bad file never aborts the rest."""
+        from workbench.services import DocumentIngestionService
+
+        good_pdf = SimpleUploadedFile("a.pdf", _make_pdf_content(), content_type="application/pdf")
+        good_img = self._png_upload("b.png")
+        bad = SimpleUploadedFile("x.txt", b"not allowed", content_type="text/plain")
+        service = DocumentIngestionService(user=self.user)
+
+        jobs, errors = service.create_uploads(
+            project=self.collection,
+            uploaded_files=[good_pdf, bad, good_img],
+            preset_slug=self.preset.slug,
+        )
+
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["filename"], "x.txt")
+        self.assertEqual(ProcessingJob.objects.filter(source_document__collection=self.collection).count(), 2)
+
+    @staticmethod
+    def _png_upload(name):
+        from io import BytesIO
+        from PIL import Image
+        buf = BytesIO()
+        Image.new("RGB", (8, 8), "white").save(buf, format="PNG")
+        return SimpleUploadedFile(name, buf.getvalue(), content_type="image/png")
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp(), DSW_UPLOAD_MAX_FILE_SIZE_BYTES=100)
+    def test_max_file_size_is_configurable_via_settings(self):
+        """The per-file cap reads DSW_UPLOAD_MAX_FILE_SIZE_BYTES dynamically."""
+        from workbench.services import DocumentIngestionService, IngestionError
+
+        oversized = SimpleUploadedFile("big.pdf", _make_pdf_content(), content_type="application/pdf")
+        service = DocumentIngestionService(user=self.user)
+        self.assertEqual(service.max_file_size, 100)
+        with self.assertRaises(IngestionError):
+            service.create_upload(
+                project=self.collection, uploaded_file=oversized, preset_slug=self.preset.slug,
+            )
+
 
 class JobTransitionTest(TestCase):
     """Test ProcessingJob state transitions."""
@@ -1390,7 +1433,7 @@ class EntryJourneyTest(TestCase):
         upload = self.client.get(reverse("document_new"))
         self.assertContains(dashboard, "Dokument hinzufügen")
         self.assertContains(upload, "Projekt")
-        self.assertContains(upload, "PDF auswählen oder hier ablegen")
+        self.assertContains(upload, "Dateien auswählen oder hier ablegen")
         self.assertContains(upload, "Standardanalyse")
         self.assertContains(upload, "Hochladen und analysieren")
 
@@ -1429,11 +1472,17 @@ class LifecycleManagementTest(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.state, "failed")
 
-    def test_only_administrator_can_create_and_archive_projects(self):
+    def test_any_user_can_create_projects_but_only_admins_archive(self):
         self.client.force_login(self.user)
-        self.assertEqual(self.client.get(reverse("project_create")).status_code, 403)
-        response = self.client.post(reverse("project_create"), {"name": "New Admin Project", "source_type": "corpus"})
-        self.assertEqual(response.status_code, 403)
+        response = self.client.get(reverse("project_create"))
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(reverse("project_create"), {"name": "User Project", "description": "Mine", "source_type": "corpus"})
+        project = Collection.objects.get(name="User Project")
+        self.assertRedirects(response, reverse("collection_detail", args=[project.pk]))
+        # The creator becomes the project owner.
+        self.assertTrue(ProjectMembership.objects.filter(project=project, user=self.user, role="owner").exists())
+        # Archiving is still an administrator-only lifecycle action.
+        self.assertEqual(self.client.post(reverse("project_archive", args=[project.pk])).status_code, 403)
 
         self.client.force_login(self.admin)
         response = self.client.post(reverse("project_create"), {"name": "New Admin Project", "description": "Test", "source_type": "corpus"})
@@ -1504,6 +1553,33 @@ class AuthorizationTest(TestCase):
         policy = ProjectAccessPolicy(user=self.outsider)
         self.assertFalse(policy.can_view(self.collection))
         self.assertFalse(policy.can_edit(self.collection))
+
+    def test_default_membership_mode_keeps_outsider_out(self):
+        """Guard the default: without the environment opt-in, a non-member has
+        no view or edit access, and cannot see the project in listings."""
+        from workbench.policy import ProjectAccessPolicy
+        policy = ProjectAccessPolicy(user=self.outsider)
+        self.assertFalse(policy.can_view(self.collection))
+        self.assertFalse(policy.can_edit(self.collection))
+        self.assertNotIn(self.collection, list(policy.visible_projects()))
+
+    @override_settings(DSW_PROJECT_VISIBILITY="all_users")
+    def test_shared_workspace_grants_view_and_edit_to_outsider(self):
+        """In all_users mode every signed-in user can see and edit every
+        non-archived project (upload/modify), while review and curate stay
+        membership-gated and tokens are unaffected."""
+        from workbench.policy import ProjectAccessPolicy
+        policy = ProjectAccessPolicy(user=self.outsider)
+        self.assertTrue(policy.can_view(self.collection))
+        self.assertTrue(policy.can_edit(self.collection))
+        self.assertIn(self.collection, list(policy.visible_projects()))
+        self.assertFalse(policy.can_review(self.collection))
+        self.assertFalse(policy.can_curate(self.collection))
+        # API tokens keep their own scoping even in shared mode.
+        token_policy = ProjectAccessPolicy(
+            token=ApiToken.objects.create(user=self.outsider, scopes=["documents:upload"])
+        )
+        self.assertFalse(token_policy.can_edit(self.collection))
 
     def test_token_scoped_viewer_only(self):
         """Token scoped to project grants viewer-only, not editor."""

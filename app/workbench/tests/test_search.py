@@ -38,9 +38,35 @@ class SearchTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse("search"), {"q": "R-184"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Object R-184")
+        # The matching passage is shown with the query highlighted.
+        self.assertContains(response, "<mark>R-184</mark>")
+        self.assertContains(response, "was restored")
         self.assertContains(response, f"revision={self.document.pk}")
         self.assertContains(response, f"region={self.region.pk}")
+
+    def test_search_groups_results_by_document_and_shows_counts(self):
+        rebuild_revision_index(self.document)
+        source2 = SourceDocument.objects.create(collection=self.project, filename="ledger.pdf", uploaded_by=self.user)
+        job2 = ProcessingJob.objects.create(source_document=source2, preset=self.job.preset, state="completed")
+        doc2 = Document.objects.create(collection=self.project, external_id="ledger", filename="ledger.pdf")
+        job2.result_document = doc2
+        job2.save(update_fields=["result_document"])
+        page2 = Page.objects.create(document=doc2, page_number=1)
+        PageRegion.objects.create(
+            source_document=source2, job=job2, page=page2, page_number=1,
+            region_type="text", left=.1, top=.1, right=.9, bottom=.2,
+            text="R-184 appears in the ledger as well.",
+        )
+        rebuild_revision_index(doc2)
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("search"), {"q": "R-184"})
+        self.assertEqual(response.status_code, 200)
+        # Two document groups, each with its filename header.
+        self.assertContains(response, "inventory.pdf")
+        self.assertContains(response, "ledger.pdf")
+        # Both passages are highlighted.
+        self.assertContains(response, "<mark>R-184</mark>", count=2)
+        self.assertContains(response, "2 matches")
 
     def test_unrelated_user_cannot_search_project(self):
         rebuild_revision_index(self.document)

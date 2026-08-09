@@ -322,11 +322,34 @@ def search_view(request):
             f"?revision={result.processed_revision_id}&page={result.page.page_number if result.page else 1}"
             f"&region={result.page_region_id or ''}"
         )
+        result.snippet = _search_snippet(result.text, query)
+    # Stable document-then-reading-order sort so {% regroup %} can fold hits by
+    # document without interleaving. There is no relevance score yet.
+    results.sort(key=lambda r: (
+        (r.source_document.filename or "").casefold(),
+        r.page.page_number if r.page else 0,
+        r.ordinal,
+    ))
     return render(request, "workbench/search.html", {
         "query": query,
         "results": results,
         "projects": projects,
     })
+
+
+def _search_snippet(text, query, window=240):
+    """Return a match-centered context window of ``text`` (full text if short)."""
+    text = text or ""
+    if len(text) <= window:
+        return text
+    idx = text.lower().find((query or "").lower())
+    if idx < 0:
+        return text[:window].rstrip() + "\u2026"
+    start = max(0, idx - window // 3)
+    end = min(len(text), start + window)
+    prefix = "\u2026" if start > 0 else ""
+    suffix = "\u2026" if end < len(text) else ""
+    return f"{prefix}{text[start:end].strip()}{suffix}"
 
 
 @login_required

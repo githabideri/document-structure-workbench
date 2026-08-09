@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n dsw_tags %}
 {% block title %}{% trans "Search" %}{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -10,14 +10,34 @@
   <div class="search-row"><input id="search-query" name="q" value="{{ query }}" placeholder="{% trans 'e.g. R-184 or restoration' %}" autofocus><button class="btn btn-primary" type="submit">{% trans "Search" %}</button></div>
 </form>
 {% if query %}
-  <h2>{% blocktrans count counter=results|length %}{{ counter }} result{% plural %}{{ counter }} results{% endblocktrans %}</h2>
-  <div class="item-list">
-  {% for result in results %}
-    <a class="item-row search-result" href="{{ result.citation_url }}">
-      <span><strong>{{ result.text|truncatechars:180 }}</strong><small>{{ result.source_document.filename }} · {{ result.project.name }} · {% trans "Page" %} {{ result.page.page_number }} · {{ result.get_passage_type_display }}</small></span>
-      <span class="btn btn-sm">{% trans "Open evidence" %}</span>
-    </a>
-  {% empty %}<div class="empty-state"><h2>{% trans "No matches" %}</h2><p>{% trans "Try an exact identifier, name, or phrase." %}</p></div>{% endfor %}
+  {% regroup results by source_document as doc_groups %}
+  <div class="search-summary">
+    <h2>{% blocktrans count counter=results|length %}{{ counter }} match{% plural %}{{ counter }} matches{% endblocktrans %}</h2>
+    <p class="search-summary-sub">{% blocktrans count counter=doc_groups|length %}in {{ counter }} document{% plural %}in {{ counter }} documents{% endblocktrans %}</p>
+  </div>
+  <div class="search-groups">
+  {% for group in doc_groups %}
+    <details class="search-group" open>
+      <summary>
+        <span class="search-group-title">{{ group.grouper.filename }}</span>
+        <span class="search-group-count">{% blocktrans count counter=group.list|length %}{{ counter }} match{% plural %}{{ counter }} matches{% endblocktrans %}</span>
+      </summary>
+      <div class="search-hits">
+        {% for result in group.list %}
+          <a class="search-hit" href="{{ result.citation_url }}">
+            <div class="search-hit-meta">
+              <span class="search-hit-page">{% trans "Page" %} {{ result.page.page_number }}</span>
+              <span class="search-hit-type">{{ result.get_passage_type_display }}</span>
+            </div>
+            <p class="search-hit-text">{{ result.snippet|highlight:query }}</p>
+            <span class="search-hit-open">{% trans "Open evidence" %} →</span>
+          </a>
+        {% endfor %}
+      </div>
+    </details>
+  {% empty %}
+    <div class="empty-state"><h2>{% trans "No matches" %}</h2><p>{% trans "Try an exact identifier, name, or phrase." %}</p></div>
+  {% endfor %}
   </div>
 {% endif %}
 {% endblock %}

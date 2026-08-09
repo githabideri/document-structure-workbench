@@ -2,6 +2,8 @@
 import re
 import unicodedata
 
+from django.db.models import F
+
 from .models import PageRegion, SearchPassage, TableCandidate
 
 
@@ -60,6 +62,10 @@ def search_project(projects, query, *, source_ids=None, limit=20):
     qs = SearchPassage.objects.filter(project__in=projects, normalized_text__contains=normalized)
     if source_ids:
         qs = qs.filter(source_document_id__in=source_ids)
+    # Restrict to each source's *active* revision: a passage's revision must be
+    # its source's currently-active revision, so reprocessings don't surface the
+    # same passage once per historical revision.
+    qs = qs.filter(source_document__active_document=F("processed_revision"))
     return list(qs.select_related("source_document", "processed_revision", "page", "page_region")[:limit])
 
 

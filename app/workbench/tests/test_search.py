@@ -20,6 +20,10 @@ class SearchTests(TestCase):
         self.document = Document.objects.create(collection=self.project, external_id="inventory", filename="inventory.pdf")
         self.job.result_document = self.document
         self.job.save(update_fields=["result_document"])
+        # The processing worker sets active_document on completion; mirror that
+        # invariant so search (which is scoped to active revisions) sees this revision.
+        self.source.active_document = self.document
+        self.source.save(update_fields=["active_document"])
         self.page = Page.objects.create(document=self.document, page_number=4)
         self.region = PageRegion.objects.create(
             source_document=self.source, job=self.job, page=self.page, page_number=4,
@@ -73,6 +77,8 @@ class SearchTests(TestCase):
         doc2 = Document.objects.create(collection=self.project, external_id="ledger", filename="ledger.pdf")
         job2.result_document = doc2
         job2.save(update_fields=["result_document"])
+        source2.active_document = doc2
+        source2.save(update_fields=["active_document"])
         page2 = Page.objects.create(document=doc2, page_number=1)
         PageRegion.objects.create(
             source_document=source2, job=job2, page=page2, page_number=1,
@@ -89,6 +95,28 @@ class SearchTests(TestCase):
         # Both passages are highlighted.
         self.assertContains(response, "<mark>R-184</mark>", count=2)
         self.assertContains(response, "2 matches")
+
+    def test_search_only_returns_active_revision_passages(self):
+        # The active revision contains the query...
+        rebuild_revision_index(self.document)
+        # ...and so does a superseded second revision of the same source.
+        job2 = ProcessingJob.objects.create(source_document=self.source, preset=self.job.preset, state="completed")
+        doc2 = Document.objects.create(collection=self.project, external_id="inventory-v2", filename="inventory.pdf")
+        job2.result_document = doc2
+        job2.save(update_fields=["result_document"])
+        page2 = Page.objects.create(document=doc2, page_number=4)
+        PageRegion.objects.create(
+            source_document=self.source, job=job2, page=page2, page_number=4,
+            region_type="text", left=.1, top=.1, right=.9, bottom=.2,
+            text="Object R-184 was restored in 1957.",
+        )
+        rebuild_revision_index(doc2)
+        # active_document is still the first revision, so the duplicate passage
+        # from the superseded revision must not multiply the result.
+        self.assertEqual(self.source.active_document_id, self.document.pk)
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("search"), {"q": "R-184"})
+        self.assertContains(response, "<mark>R-184</mark>", count=1)
 
     def test_unrelated_user_cannot_search_project(self):
         rebuild_revision_index(self.document)

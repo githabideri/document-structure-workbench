@@ -1472,27 +1472,39 @@ class LifecycleManagementTest(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.state, "failed")
 
-    def test_any_user_can_create_projects_but_only_admins_archive(self):
+    def test_project_lifecycle_requires_curator_group(self):
+        """Create/archive are gated on the Project Curator group (not on any
+        signed-in user, nor only on admins). Curators become owner on create."""
+        from django.contrib.auth.models import Group
+
+        # A signed-in user without the curator group cannot create or archive.
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(reverse("project_create")).status_code, 403)
+        self.assertEqual(self.client.post(reverse("project_create"), {"name": "Nope"}).status_code, 403)
+        self.assertEqual(Collection.objects.filter(name="Nope").count(), 0)
+
+        # A regular user who is made a Project Curator gains the lifecycle rights.
+        curator_group, _ = Group.objects.get_or_create(name="Project Curator")
+        curator_group.user_set.add(self.user)
         self.client.force_login(self.user)
         response = self.client.get(reverse("project_create"))
         self.assertEqual(response.status_code, 200)
         response = self.client.post(reverse("project_create"), {"name": "User Project", "description": "Mine", "source_type": "corpus"})
         project = Collection.objects.get(name="User Project")
         self.assertRedirects(response, reverse("collection_detail", args=[project.pk]))
-        # The creator becomes the project owner.
         self.assertTrue(ProjectMembership.objects.filter(project=project, user=self.user, role="owner").exists())
-        # Archiving is still an administrator-only lifecycle action.
-        self.assertEqual(self.client.post(reverse("project_archive", args=[project.pk])).status_code, 403)
-
-        self.client.force_login(self.admin)
-        response = self.client.post(reverse("project_create"), {"name": "New Admin Project", "description": "Test", "source_type": "corpus"})
-        project = Collection.objects.get(name="New Admin Project")
-        self.assertRedirects(response, reverse("collection_detail", args=[project.pk]))
-        self.assertTrue(ProjectMembership.objects.filter(project=project, user=self.admin, role="owner").exists())
+        # Curators can also archive/restore.
         response = self.client.post(reverse("project_archive", args=[project.pk]))
         self.assertRedirects(response, reverse("collection_list"))
         project.refresh_from_db()
         self.assertTrue(project.is_archived)
+
+        # Superusers (admins) keep full lifecycle rights too.
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("project_create"), {"name": "Admin Project", "description": "Test", "source_type": "corpus"})
+        admin_project = Collection.objects.get(name="Admin Project")
+        self.assertRedirects(response, reverse("collection_detail", args=[admin_project.pk]))
+        self.assertEqual(self.client.post(reverse("project_archive", args=[admin_project.pk])).status_code, 302)
 
     def test_editor_can_archive_upload_without_deleting_immutable_rows(self):
         job = ProcessingJob.objects.create(source_document=self.source, preset=self.preset, state="failed", created_by=self.user)

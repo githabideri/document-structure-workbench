@@ -49,6 +49,13 @@ class UserPreferences(models.Model):
         return obj
 
 
+# Name of the group whose members can do all project lifecycle work
+# (create, archive/restore, manage projects). Seeded for all existing users
+# by migration 0022; manage members via the Django admin or the
+# manage_project_curator command.
+PROJECT_CURATOR_GROUP = "Project Curator"
+
+
 class Collection(models.Model):
     """A named set of documents for processing and review."""
 

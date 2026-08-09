@@ -150,6 +150,7 @@ class DiagnosticsService:
         provider = DiagnosticsService.provider_status()
         processor = DiagnosticsService.processor_status()
         return {"status": "ok" if database == "ok" else "error", "release": release, "database": database,
+                "project_visibility": getattr(settings, "DSW_PROJECT_VISIBILITY", "membership"),
                 "worker": {"status": "ok" if worker_ok else "stale", "last_seen": worker_seen.isoformat() if worker_seen else None,
                             "queue_depth": ChatRun.objects.filter(state="queued").count() if database == "ok" else None},
                 "chat_provider": provider, "document_processor": processor}

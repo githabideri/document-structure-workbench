@@ -25,6 +25,7 @@ from django.views.decorators.http import require_POST
 from django.contrib.auth import logout as auth_logout
 
 from .models import (
+    PROJECT_CURATOR_GROUP,
     AuditEvent, Collection, Decision, Document, ExtractionRun,
     Page, PageRegion, ProcessingArtifact, RegionCorrection, Review, ReviewTask, SourceDocument, TableCandidate,
     TableExtraction, OcrRequest,
@@ -45,6 +46,18 @@ def is_curator(user):
 
 def is_admin(user):
     return user.is_superuser or user.groups.filter(name="Administrator").exists()
+
+
+def is_project_curator(user):
+    """Members of the Project Curator group (plus superusers and admins) can
+    do all project lifecycle work: create, archive/restore, and manage
+    projects. Membership is seeded for all existing users by migration and is
+    changeable by an administrator in the Django admin or via the
+    manage_project_curator management command."""
+    return (
+        user.is_superuser
+        or user.groups.filter(name__in=[PROJECT_CURATOR_GROUP, "Administrator"]).exists()
+    )
 
 
 # --- Project access decorator ---
@@ -181,15 +194,16 @@ def collection_list(request):
     return render(request, "workbench/collection_list.html", {
         "collections": collections,
         "can_add_document": any(project.user_can_edit for project in collections),
-        "can_create_project": True,
+        "can_create_project": is_project_curator(request.user),
         "is_admin": is_admin(request.user),
     })
 
 
 @login_required
 def project_create(request):
-    # Any signed-in user may create a project; the creator becomes its owner.
-    # Archiving remains an administrator-only lifecycle action.
+    # Project lifecycle work is reserved for Project Curators (and admins).
+    if not is_project_curator(request.user):
+        raise PermissionDenied
     if request.method == "POST":
         name = request.POST.get("name", "").strip()
         source_type = request.POST.get("source_type", "corpus")
@@ -216,7 +230,7 @@ def project_create(request):
 @login_required
 @require_POST
 def project_archive(request, collection_id):
-    if not is_admin(request.user):
+    if not is_project_curator(request.user):
         raise PermissionDenied
     from .policy import ProjectAccessPolicy
     project = get_object_or_404(Collection, pk=collection_id)

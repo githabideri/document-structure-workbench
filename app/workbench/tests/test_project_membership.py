@@ -139,6 +139,37 @@ class ListProjectMembershipsCommandTests(TestCase):
         self.assertIn("total=2", out)
 
 
+class ManageProjectCuratorCommandTests(TestCase):
+    """Programmatic control of the Project Curator group membership."""
+
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        self.alice = User.objects.create_user(username="alice")
+        self.bob = User.objects.create_user(username="bob")
+        self.group, _ = Group.objects.get_or_create(name="Project Curator")
+
+    def test_list_reports_current_members(self):
+        self.group.user_set.add(self.alice)
+        out = _run("manage_project_curator", "--list")
+        self.assertIn("alice", out)
+        self.assertNotIn("bob", out)
+
+    def test_add_and_remove_are_idempotent(self):
+        _run("manage_project_curator", "--add", "alice")
+        self.assertTrue(self.group.user_set.filter(username="alice").exists())
+        _run("manage_project_curator", "--add", "alice")  # no-op
+        self.assertEqual(self.group.user_set.filter(username="alice").count(), 1)
+        _run("manage_project_curator", "--remove", "alice")
+        self.assertFalse(self.group.user_set.filter(username="alice").exists())
+        _run("manage_project_curator", "--remove", "alice")  # no-op
+        self.assertEqual(self.group.user_set.filter(username="alice").count(), 0)
+
+    def test_missing_user_raises(self):
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            _run("manage_project_curator", "--add", "nobody")
+
+
 class AdminRegistrationTests(TestCase):
     def test_project_membership_registered(self):
         from django.contrib import admin

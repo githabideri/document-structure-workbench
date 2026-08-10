@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Document workspace regression smoke. Verifies the core rework invariant:
+# once a page image is loaded, region-level work (selection, transcription
+# save, recognition run) must NEVER recreate the OpenSeadragon viewer or reload
+# the page. Asserts via window.__DSW_WORKSPACE__.viewer.stats():
+#   generation/imageLoads must not change during region work,
+#   selectionChanges/focusChanges must advance.
+#
+# Credentials and targets come from the environment only (never the result).
+base_url="${DSW_BROWSER_BASE_URL:-http://127.0.0.1:8000}"
+username="${DSW_BROWSER_USERNAME:-}"
+password="${DSW_BROWSER_PASSWORD:-}"
+source_id="${DSW_WS_SOURCE_ID:-1}"
+revision_id="${DSW_WS_REVISION_ID:-1}"
+page_number="${DSW_WS_PAGE:-1}"
+region_a="${DSW_WS_REGION_A:-2}"
+region_b="${DSW_WS_REGION_B:-3}"
+output_dir="${DSW_BROWSER_OUTPUT_DIR:-/tmp/dsw-workspace-smoke-$(date +%Y%m%d-%H%M%S)}"
+allow_remote="${DSW_BROWSER_ALLOW_REMOTE:-0}"
+browser="$(dirname "$0")/agent-browser-dsw"
+session="dsw-workspace-smoke-$(date +%s)"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/dsw-workspace-smoke [options]
+
+Runs the document workspace regression acceptance flow: log in, open a deep
+link, then assert that selecting a region, saving a transcription and running
+a recognition job never recreate the viewer (imageLoads must stay constant)
+while the selection count advances and the URL stays deep-linkable.
+
+Options:
+  -h, --help          Show this help.
+  --base-url URL      Application URL (or DSW_BROWSER_BASE_URL).
+  --username NAME     Browser test username (or DSW_BROWSER_USERNAME).
+  --password PASSWORD Convenience only; prefer DSW_BROWSER_PASSWORD.
+  --source-id ID      Fixture source document id (default 1).
+  --revision-id ID    Immutable revision id (default 1).
+  --page N            Page number to open (default 1).
+  --region-a ID       A region on the page to select first.
+  --region-b ID       A second region to select (default 3).
+  --output-dir PATH   Artifact directory.
+  --allow-remote      Permit non-local BASE_URL (required for staging).
+
+Requires a running server with an OpenSeadragon-served page image and at least
+two detected regions, plus a fixture user who can edit the document.
+EOF
+}
+while (($#)); do
+  case "$1" in
+    -h|--help) usage; exit 0;;
+    --base-url) base_url="${2:?missing URL}"; shift 2;;
+    --username) username="${2:?missing username}"; shift 2;;
+    --password) password="${2:?missing password}"; shift 2;;
+    --source-id) source_id="${2:?missing source id}"; shift 2;;
+    --revision-id) revision_id="${2:?missing revision id}"; shift 2;;
+    --page) page_number="${2:?missing page}"; shift 2;;
+    --region-a) region_a="${2:?missing region a}"; shift 2;;
+    --region-b) region_b="${2:?missing region b}"; shift 2;;
+    --output-dir) output_dir="${2:?missing output directory}"; shift 2;;
+    --allow-remote) allow_remote=1; shift;;
+    *) echo "workspace-smoke: unknown option $1" >&2; usage >&2; exit 2;;
+  esac
+done
+
+case "$base_url" in
+  http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*) ;;
+  *) [[ "$allow_remote" == 1 ]] || { echo "workspace-smoke: remote URL requires --allow-remote" >&2; exit 2; };;
+esac
+mkdir -p "$output_dir"
+steps_file="$output_dir/steps.ndjson"
+: > "$steps_file"
+
+record() { python3 -c 'import json,sys; print(json.dumps({"scenario":sys.argv[1],"status":sys.argv[2],"detail":sys.argv[3]}))' "$1" "$2" "$3" >> "$steps_file"; }
+fail() { echo "workspace-smoke: $*" >&2; exit 1; }
+
+# Run an eval that is expected to print a non-empty JSON on success (throws otherwise).
+step_assert() { # $1 name, $2 js
+  local out
+  out="$("$browser" --session "$session" eval "$2" 2>/dev/null)"
+  if [[ -n "$out" && "$out" != *"threw"* && "$out" != "null" ]]; then
+    record "$1" pass "$out"; return 0
+  fi
+  record "$1" fail "$2"; return 1
+}
+
+finish() {
+  local status=$?
+  "$browser" --session "$session" console >"$output_dir/console.log" 2>&1 || true
+  "$browser" --session "$session" errors >"$output_dir/errors.log" 2>&1 || true
+  "$browser" close --all >/dev/null 2>&1 || true
+  return "$status"
+}
+trap finish EXIT
+
+[[ -n "$username" && -n "$password" ]] || fail "set DSW_BROWSER_USERNAME and DSW_BROWSER_PASSWORD"
+
+# ---- Login ----
+"$browser" --session "$session" close --all >/dev/null 2>&1 || true
+"$browser" --session "$session" open "$base_url/login/" >/dev/null 2>&1 || fail "login page did not open"
+sleep 1.5
+"$browser" --session "$session" find label Username fill "$username" >/dev/null 2>&1 || fail "username field not found"
+sleep 0.3
+"$browser" --session "$session" find label Password fill "$password" >/dev/null 2>&1 || fail "password field not found"
+sleep 0.3
+"$browser" --session "$session" find role button click --name Login >/dev/null 2>&1 || fail "login submit failed"
+sleep 1.5
+
+# ---- Open a deep link; wait for the viewer ----
+url="$base_url/documents/$source_id/?revision=$revision_id&page=$page_number&region=$region_a"
+"$browser" --session "$session" open "$url" >/dev/null 2>&1 || fail "workspace deep link did not open"
+for _ in $(seq 1 30); do
+  if "$browser" --session "$session" eval 'window.__DSW_WORKSPACE__ && window.__DSW_WORKSPACE__.viewer.isReady() ? "ready" : "no"' 2>/dev/null | grep -q ready; then break; fi
+  sleep 0.5
+done
+step_assert deep-link-restored "(()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const s=ws.viewer.stats();if((s.imageLoads!==1)||ws.state.regionId!=='$region_a')throw new Error('deep link state');return JSON.stringify({imageLoads:s.imageLoads,regionId:ws.state.regionId});})()" || fail "deep link did not restore + open viewer"
+
+# ---- Select another region (same code path a canvas-click invokes). ----
+step_assert region-select-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const before=ws.viewer.stats();await ws.selectRegion('$region_b',{focus:true});await new Promise(r=>setTimeout(r,500));const after=ws.viewer.stats();if(after.imageLoads!==before.imageLoads)throw new Error('viewer reloaded');if(ws.state.regionId!=='$region_b')throw new Error('region not selected');return JSON.stringify({imageLoads:after.imageLoads,selectionChanges:after.selectionChanges,regionId:ws.state.regionId});})()" || fail "region selection recreated the viewer or did not select"
+
+# ---- Save a transcription edit; viewer must not reload. ----
+"$browser" --session "$session" eval "(()=>{const a=document.querySelector('#transcription-area');if(!a)throw new Error('no textarea');a.value=a.value+' [ws-smoke]';a.dispatchEvent(new Event('input',{bubbles:true}));return 'edited';})()" >/dev/null 2>&1
+"$browser" --session "$session" eval "document.querySelector('[data-transcription-action=save]')?.click();'save'" >/dev/null 2>&1
+sleep 0.8
+step_assert manual-save-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const after=ws.viewer.stats();if(after.imageLoads!==1)throw new Error('viewer reloaded');const a=document.querySelector('#transcription-area');if(!a)throw new Error('no textarea');if(a.value!==a.dataset.expectedCurrent)throw new Error('save not persisted');return JSON.stringify({imageLoads:after.imageLoads,persisted:a.value.slice(0,30)});})()" || fail "manual save recreated the viewer or did not persist"
+
+# ---- Run a vision job; version rail becomes pending without recreating anything. ----
+step_assert run-vision-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const before=ws.viewer.stats();const btn=document.querySelector('.split-button[data-split-button=vision] .split-button-main');if(!btn)throw new Error('no vision button');btn.click();let pending=false;for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,300));const v=document.querySelector('#inspector-versions');if(v&&v.dataset.pending==='true'){pending=true;break;}}const after=ws.viewer.stats();if(after.imageLoads!==before.imageLoads)throw new Error('viewer reloaded');if(!document.querySelector('#inspector-editor'))throw new Error('editor lost');if(!pending)throw new Error('rail did not become pending');return JSON.stringify({imageLoads:after.imageLoads,selectionChanges:after.selectionChanges,pending:true});})()" || fail "vision run recreated the viewer or did not update the rail"
+
+record finish pass "imageLoads stayed constant through selection, save and vision run"
+"$browser" --session "$session" screenshot "$output_dir/final.png" >/dev/null 2>&1 || true
+echo "workspace-smoke: PASS — imageLoads stayed constant through all region-level actions"

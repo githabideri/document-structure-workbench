@@ -120,6 +120,10 @@ function initWorkspace(shell) {
       const html = await resp.text();
       target.innerHTML = html;
       target.dataset.regionId = state.regionId || "";
+      // The swapped content carries hx-post forms (type/suppress/revert,
+      // recognition split buttons, candidate accept). Bind them to HTMX so a
+      // click performs an AJAX partial swap instead of a native page submit.
+      window.htmx?.process(target);
       wireInspectorRoot();
     } catch { /* transient */ }
   }

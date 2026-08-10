@@ -1,0 +1,46 @@
+{% load i18n %}
+<div class="inspector" data-region-id="{{ selected_region.id }}" data-async-kind="region" data-async-id="{{ selected_region.id }}">
+    {% if inspector_error %}
+    <div class="inspector-alert" role="alert">{{ inspector_error }}</div>
+    {% endif %}
+
+    <header class="inspector-head">
+        <div class="inspector-head-main">
+            <h2>{% trans "Region" %} {{ selected_region.id }}</h2>
+            <span class="badge region-type-badge region-{{ selected_region.display_region_type }}">{{ selected_region.display_region_type_label }}{% if selected_region.display_is_suppressed %} · {% trans "Suppressed" %}{% endif %}</span>
+        </div>
+        {% if can_edit_document %}
+        <details class="inspector-menu">
+            <summary aria-label="{% trans 'Region actions' %}">⋯</summary>
+            <div class="inspector-menu-panel">
+                <form hx-post="{% url 'correct_region' selected_region.id %}" hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="button">
+                    {% csrf_token %}
+                    <input type="hidden" name="operation" value="type">
+                    <input type="hidden" name="expected_current_value" value="{{ selected_region.effective_region_type }}">
+                    <label class="menu-field">{% trans "Region type" %}
+                        <select name="region_type">{% for value, label in region_types %}<option value="{{ value }}"{% if value == selected_region.effective_region_type %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                    </label>
+                    <button class="btn btn-sm btn-secondary" type="submit">{% trans "Change type" %}</button>
+                </form>
+                {% if selected_region.suppression_correction %}
+                <form hx-post="{% url 'revert_region_correction' selected_region.suppression_correction.id %}" hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="button">
+                    {% csrf_token %}
+                    <button class="btn btn-sm btn-secondary" type="submit">{% trans "Restore region" %}</button>
+                </form>
+                {% else %}
+                <form hx-post="{% url 'correct_region' selected_region.id %}" hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="button">
+                    {% csrf_token %}
+                    <input type="hidden" name="operation" value="suppress">
+                    <input type="hidden" name="expected_current_value" value="false">
+                    <button class="btn btn-sm btn-secondary" type="submit">{% trans "Suppress region" %}</button>
+                </form>
+                {% endif %}
+                <button type="button" class="btn btn-sm btn-secondary" data-inspector-action="focus-region">{% trans "Focus region" %}</button>
+            </div>
+        </details>
+        {% endif %}
+    </header>
+
+    {% include "workbench/_inspector_editor.html" %}
+    {% include "workbench/_inspector_versions.html" %}
+</div>

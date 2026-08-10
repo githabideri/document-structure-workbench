@@ -1,0 +1,71 @@
+{% load i18n %}
+<section class="inspector-editor" id="inspector-editor" data-region-id="{{ selected_region.id }}" aria-label="{% trans 'Transcription' %}">
+    <div class="inspector-section-label">{% trans "Transcription" %}</div>
+
+    <textarea class="transcription-area" id="transcription-area"
+              data-expected-current="{{ selected_region.effective_text }}"
+              data-save-url="{% url 'correct_region_text' selected_region.id %}"
+              aria-label="{% trans 'Current transcription' %}"
+              {% if not can_edit_document %}readonly{% endif %}>{{ selected_region.effective_text }}</textarea>
+
+    <div class="transcription-meta" id="transcription-meta">
+        <span class="dirty-state" data-dirty-state role="status" aria-live="polite"></span>
+        <div class="transcription-meta-actions">
+            {% if can_edit_document and selected_region.active_text_correction %}
+            <button type="button" class="btn btn-sm btn-secondary" data-transcription-action="revert"
+                    hx-post="{% url 'revert_region_correction' selected_region.active_text_correction.id %}"
+                    hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="this">{% trans "Revert" %}</button>
+            {% endif %}
+            {% if can_edit_document %}
+            <button type="button" class="btn btn-sm btn-primary" data-transcription-action="save" disabled>{% trans "Save" %}</button>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if can_edit_document %}
+    <div class="inspector-alert inspector-status" id="inspector-status" role="status" aria-live="polite" hidden></div>
+
+    {% if htr_enabled %}
+    <div class="recognition-controls">
+        <form class="split-button" data-split-button="htr"
+              hx-post="{% url 'create_region_htr' selected_region.id %}" hx-target="#inspector-versions" hx-swap="outerHTML" hx-disabled-elt="button">
+            {% csrf_token %}
+            <input type="hidden" name="pipeline_id" value="{{ htr_pipeline }}">
+            <button type="submit" class="split-button-main">
+                <span class="split-button-label">{% trans "Run HTR" %}</span>
+                <span class="split-button-model" data-recog-model>{% for pid, pname in htr_pipelines %}{% if pid == htr_pipeline %}{{ pname }}{% endif %}{% endfor %}</span>
+            </button>
+            <details class="split-button-menu">
+                <summary aria-label="{% trans 'Choose HTR pipeline' %}">▾</summary>
+                <div class="split-button-menu-panel" role="menu">
+                    {% for pid, pname in htr_pipelines %}
+                    <button type="button" role="menuitemradio" aria-checked="{% if pid == htr_pipeline %}true{% else %}false{% endif %}" data-recog-option="{{ pid }}" data-recog-label="{{ pname }}">{{ pname }}</button>
+                    {% endfor %}
+                </div>
+            </details>
+        </form>
+
+        <form class="split-button" data-split-button="vision"
+              hx-post="{% url 'create_ocr_request' selected_region.id %}" hx-target="#inspector-versions" hx-swap="outerHTML" hx-disabled-elt="button">
+            {% csrf_token %}
+            <input type="hidden" name="provider" value="{{ vision_provider }}">
+            <input type="hidden" name="model" value="">
+            <button type="submit" class="split-button-main">
+                <span class="split-button-label">{% trans "Run Vision" %}</span>
+                <span class="split-button-model" data-recog-model>{% for provider, label, model in vision_models %}{% if provider == vision_provider %}{{ label }}{% endif %}{% endfor %}</span>
+            </button>
+            <details class="split-button-menu">
+                <summary aria-label="{% trans 'Choose vision model' %}">▾</summary>
+                <div class="split-button-menu-panel" role="menu">
+                    {% for provider, label, model in vision_models %}
+                    <button type="button" role="menuitemradio" aria-checked="{% if provider == vision_provider %}true{% else %}false{% endif %}" data-recog-option="{{ provider }}" data-recog-label="{{ label }}" data-recog-model="{{ model }}">{{ label }}</button>
+                    {% endfor %}
+                </div>
+            </details>
+        </form>
+    </div>
+    {% else %}
+    <p class="help-text">{% trans "Recognition is not enabled on this server." %}</p>
+    {% endif %}
+    {% endif %}
+</section>

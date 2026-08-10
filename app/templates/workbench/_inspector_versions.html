@@ -1,0 +1,73 @@
+{% load i18n %}
+<div class="inspector-versions" id="inspector-versions" data-region-id="{{ selected_region.id }}"
+     data-pending="{% if region_versions.any_pending %}true{% else %}false{% endif %}"
+     data-poll-url="{% url 'region_versions_fragment' selected_region.id %}"
+     data-async-kind="region-versions" data-async-state="{% if region_versions.any_pending %}pending{% else %}idle{% endif %}">
+
+    <div class="inspector-section-label">{% trans "Versions / provenance" %}</div>
+
+    <div class="version-current">
+        <div class="version-current-head">
+            <span class="version-dot is-current" aria-hidden="true"></span>
+            <strong>{% trans "Current" %}</strong>
+            <span class="version-current-source">{{ region_versions.current.source_label }}</span>
+            {% if region_versions.current.updated_at %}<span class="version-current-time">{{ region_versions.current.updated_at|timesince }}</span>{% endif %}
+        </div>
+        <pre class="version-current-text">{{ region_versions.current.text|default:_('No text was extracted for this region.') }}</pre>
+    </div>
+
+    <ul class="version-rail" role="list">
+        {% for entry in region_versions.entries %}
+        <li class="version-item kind-{{ entry.kind }}{% if entry.accepted %} is-accepted{% endif %}{% if entry.state == 'queued' or entry.state == 'processing' %} is-pending{% endif %}{% if not entry.selectable %} is-disabled{% endif %}"
+            data-version-id="{{ entry.id }}" data-version-kind="{{ entry.kind }}"
+            data-accept-url="{{ entry.accept_url }}" data-detail-url="{{ entry.detail_url }}">
+            <button type="button" class="version-select"{% if not entry.selectable %} disabled{% endif %} data-version-select
+                    aria-label="{{ entry.label }}{% if entry.sublabel %} {{ entry.sublabel }}{% endif %}">
+                <span class="version-rail-main">
+                    <span class="version-dot kind-{{ entry.kind }}{% if entry.accepted %} is-current{% endif %}" aria-hidden="true"></span>
+                    {{ entry.label }}{% if entry.sublabel %} · {{ entry.sublabel }}{% endif %}
+                </span>
+                <span class="version-rail-meta">
+                    {% if entry.state == 'queued' %}{% trans "queued" %}{% elif entry.state == 'processing' %}{% trans "running…" %}{% elif entry.state == 'failed' %}{% trans "failed" %}{% elif entry.status == 'reverted' %}{% trans "reverted" %}{% endif %}
+                    {% if entry.created_by %} · {{ entry.created_by }}{% endif %}
+                    {% if entry.created_at %} · {{ entry.created_at|timesince }}{% endif %}
+                </span>
+            </button>
+            {% if entry.accepted %}<span class="version-badge">{% trans "current" %}</span>{% endif %}
+            {% if entry.kind == 'htr' and entry.selectable %}
+            <button type="button" class="version-lines" data-version-lines aria-label="{% trans 'Show HTR lines over the page' %}">{% trans "Lines" %}</button>
+            {% endif %}
+            <pre class="version-text" hidden>{{ entry.text }}</pre>
+        </li>
+        {% endfor %}
+    </ul>
+
+    <div class="version-compare" id="version-compare" hidden role="region" aria-label="{% trans 'Candidate comparison' %}">
+        <div class="version-compare-head">
+            <strong id="version-compare-title"></strong>
+            <button type="button" class="btn btn-sm btn-ghost" data-version-compare-close aria-label="{% trans 'Close comparison' %}">✕</button>
+        </div>
+        <div class="version-compare-body" id="version-compare-body"></div>
+        <div class="version-compare-actions">
+            {% if can_edit_document %}<button type="button" class="btn btn-sm btn-primary" id="version-compare-accept" hidden>{% trans "Use transcription" %}</button>{% endif %}
+        </div>
+    </div>
+
+    {% if region_versions.activity %}
+    <details class="version-activity">
+        <summary>{% trans "Provenance details" %}</summary>
+        <ul class="version-activity-list">
+            {% for act in region_versions.activity %}
+            <li>
+                <span class="activity-label">{{ act.label }}{% if act.detail %}: {{ act.detail }}{% endif %}</span>
+                <span class="activity-meta">
+                    {% if act.created_by %}{{ act.created_by }}{% endif %}
+                    {% if act.created_at %} · {{ act.created_at|timesince }}{% endif %}
+                    {% if act.status == 'reverted' %} · {% trans "reverted" %}{% if act.reverted_by %} {% trans "by" %} {{ act.reverted_by }}{% endif %}{% endif %}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% endif %}
+</div>

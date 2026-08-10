@@ -3,207 +3,100 @@
 {% block title %}{{ document.filename }}{% endblock %}
 
 {% block content %}
-<div class="workspace" data-document-id="{{ document.id }}" data-ui-id="document-workspace">
+<div class="workspace-shell" id="workspace-shell"
+     data-document-id="{{ document.id }}"
+     data-revision-id="{{ workspace_revision_id }}"
+     data-source-id="{{ workspace_document_id }}"
+     data-page-id="{{ selected_page.id|default:'' }}"
+     data-page-number="{{ selected_page.page_number|default:'' }}"
+     data-selected-region="{{ selected_region.id|default:'' }}"
+     data-inspector-url="{{ region_inspector_url }}"
+     data-page-data-url="{{ page_workspace_data_url }}"
+     data-image-url="{{ page_image_url }}"
+     data-ui-id="document-workspace">
     <header class="workspace-header">
-        <div>
+        <div class="workspace-title">
             <p class="eyebrow">{% trans "Document workspace" %}</p>
             <h1>{{ document.filename }}</h1>
-            <p class="page-intro">
-                {% trans "Inspect the original scan and the structure detected by the processor." %}
-                <span class="workspace-meta">{{ document.page_count }} {% trans "pages" %} · {{ document.collection.name }}</span>
-            </p>
+            <p class="workspace-meta">{{ document.page_count }} {% trans "pages" %} · {{ document.collection.name }}</p>
         </div>
-        {% if thread_id %}<a href="{% url 'chat_thread' thread_id %}" class="btn btn-secondary">← {% trans "Return to conversation" %}</a>{% else %}<a href="{% url 'collection_detail' document.collection.id %}" class="btn btn-secondary">{% trans "Back to Project" %}</a>{% endif %}
-        <details class="export-menu">
-            <summary class="btn btn-secondary" aria-label="{% trans 'Export document' %}">{% trans "Export" %}</summary>
-            <div class="export-menu-items">
-                <a href="{% url 'export_revision' workspace_revision_id %}?format=md">{% trans "Markdown (.md)" %}</a>
-                <a href="{% url 'export_revision' workspace_revision_id %}?format=txt">{% trans "Plain text (.txt)" %}</a>
-            </div>
-        </details>
+        <nav class="workspace-actions" aria-label="{% trans 'Workspace actions' %}">
+            {% if thread_id %}<a href="{% url 'chat_thread' thread_id %}" class="btn btn-secondary btn-sm">← {% trans "Conversation" %}</a>{% else %}<a href="{% url 'collection_detail' document.collection.id %}" class="btn btn-secondary btn-sm">{% trans "Project" %}</a>{% endif %}
+            <details class="export-menu">
+                <summary class="btn btn-secondary btn-sm" aria-label="{% trans 'Export document' %}">{% trans "Export" %}</summary>
+                <div class="export-menu-items">
+                    <a href="{% url 'export_revision' workspace_revision_id %}?format=md">{% trans "Markdown (.md)" %}</a>
+                    <a href="{% url 'export_revision' workspace_revision_id %}?format=txt">{% trans "Plain text (.txt)" %}</a>
+                </div>
+            </details>
+        </nav>
     </header>
 
-    <div class="workspace-grid">
-        <aside class="workspace-pages" aria-label="{% trans 'Document pages' %}" data-ui-id="page-navigator">
-            <div class="workspace-panel-heading">
+    <div class="workspace-stage" id="workspace-stage">
+        {% comment %} Page navigator — collapsible rail, preference in localStorage. {% endcomment %}
+        <aside class="page-navigator" id="page-navigator" aria-label="{% trans 'Document pages' %}" data-ui-id="page-navigator">
+            <div class="page-navigator-head">
                 <h2>{% trans "Pages" %}</h2>
-                <span>{{ pages|length }}</span>
+                <button type="button" class="icon-btn page-navigator-collapse" data-action="collapse-pages"
+                        aria-label="{% trans 'Collapse page list' %}" title="{% trans 'Collapse page list' %}">«</button>
             </div>
-            <nav class="page-list">
+            <nav class="page-list" id="page-list">
                 {% for item in pages %}
-                <a class="page-list-item{% if item.id == selected_page.id %} is-selected{% endif %}"
-                   href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ item.page_number }}"
-                   aria-current="{% if item.id == selected_page.id %}page{% endif %}">
+                <button type="button" class="page-list-item{% if item.id == selected_page.id %} is-selected{% endif %}"
+                        data-page-id="{{ item.id }}" data-page-number="{{ item.page_number }}"
+                        aria-current="{% if item.id == selected_page.id %}page{% endif %}">
                     <span class="page-number">{{ item.page_number }}</span>
                     {% if item.image_path %}<img src="{% url 'page_image' item.id %}" alt="" loading="lazy">{% endif %}
-                    <span>{% trans "Page" %} {{ item.page_number }}</span>
-                </a>
+                </button>
                 {% empty %}<p class="empty-state">{% trans "No pages were imported." %}</p>{% endfor %}
             </nav>
         </aside>
+        <button type="button" class="page-navigator-opener" id="page-navigator-opener" data-action="expand-pages" hidden
+                aria-label="{% trans 'Show page list' %}" title="{% trans 'Show page list' %}">»</button>
 
-        <section class="workspace-scan" aria-label="{% trans 'Original page scan' %}" data-ui-id="scan-viewer">
-            <div class="workspace-panel-heading">
-                <h2>{% trans "Original scan" %}</h2>
-                {% if selected_page %}
-                <div class="scan-navigation">
-                    {% if previous_page %}<a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ previous_page.page_number }}" aria-label="{% trans 'Previous page' %}">←</a>{% endif %}
-                    <span>{% trans "Page" %} {{ selected_page.page_number }}</span>
-                    {% if next_page %}<a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ next_page.page_number }}" aria-label="{% trans 'Next page' %}">→</a>{% endif %}
-                </div>
-                {% endif %}
+        {% comment %} Page viewer — OpenSeadragon. This element is the single authoritative viewport; region-level work never recreates it. {% endcomment %}
+        <section class="viewer-pane" aria-label="{% trans 'Page viewer' %}" data-ui-id="scan-viewer">
+            <div class="viewer-toolbar" id="viewer-toolbar" role="toolbar" aria-label="{% trans 'Viewer controls' %}">
+                <span class="viewer-page-indicator" id="viewer-page-indicator">{% if selected_page %}{% trans "Page" %} {{ selected_page.page_number }}{% endif %}</span>
+                <div class="viewer-toolbar-spacer"></div>
+                <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="zoom-out" aria-label="{% trans 'Zoom out' %}">−</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="zoom-in" aria-label="{% trans 'Zoom in' %}">+</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="fit-width">{% trans "Fit width" %}</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="fit-page">{% trans "Fit page" %}</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="focus-region" disabled>{% trans "Focus region" %}</button>
             </div>
-            {% if selected_page and selected_page.image_path %}
-            <div class="scan-toolbar" aria-label="{% trans 'Scan controls' %}">
-                <button type="button" class="btn btn-sm btn-secondary" data-zoom-out aria-label="{% trans 'Zoom out' %}">−</button>
-                <span data-zoom-value>100%</span>
-                <button type="button" class="btn btn-sm btn-secondary" data-zoom-in aria-label="{% trans 'Zoom in' %}">+</button>
-                <button type="button" class="btn btn-sm btn-secondary" data-zoom-fit>{% trans "Fit" %}</button>
+            <div class="viewer-host" id="viewer-host">
+                <div class="viewer-empty" id="viewer-empty" hidden>{% trans "No page image is available for this page." %}</div>
             </div>
-            <div class="scan-viewport" id="scan-viewport">
-                <div class="scan-stage" id="scan-stage" data-zoom="1">
-                    <img id="page-image" src="{% url 'page_image' selected_page.id %}" alt="{% trans 'Original document page' %}">
-                    <svg class="region-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="{% trans 'Detected regions' %}">
-                        <g data-layer="regions" aria-hidden="true">
-                        {% for region in page_regions %}
-                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" class="region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}">
-                            <rect class="region-box region-{{ region.display_region_type }}{% if region.display_is_suppressed %} is-suppressed{% endif %}{% if region.id == selected_region.id %} is-selected{% endif %}"
-                                  x="{{ region.left|unlocalize }}" y="{{ region.top|unlocalize }}" width="{{ region.overlay_width|floatformat:'6u' }}" height="{{ region.overlay_height|floatformat:'6u' }}"
-                                  data-region-id="{{ region.id }}" role="button" tabindex="0">
-                                <title>{{ region.display_region_type_label }}{% if region.display_is_suppressed %} · {% trans "suppressed" %}{% endif %}</title>
-                            </rect>
-                        </a>
-                        {% endfor %}
-                        </g>
-                        <g data-layer="htr-lines" aria-label="{% trans 'Handwriting recognition lines' %}" hidden></g>
-                    </svg>
-                    <div class="region-hit-layer" aria-label="{% trans 'Select detected region' %}">
-                        {% for region in page_regions %}
-                        <a href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}&region={{ region.id }}" onclick="window.location.assign(this.getAttribute('href')); return false;" class="region-hit region-link{% if region.display_is_suppressed %} is-suppressed{% endif %}" data-region-id="{{ region.id }}" data-region-type="{{ region.display_region_type }}" data-suppressed="{{ region.display_is_suppressed|yesno:'true,false' }}"
-                           style="left:{{ region.overlay_left_percent|floatformat:'4u' }}%;top:{{ region.overlay_top_percent|floatformat:'4u' }}%;width:{{ region.overlay_width_percent|floatformat:'4u' }}%;height:{{ region.overlay_height_percent|floatformat:'4u' }}%;"
-                           aria-label="{{ region.display_region_type_label }}">{{ region.display_region_type_label }}</a>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-            <div class="region-filters" aria-label="{% trans 'Region filters' %}">
-                <span class="filter-label">{% trans "Show" %}</span>
-                <button type="button" class="filter-button is-active" data-region-filter="all">{% trans "All" %} <span data-filter-count="all"></span></button>
-                <button type="button" class="filter-button" data-show-suppressed="false">{% trans "Show suppressed" %}</button>
-                {% for value, label in region_types %}<button type="button" class="filter-button" data-region-filter="{{ value }}">{{ label }} <span data-filter-count="{{ value }}"></span></button>{% endfor %}
-            </div>
-            <div class="scan-legend"><span class="legend-swatch"></span>{% trans "Detected structure" %} · {% trans "click a region to inspect it" %}</div>
-            {% else %}
-            <div class="empty-state scan-empty">{% trans "No page image is available for this page." %}</div>
-            {% endif %}
+            <div class="viewer-legend"><span class="legend-swatch"></span>{% trans "Detected structure" %} · {% trans "click a region to inspect it" %}</div>
         </section>
 
-        <aside class="workspace-content" aria-label="{% trans 'Extracted content' %}" data-ui-id="read-panel">
-            <div class="workspace-panel-heading">
-                <h2>{% trans "Extracted content" %}</h2>
-                <span>{% trans "Read-only" %}</span>
-            </div>
+        {% comment %} Draggable vertical separator between viewer and inspector. {% endcomment %}
+        <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="{% trans 'Resize inspector' %}" tabindex="0"></div>
+
+        {% comment %} Region inspector — independently reloadable. Selecting/acting on a region swaps #region-inspector, never the viewer. {% endcomment %}
+        <aside class="region-inspector" id="region-inspector" aria-label="{% trans 'Region inspector' %}" data-ui-id="read-panel" data-region-id="{{ selected_region.id|default:'' }}">
             {% if selected_region %}
-            <section class="region-detail" id="region-{{ selected_region.id }}" data-selected-region="{{ selected_region.id }}">
-                <div class="region-detail-heading">
-                    <span class="region-type-badge">{{ selected_region.display_region_type_label }}{% if selected_region.display_is_suppressed %} · {% trans "Suppressed" %}{% endif %}</span>
-                    <span>{% trans "Region" %} {{ selected_region.id }}</span>
-                    <a class="btn btn-sm btn-secondary region-detail-back" href="{% url 'document_detail' workspace_document_id %}?revision={{ workspace_revision_id }}&page={{ selected_page.page_number }}">← {% trans "Back to page" %}</a>
+                {% include "workbench/_region_inspector.html" %}
+            {% else %}
+                <div class="inspector-empty">
+                    <div class="inspector-empty-card">
+                        <h2>{% trans "Select a region" %}</h2>
+                        <p>{% trans "Click a detected region in the page to inspect and transcribe it. Drag the page to pan; Ctrl/⌘ + scroll to zoom." %}</p>
+                    </div>
                 </div>
-                <p class="region-text">{{ selected_region.effective_text|default:_('No text was extracted for this region.') }}</p>
-                {% if source_document and can_edit_document %}
-                <section class="htr-panel" data-htr-region="{{ selected_region.id }}" data-htr-enabled="{{ htr_enabled|yesno:'true,false' }}" data-htr-csrf="{{ csrf_token }}" aria-label="{% trans 'Handwriting recognition' %}">
-                    <details>
-                        <summary>{% trans "Handwriting recognition (HTR)" %}</summary>
-                        <p class="help-text">{% trans "Detect handwritten lines in this region and transcribe them. The result is a candidate — it never replaces the current text until you accept it." %}</p>
-                        <div class="htr-status" data-htr-status role="status" aria-live="polite"></div>
-                        <div class="htr-actions">
-                            <label class="htr-pipeline-label" for="htr-pipeline-select">{% trans "Recognizer" %}
-                                <select id="htr-pipeline-select" data-htr-pipeline>
-                                    {% for pid, pname in htr_pipelines %}
-                                        <option value="{{ pid }}"{% if pid == htr_default_pipeline %} selected{% endif %}>{{ pname }}</option>
-                                    {% endfor %}
-                                </select>
-                            </label>
-                            <button class="btn btn-secondary" type="button" data-htr-run disabled>{% trans "Run HTR" %}</button>
-                            <button class="btn btn-secondary" type="button" data-htr-toggle-lines hidden>{% trans "Show HTR lines" %}</button>
-                            <button class="btn btn-secondary" type="button" data-htr-run-again hidden>{% trans "Run again" %}</button>
-                        </div>
-                        <div class="htr-runs" data-htr-runs></div>
-                        <div class="htr-line-detail" data-htr-line-detail hidden></div>
-                    </details>
-                </section>
-                <details class="correction-editor"><summary>{% trans "Suggest a text correction" %}</summary>
-                    <section class="correction-block">
-                        <h4 class="correction-block-title">{% trans "Re-transcribe this region with a visual model" %}</h4>
-                        <p class="help-text">{% trans "Runs a fresh visual OCR over this crop. The result appears as a candidate below and never replaces the current text automatically." %}</p>
-                        <form method="post" action="{% url 'create_ocr_request' selected_region.id %}">
-                            {% csrf_token %}
-                            <label>{% trans "Visual model" %}<select name="provider">
-                                <option value="qwen" selected>{% trans "Qwen vision (chat model)" %}</option>
-                                <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
-                            </select></label>
-                            <button class="btn btn-secondary" type="submit">{% trans "Re-run visual OCR" %}</button>
-                        </form>
-                    </section>
-                    <section class="correction-block">
-                        <h4 class="correction-block-title">{% trans "Manual correction" %}</h4>
-                        <form method="post" action="{% url 'correct_region_text' selected_region.id %}">
-                            {% csrf_token %}
-                            <label>{% trans "Replacement text" %}<textarea name="replacement_text" required>{{ selected_region.effective_text }}</textarea></label>
-                            <input type="hidden" name="expected_current_text" value="{{ selected_region.effective_text }}">
-                            <label>{% trans "Reason (optional)" %}<input name="reason"></label>
-                            <button class="btn btn-primary" type="submit">{% trans "Save correction" %}</button>
-                        </form>
-                        <form method="post" action="{% url 'correct_region' selected_region.id %}">
-                            {% csrf_token %}<input type="hidden" name="operation" value="type"><input type="hidden" name="expected_current_value" value="{{ selected_region.effective_region_type }}">
-                            <label>{% trans "Region type" %}<select name="region_type">{% for value, label in region_types %}<option value="{{ value }}"{% if value == selected_region.effective_region_type %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-                            <button class="btn btn-secondary" type="submit">{% trans "Change type" %}</button>
-                        </form>
-                        <form method="post" action="{% url 'correct_region' selected_region.id %}">
-                            {% csrf_token %}<input type="hidden" name="operation" value="suppress"><input type="hidden" name="expected_current_value" value="{% if selected_region.is_suppressed %}true{% else %}false{% endif %}">
-                            {% if not selected_region.display_is_suppressed %}<button class="btn btn-secondary" type="submit">{% trans "Suppress region" %}</button>{% endif %}
-                        </form>
-                    </section>
-                    {% if selected_region.display_is_suppressed %}
-                    {% if selected_region.suppression_correction %}<form method="post" action="{% url 'revert_region_correction' selected_region.suppression_correction.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-secondary" type="submit">{% trans "Restore region" %}</button></form>{% endif %}
-                    {% endif %}
-                </details>
-                {% endif %}
-                {% if visual_ocr_requests %}{% include "workbench/_ocr_history_fragment.html" with ocr_candidates=visual_ocr_requests ocr_kind="region" ocr_title=_("Visual OCR candidates") fragment_url=region_ocr_fragment_url any_pending=region_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
-                {% if selected_region.corrections.all %}<details class="correction-history"><summary>{% trans "Correction history" %}</summary>
-                    {% for correction in selected_region.corrections.all %}<div class="history-item"><span>{{ correction.get_operation_display }} · {{ correction.created_at|date:"SHORT_DATETIME_FORMAT" }} · {{ correction.get_status_display }}</span>{% if can_edit_document and correction.status == "active" %}<form method="post" action="{% url 'revert_region_correction' correction.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-secondary" type="submit">{% trans "Undo" %}</button></form>{% endif %}</div>{% empty %}<p class="empty-state">{% trans "No corrections yet." %}</p>{% endfor %}
-                </details>{% endif %}
-                <dl class="technical-summary">
-                    <div><dt>{% trans "Page" %}</dt><dd>{{ selected_region.page_number }}</dd></div>
-                    {% if selected_region.confidence %}<div><dt>{% trans "Confidence" %}</dt><dd>{{ selected_region.confidence|floatformat:2 }}</dd></div>{% endif %}
-                    <div><dt>{% trans "Processor" %}</dt><dd>{{ selected_region.job.processor|default:_('Document processor') }}</dd></div>
-                </dl>
-                <details><summary>{% trans "Technical details" %}</summary>
-                    <dl class="technical-details">
-                        <div><dt>{% trans "Processing job" %}</dt><dd>#{{ selected_region.job_id }}</dd></div>
-                        <div><dt>{% trans "Original reference" %}</dt><dd>{{ selected_region.metadata.external_ref|default:"—" }}</dd></div>
-                        <div><dt>{% trans "Coordinates" %}</dt><dd>{{ selected_region.left|floatformat:3 }}, {{ selected_region.top|floatformat:3 }} → {{ selected_region.right|floatformat:3 }}, {{ selected_region.bottom|floatformat:3 }}</dd></div>
-                    </dl>
-                </details>
-            </section>
             {% endif %}
-            <section class="page-text" id="page-text">
-                <h3>{% trans "Full page text" %}</h3>
-                {% if source_document and can_edit_document and selected_page %}<form method="post" action="{% url 'create_page_ocr_request' selected_page.id %}">{% csrf_token %}<label>{% trans "Visual model" %}<select name="provider">
-                    <option value="qwen" selected>{% trans "Qwen vision (chat model)" %}</option>
-                    <option value="paddleocr-vl">{% trans "PaddleOCR-VL" %}</option>
-                </select></label><button class="btn btn-secondary" type="submit">{% trans "Re-run full page with visual OCR" %}</button></form>{% endif %}
-                {% if page_text %}<pre>{{ page_text }}</pre>{% else %}<p class="empty-state">{% trans "No page text was imported." %}</p>{% endif %}
-                {% if page_ocr_requests %}{% include "workbench/_ocr_history_fragment.html" with ocr_candidates=page_ocr_requests ocr_kind="page" ocr_title=_("Page OCR candidates") fragment_url=page_ocr_fragment_url any_pending=page_ocr_any_pending can_edit_document=can_edit_document %}{% endif %}
-            </section>
-            {% if tables %}<section class="page-tables"><h3>{% trans "Tables on this page" %}</h3>{% for table in tables %}<details class="table-result"><summary>{{ table.stable_table_id }}</summary>{% with extraction=table.extractions.first %}{% if extraction and extraction.safe_html %}<div class="table-preview">{{ extraction.safe_html|safe }}</div>{% else %}<p class="empty-state">{% trans "No readable table extraction is available." %}</p>{% endif %}{% endwith %}</details>{% endfor %}</section>{% endif %}
         </aside>
     </div>
+
+    {# Region overlay data for the OpenSeadragon viewer (normalized page-relative bounds). #}
+    <script type="application/json" id="page-regions-data">{{ page_regions_json|safe }}</script>
+    {# HTR line overlays toggle against the existing viewer. #}
+    <script type="application/json" id="workspace-config-data">{"htrEnabled": {{ htr_enabled|yesno:"true,false" }}}</script>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
-<script type="module" src="{% static 'js/htr-workspace.js' %}"></script>
-<script type="module" src="{% static 'js/document-workspace.js' %}"></script>
+<script nonce src="{% static 'vendor/openseadragon/openseadragon.min.js' %}"></script>
+<script type="module" src="{% static 'js/workspace/workspace.js' %}"></script>
 {% endblock %}

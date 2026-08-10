@@ -31,6 +31,18 @@ class UserPreferences(models.Model):
         default=False,
         help_text="Force the user to set a new password before any other page.",
     )
+    # Last-used recognition identifiers. These follow the user across browsers
+    # (unlike screen-specific layout choices, which live in the browser) and are
+    # only recorded when the user actually starts a run. Blank = use the server
+    # default. Stored as free text so stale values never break the workspace.
+    last_htr_pipeline = models.CharField(
+        max_length=80, blank=True, default="",
+        help_text="Last-used HTR pipeline id for the document workspace.",
+    )
+    last_vision_provider = models.CharField(
+        max_length=200, blank=True, default="",
+        help_text="Last-used visual OCR provider/model for the document workspace.",
+    )
 
     class Meta:
         verbose_name = "User preferences"
@@ -1065,6 +1077,11 @@ class RegionCorrection(models.Model):
     status = models.CharField(max_length=20, choices=STATUSES, default="active")
     created_at = models.DateTimeField(auto_now_add=True)
     reverted_at = models.DateTimeField(null=True, blank=True)
+    reverted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="reverted_region_corrections",
+        help_text="Who reverted this correction. Null for historical rows.",
+    )
 
     class Meta:
         ordering = ["-created_at", "-id"]

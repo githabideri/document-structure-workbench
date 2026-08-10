@@ -456,6 +456,26 @@ class CorrectionService:
             raise CorrectionError("The correction is not valid.") from exc
         return correction
 
+    @staticmethod
+    def revert(*, correction, user=None, policy=None):
+        """Mark an active correction reverted and attribute it to ``user``.
+
+        Existing rows that predate ``reverted_by`` stay null; only new reverts
+        record the acting user. Reverting an already-reverted row is a no-op so
+        the operation remains idempotent.
+        """
+        from .policy import ProjectAccessPolicy
+        policy = policy or ProjectAccessPolicy(user=user)
+        if not policy.can_edit(correction.document.collection):
+            raise CorrectionError("You do not have permission to edit this project.")
+        if correction.status == "active":
+            with transaction.atomic():
+                correction.status = "reverted"
+                correction.reverted_at = timezone.now()
+                correction.reverted_by = user
+                correction.save(update_fields=["status", "reverted_at", "reverted_by"])
+        return correction
+
 
 class OcrService:
     """Shared lifecycle boundary for visual OCR candidates."""

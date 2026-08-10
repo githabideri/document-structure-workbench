@@ -755,6 +755,180 @@ def page_text_to_plain(text):
     return html.unescape(text)
 
 
+# --- Document workspace: region adapter, inspector partials, deep-link state ---
+#
+# The workspace is a stable shell (collapsible page navigator, OpenSeadragon
+# viewer, resizable inspector). Region-level work must never recreate the
+# viewer or reload the page: selecting/acting on a region only swaps the
+# inspector partials. The helpers below build the region overlay data the
+# viewer consumes and render the independently reloadable inspector.
+
+def _region_adapter(region, selected_region_id=None):
+    """Frontend representation of a detected region for the viewer overlay layer.
+
+    Intentionally decoupled from the Django model: ``bbox`` uses normalized
+    page-relative coordinates that map directly onto OpenSeadragon overlays, so
+    Annotorious (or a similar editor) could later consume/extend this shape
+    without a backend model rewrite.
+    """
+    return {
+        "id": region.pk,
+        "bbox": {
+            "left": region.left,
+            "top": region.top,
+            "width": region.right - region.left,
+            "height": region.bottom - region.top,
+        },
+        "type": region.effective_region_type,
+        "original_type": region.region_type,
+        "type_label": str(dict(PageRegion.REGION_TYPES).get(
+            region.effective_region_type, region.effective_region_type,
+        )),
+        "text": region.effective_text,
+        "selected": selected_region_id is not None and region.pk == selected_region_id,
+        "suppressed": region.is_suppressed,
+    }
+
+
+def _decorate_region_display(regions):
+    """Attach the display_* attributes the templates read, in a single pass."""
+    for region in regions:
+        region.display_region_type = region.effective_region_type
+        region.display_region_type_label = dict(PageRegion.REGION_TYPES).get(
+            region.display_region_type, region.display_region_type,
+        )
+        region.display_is_suppressed = region.is_suppressed
+        region.suppression_correction = region.corrections.filter(
+            operation="suppress", status="active",
+        ).order_by("-created_at", "-id").first()
+
+
+def _workspace_recognition_context(request):
+    from . import recognition
+    return {
+        "htr_enabled": getattr(settings, "DSW_HTR_ENABLED", False) or getattr(settings, "DSW_HTR_FIXTURE_MODE", False),
+        "htr_pipelines": recognition.available_htr_pipelines(),
+        "htr_pipeline": recognition.effective_htr_pipeline(request.user),
+        "vision_models": recognition.available_vision_models(),
+        "vision_provider": recognition.effective_vision_provider(request.user),
+        "default_vision_provider": recognition.default_vision_provider(),
+        "default_htr_pipeline": recognition.default_htr_pipeline(),
+    }
+
+
+def _inspector_context(request, region, can_edit_document=None):
+    from .policy import ProjectAccessPolicy
+    from .provenance import build_region_versions
+    document = region.page.document
+    source = getattr(getattr(document, "processing_job", None), "source_document", None)
+    if can_edit_document is None:
+        can_edit_document = ProjectAccessPolicy(user=request.user).can_edit(document.collection)
+    _decorate_region_display([region])
+    region.active_text_correction = region.corrections.filter(
+        operation="text", status="active",
+    ).order_by("-created_at", "-id").first()
+    ctx = {
+        "selected_region": region,
+        "selected_page": region.page,
+        "region_types": PageRegion.REGION_TYPES,
+        "can_edit_document": can_edit_document,
+        "source_document": source,
+        "workspace_document_id": source.id if source else document.id,
+        "workspace_revision_id": document.id,
+        "region_versions": build_region_versions(region),
+    }
+    ctx.update(_workspace_recognition_context(request))
+    return ctx
+
+
+def _is_htmx(request):
+    return request.headers.get("HX-Request") == "true"
+
+
+def _inspector_response(request, region, scope="full", error=None):
+    """Render the appropriate inspector partial for HTMX, else deep-link redirect.
+
+    ``scope`` selects which partial to swap: ``"full"`` replaces the whole
+    inspector (explicit user actions: accept, revert, type, suppress, selection);
+    ``"versions"`` replaces only the provenance/version rail so the transcription
+    editor and the viewer are untouched (run start, background polling).
+    """
+    if _is_htmx(request):
+        partial = "workbench/_inspector_versions.html" if scope == "versions" else "workbench/_region_inspector.html"
+        ctx = _inspector_context(request, region)
+        if error:
+            ctx["inspector_error"] = error
+        response = render(request, partial, ctx)
+        response.headers["HX-Retarget"] = "#inspector-versions" if scope == "versions" else "#region-inspector"
+        response.headers["HX-Reswap"] = "outerHTML" if scope == "versions" else "innerHTML"
+        return response
+    if error:
+        messages.error(request, error)
+    return _redirect_to_region(request, region)
+
+
+@login_required
+def region_inspector(request, region_id):
+    """Render the full region inspector partial (HTMX target for selection)."""
+    from .policy import ProjectAccessPolicy
+    region = get_object_or_404(
+        PageRegion.objects.select_related("page__document__collection", "job").prefetch_related("corrections", "ocr_requests"),
+        pk=region_id,
+    )
+    if not ProjectAccessPolicy(user=request.user).can_view(region.page.document.collection):
+        raise PermissionDenied
+    return render(request, "workbench/_region_inspector.html", _inspector_context(request, region))
+
+
+@login_required
+def region_versions_fragment(request, region_id):
+    """Render just the provenance/version rail (polling source).
+
+    Polling swaps only this partial so the transcription editor and the viewer
+    never move while a recognition job runs.
+    """
+    from .policy import ProjectAccessPolicy
+    region = get_object_or_404(
+        PageRegion.objects.select_related("page__document__collection").prefetch_related("corrections", "ocr_requests"),
+        pk=region_id,
+    )
+    if not ProjectAccessPolicy(user=request.user).can_view(region.page.document.collection):
+        raise PermissionDenied
+    return render(request, "workbench/_inspector_versions.html", _inspector_context(request, region))
+
+
+@login_required
+def page_workspace_data(request, page_id):
+    """JSON for client-side page switching (keeps the viewer shell stable).
+
+    Switching *page* may load another page image; switching *region* never does.
+    This endpoint lets the client open the new page image in the existing
+    OpenSeadragon instance and rebuild overlays without a full reload.
+    """
+    from .policy import ProjectAccessPolicy
+    page = get_object_or_404(Page.objects.select_related("document__collection", "document__processing_job__source_document"), pk=page_id)
+    if not ProjectAccessPolicy(user=request.user).can_view(page.document.collection):
+        return JsonResponse({"error": "permission_denied"}, status=403)
+    regions = list(page.regions.all())
+    _decorate_region_display(regions)
+    pages = list(page.document.pages.all())
+    index = next((i for i, p in enumerate(pages) if p.pk == page.pk), -1)
+    prev_page = pages[index - 1] if index > 0 else None
+    next_page = pages[index + 1] if 0 <= index < len(pages) - 1 else None
+    source = getattr(getattr(page.document, "processing_job", None), "source_document", None)
+    return JsonResponse({
+        "page_id": page.pk,
+        "page_number": page.page_number,
+        "revision_id": page.document_id,
+        "source_document_id": source.pk if source else page.document_id,
+        "image_url": reverse("page_image", args=[page.pk]) if page.image_path else None,
+        "has_image": bool(page.image_path),
+        "regions": [_region_adapter(r) for r in regions],
+        "prev_page_id": prev_page.pk if prev_page else None,
+        "next_page_id": next_page.pk if next_page else None,
+    })
+
+
 @login_required
 def document_detail(request, document_id):
     from .policy import ProjectAccessPolicy
@@ -803,21 +977,7 @@ def document_detail(request, document_id):
         .select_related("page", "job")
         .prefetch_related("corrections", "ocr_requests")
     )
-    for region in regions:
-        region.display_region_type = region.effective_region_type
-        region.display_region_type_label = dict(PageRegion.REGION_TYPES).get(
-            region.display_region_type, region.display_region_type,
-        )
-        region.display_is_suppressed = region.is_suppressed
-        region.suppression_correction = region.corrections.filter(
-            operation="suppress", status="active",
-        ).order_by("-created_at", "-id").first()
-        region.overlay_width = region.right - region.left
-        region.overlay_height = region.bottom - region.top
-        region.overlay_left_percent = region.left * 100
-        region.overlay_top_percent = region.top * 100
-        region.overlay_width_percent = region.overlay_width * 100
-        region.overlay_height_percent = region.overlay_height * 100
+    _decorate_region_display(regions)
     page_regions = [region for region in regions if page and region.page_id == page.id]
     selected_region = None
     region_id = request.GET.get("region")
@@ -830,16 +990,11 @@ def document_detail(request, document_id):
         except (TypeError, ValueError):
             selected_region = None
 
-    page_text = ""
-    page_ocr_requests = list(OcrRequest.objects.filter(page=page).exclude(provider="htr").order_by("-created_at", "-id")[:10]) if page else []
     processing_job = getattr(document, "processing_job", None)
-    if processing_job:
-        artifact = ProcessingArtifact.objects.filter(
-            job=processing_job, artifact_type="page_text", page_number=page.page_number if page else None,
-        ).first()
-        if artifact:
-            page_text = artifact.data.get("text", "") if isinstance(artifact.data, dict) else ""
-        page_text = page_text_to_plain(page_text)
+
+    # Region overlay data for the OpenSeadragon viewer. The viewer consumes
+    # normalized bounds and never needs to reload for region-level actions.
+    page_regions_json = json.dumps([_region_adapter(r, region_id) for r in page_regions])
 
     tables = document.tables.filter(page=page).select_related("page").prefetch_related("extractions") if page else []
     for table in tables:
@@ -853,11 +1008,7 @@ def document_detail(request, document_id):
                     strip=True,
                 )
 
-    visual_ocr_requests = (
-        list(selected_region.ocr_requests.exclude(provider="htr").order_by("-created_at", "-id")[:10])
-        if selected_region else []
-    )
-    return render(request, "workbench/document_detail.html", {
+    context = {
         "document": document,
         "tables": tables,
         "pages": pages,
@@ -865,67 +1016,90 @@ def document_detail(request, document_id):
         "previous_page": previous_page,
         "next_page": next_page,
         "page_regions": page_regions,
+        "page_regions_json": page_regions_json,
         "region_types": PageRegion.REGION_TYPES,
         "selected_region": selected_region,
-        "page_text": page_text,
-        "page_ocr_requests": page_ocr_requests,
-        "visual_ocr_requests": visual_ocr_requests,
-        "region_ocr_fragment_url": (
-            reverse("ocr_history_fragment", args=[source_document.id]) + f"?region={selected_region.id}"
-            if source_document and selected_region else ""
-        ),
-        "page_ocr_fragment_url": (
-            reverse("ocr_history_fragment", args=[source_document.id]) + f"?page={page.id}"
-            if source_document and page else ""
-        ),
-        "region_ocr_any_pending": any(c.state in {"queued", "processing"} for c in visual_ocr_requests),
-        "page_ocr_any_pending": any(c.state in {"queued", "processing"} for c in page_ocr_requests),
         "processing_job": processing_job,
         "source_document": source_document,
         "workspace_document_id": source_document.id if source_document else document.id,
         "workspace_revision_id": document.id,
         "can_edit_document": can_edit_document,
         "thread_id": request.GET.get("thread", ""),
-        "htr_enabled": getattr(settings, "DSW_HTR_ENABLED", False) or getattr(settings, "DSW_HTR_FIXTURE_MODE", False),
-        "htr_default_pipeline": getattr(settings, "DSW_HTR_DEFAULT_PIPELINE", "htrflow-trocr-kurrent"),
-        "htr_pipelines": [
-            ("htrflow-trocr-kurrent", "TrOCR · Kurrent (19th-c. German)"),
-            ("htrflow-trocr-prototype", "TrOCR · prototype (generic)"),
-        ],
-    })
+        "page_image_url": reverse("page_image", args=[page.id]) if page and page.image_path else "",
+        "region_inspector_url": reverse("region_inspector", args=[selected_region.id]) if selected_region else "",
+        "page_workspace_data_url": reverse("page_workspace_data", args=[page.id]) if page else "",
+    }
+    context.update(_workspace_recognition_context(request))
+    if selected_region:
+        context.update(_inspector_context(request, selected_region, can_edit_document=can_edit_document))
+    return render(request, "workbench/document_detail.html", context)
 
 
 @login_required
 @require_POST
 def correct_region_text(request, region_id):
-    """Apply one explicit, reversible text correction to a region."""
+    """Apply one explicit, reversible text correction to a region.
+
+    The workspace editor posts JSON so a conflict never clobbers the textarea:
+    on a state conflict we return 409 and the editor keeps the user's text. For
+    non-JSON callers (legacy links) we fall back to messages + redirect.
+    """
     from .services import CorrectionError, CorrectionService
+    from .provenance import build_region_versions
     region = get_object_or_404(
-        PageRegion.objects.select_related("page__document__collection", "source_document"),
+        PageRegion.objects.select_related("page__document__collection", "source_document").prefetch_related("corrections", "ocr_requests"),
         pk=region_id,
     )
-    document = region.page.document
-    expected = request.POST.get("expected_current_text", "")
-    replacement = request.POST.get("replacement_text", "")
-    if region.effective_text != expected:
-        messages.error(request, _("This region changed since it was inspected. Reload it before editing."))
-    elif not replacement.strip():
-        messages.error(request, _("Replacement text cannot be empty."))
+    wants_json = "application/json" in request.headers.get("Accept", "")
+    body = {}
+    if wants_json:
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": {"code": "invalid_json", "message": "Invalid JSON body."}}, status=400)
+        expected = body.get("expected_current_text", "")
+        replacement = body.get("replacement_text", "")
+        reason = str(body.get("reason", "")).strip()
     else:
+        expected = request.POST.get("expected_current_text", "")
+        replacement = request.POST.get("replacement_text", "")
+        reason = request.POST.get("reason", "").strip()
+
+    error = None
+    if region.effective_text != expected:
+        error = _("This region changed since it was inspected. Reload it before editing.")
+    elif not replacement.strip():
+        error = _("Replacement text cannot be empty.")
+    if error is None:
         try:
             CorrectionService.apply(
                 region=region, user=request.user, operation="text",
                 before={"text": region.effective_text}, after={"text": replacement},
-                reason=request.POST.get("reason", "").strip(),
+                reason=reason,
             )
-        except CorrectionError as error:
-            messages.error(request, _(str(error)))
-        else:
-            messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
-    source = getattr(getattr(document, "processing_job", None), "source_document", None)
-    target = source.id if source else document.id
-    query = f"?revision={document.id}&page={region.page_number}&region={region.id}" if source else f"?page={region.page_number}&region={region.id}"
-    return redirect(f"{reverse('document_detail', args=[target])}{query}")
+        except CorrectionError as exc:
+            error = _(str(exc))
+    if error is not None:
+        if wants_json:
+            code = "region_state_conflict" if "changed" in str(error) else "invalid_request"
+            return JsonResponse({"error": {"code": code, "message": str(error)}}, status=409 if code == "region_state_conflict" else 400)
+        messages.error(request, error)
+        return _redirect_to_region(request, region)
+
+    if wants_json:
+        # Refresh the versions rail in the same response so a new manual
+        # version appears without a second request or a viewer reload.
+        versions_ctx = _inspector_context(request, region)
+        from django.template.loader import render_to_string
+        versions_html = render_to_string("workbench/_inspector_versions.html", versions_ctx, request=request)
+        return JsonResponse({
+            "ok": True,
+            "region_id": region.pk,
+            "effective_text": region.effective_text,
+            "versions_html": versions_html,
+        })
+    messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
+    return _inspector_response(request, region)
 
 
 @login_required
@@ -933,15 +1107,14 @@ def correct_region_text(request, region_id):
 def correct_region(request, region_id):
     """Apply a typed correction operation to one immutable-revision region."""
     from .services import CorrectionError, CorrectionService
-    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "source_document"), pk=region_id)
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "source_document").prefetch_related("corrections", "ocr_requests"), pk=region_id)
     document = region.page.document
     operation = request.POST.get("operation", "")
     expected = request.POST.get("expected_current_value", "")
     if operation == "type":
         value = request.POST.get("region_type", "")
         if value not in dict(PageRegion.REGION_TYPES):
-            messages.error(request, _("Choose a valid region type."))
-            return _redirect_to_region(request, region)
+            return _inspector_response(request, region, error=_("Choose a valid region type."))
         current = region.effective_region_type
         after, before = {"region_type": value}, {"region_type": current}
     elif operation == "suppress":
@@ -950,26 +1123,22 @@ def correct_region(request, region_id):
     elif operation == "note":
         note = request.POST.get("note", "").strip()
         if not note:
-            messages.error(request, _("A note cannot be empty."))
-            return _redirect_to_region(request, region)
+            return _inspector_response(request, region, error=_("A note cannot be empty."))
         after, before = {"note": note}, {}
         current = ""
     else:
-        messages.error(request, _("Unsupported correction operation."))
-        return _redirect_to_region(request, region)
+        return _inspector_response(request, region, error=_("Unsupported correction operation."))
     if operation in {"type", "suppress"} and expected != current:
-        messages.error(request, _("This region changed since it was inspected. Reload it before editing."))
-        return _redirect_to_region(request, region)
+        return _inspector_response(request, region, error=_("This region changed since it was inspected. Reload it before editing."))
     try:
         CorrectionService.apply(
             region=region, user=request.user, operation=operation,
             before=before, after=after, reason=request.POST.get("reason", "").strip(),
         )
-    except CorrectionError as error:
-        messages.error(request, _(str(error)))
-        return _redirect_to_region(request, region)
+    except CorrectionError as exc:
+        return _inspector_response(request, region, error=_(str(exc)))
     messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
-    return _redirect_to_region(request, region)
+    return _inspector_response(request, region)
 
 
 def _redirect_to_region(request, region):
@@ -1022,22 +1191,24 @@ def create_ocr_request(request, region_id):
     """Queue a visual OCR candidate for one immutable detected region."""
     from .policy import ProjectAccessPolicy
     from .models import PageRegion
-    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "page__document__processing_job__source_document"), pk=region_id)
+    region = get_object_or_404(PageRegion.objects.select_related("page__document__collection", "page__document__processing_job__source_document").prefetch_related("corrections", "ocr_requests"), pk=region_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(region.page.document.collection):
         raise PermissionDenied
     from .services import OcrService
-    provider = (request.POST.get("provider") or getattr(settings, "DSW_OCR_PROVIDER", "qwen")).strip()
+    from . import recognition
+    provider = recognition.effective_vision_provider(request.user, (request.POST.get("provider") or "").strip())
     try:
         OcrService.create(
             page=region.page, region=region, provider=provider,
-            model=(getattr(settings, "DSW_CHAT_MODEL", "") if provider == "qwen" else getattr(settings, "DSW_OCR_MODEL", "")),
+            model=request.POST.get("model", "") or recognition.available_vision_models_dict().get(provider, ""),
             prompt=request.POST.get("prompt", ""), user=request.user,
         )
+        recognition.remember_vision_provider(request.user, provider)
     except (PermissionError, ValueError) as exc:
-        messages.error(request, _(str(exc)))
-        return _redirect_to_region(request, region)
+        return _inspector_response(request, region, scope="versions", error=_(str(exc)))
     messages.success(request, _("Visual OCR candidate queued. This will not change the current text automatically."))
-    return _redirect_to_region(request, region)
+    # Only the version rail swaps so an in-progress transcription edit survives.
+    return _inspector_response(request, region, scope="versions")
 
 
 @login_required
@@ -1076,22 +1247,73 @@ def accept_ocr_request(request, request_id):
         OcrService.accept(item=item, user=request.user)
         messages.success(request, _("Visual OCR text accepted as a reversible correction."))
     except (PermissionError, ValueError) as exc:
-        messages.error(request, _(str(exc)))
-    return _redirect_to_region(request, item.region)
+        return _inspector_response(request, item.region, error=_(str(exc)))
+    return _inspector_response(request, item.region)
+
+
+@login_required
+@require_POST
+def create_region_htr(request, region_id):
+    """Start a region HTR run from the workspace split button (session form).
+
+    Records the chosen pipeline as the user's last-used preference and returns
+    only the version rail so the viewer/editor are untouched while the job runs.
+    """
+    from .policy import ProjectAccessPolicy
+    from . import recognition
+    region = get_object_or_404(
+        PageRegion.objects.select_related("page__document__collection").prefetch_related("corrections", "ocr_requests"),
+        pk=region_id,
+    )
+    if not ProjectAccessPolicy(user=request.user).can_edit(region.page.document.collection):
+        raise PermissionDenied
+    if not (getattr(settings, "DSW_HTR_ENABLED", False) or getattr(settings, "DSW_HTR_FIXTURE_MODE", False)):
+        return _inspector_response(request, region, scope="versions", error=_("HTR is not enabled on this server."))
+    pipeline_id = recognition.effective_htr_pipeline(request.user, (request.POST.get("pipeline_id") or "").strip())
+    try:
+        from .services import HtrService
+        HtrService.create(page=region.page, region=region, pipeline_id=pipeline_id, user=request.user)
+        recognition.remember_htr_pipeline(request.user, pipeline_id)
+    except (PermissionError, ValueError) as exc:
+        return _inspector_response(request, region, scope="versions", error=_(str(exc)))
+    messages.success(request, _("HTR run queued. The result is a candidate until you accept it."))
+    return _inspector_response(request, region, scope="versions")
+
+
+@login_required
+@require_POST
+def accept_region_htr(request, request_id):
+    """Accept an HTR candidate as a reversible region-text correction."""
+    from .policy import ProjectAccessPolicy
+    from .services import CorrectionError, HtrService
+    item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
+    if not ProjectAccessPolicy(user=request.user).can_edit(item.document.collection):
+        raise PermissionDenied
+    try:
+        HtrService.accept(item=item, user=request.user)
+        messages.success(request, _("HTR transcription accepted as a reversible correction."))
+    except (PermissionError, ValueError) as exc:
+        return _inspector_response(request, item.region, error=_(str(exc)))
+    except CorrectionError as exc:
+        return _inspector_response(request, item.region, error=_(str(exc)))
+    return _inspector_response(request, item.region)
 
 
 @login_required
 @require_POST
 def revert_region_correction(request, correction_id):
     from .policy import ProjectAccessPolicy
-    correction = get_object_or_404(RegionCorrection.objects.select_related("document__collection"), pk=correction_id)
+    from .services import CorrectionError, CorrectionService
+    correction = get_object_or_404(RegionCorrection.objects.select_related("document__collection", "region"), pk=correction_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(correction.document.collection):
-        return JsonResponse({"error": "permission_denied"}, status=403)
-    if correction.status == "active":
-        correction.status = "reverted"
-        correction.reverted_at = timezone.now()
-        correction.save(update_fields=["status", "reverted_at"])
-    return redirect(request.POST.get("next") or reverse("document_detail", args=[correction.document_id]))
+        if _is_htmx(request):
+            return JsonResponse({"error": "permission_denied"}, status=403)
+        raise PermissionDenied
+    try:
+        CorrectionService.revert(correction=correction, user=request.user)
+    except CorrectionError as exc:
+        return _inspector_response(request, correction.region, error=_(str(exc)))
+    return _inspector_response(request, correction.region)
 
 
 # --- Reviews ---

@@ -44,14 +44,23 @@ class DocumentDetailOcrFragmentTests(TestCase):
         params.update(extra)
         return self.client.get(reverse("document_detail", args=[self.source.pk]) + "?" + "&".join(f"{k}={v}" for k, v in params.items()))
 
-    def test_detail_renders_region_and_back_link(self):
-        # A pending candidate is present so the OCR-history include executes.
+    def test_detail_renders_workspace_and_region_inspector(self):
+        # A pending candidate is present so the provenance rail executes.
         OcrService.create(page=self.page, region=self.region, provider="qwen", model="m", user=self.user)
         response = self._detail()
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Back to page")
-        self.assertContains(response, f"region-{self.region.pk}")
-        self.assertContains(response, "Visual OCR candidates")
+        # Stable shell + independently reloadable inspector.
+        self.assertContains(response, 'id="workspace-shell"')
+        self.assertContains(response, 'id="region-inspector"')
+        self.assertContains(response, f'data-region-id="{self.region.pk}"')
+        self.assertContains(response, "Transcription")
+        self.assertContains(response, "Versions / provenance")
+        # Region overlay data is embedded for the OpenSeadragon viewer.
+        self.assertContains(response, "page-regions-data")
+        # The pending candidate is surfaced as a version rail entry (not a reload link).
+        self.assertContains(response, "queued")
+        # No legacy full-page region-selection links remain in normal work.
+        self.assertNotContains(response, "Back to page")
 
     def test_fragment_endpoint_returns_candidate_history(self):
         OcrService.create(page=self.page, region=self.region, provider="qwen", model="m", user=self.user)

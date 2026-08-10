@@ -1213,21 +1213,23 @@ class DocumentWorkspaceTest(TestCase):
             "page": 1, "region": self.region.pk,
         })
         self.assertEqual(response.status_code, 200)
+        # Page image is wired into the stable OpenSeadragon shell (not a reload link).
         self.assertContains(response, reverse("page_image", args=[self.page.pk]))
         self.assertContains(response, f'data-region-id="{self.region.pk}"')
         self.assertContains(response, "Archive title")
-        self.assertContains(response, "Full extracted page text.")
         self.assertEqual(response.context["selected_page"], self.page)
         self.assertEqual(response.context["selected_region"], self.region)
 
     def test_workspace_overlay_coordinates_are_ascii_decimal_in_german(self):
+        # Region overlay data is embedded as JSON for OpenSeadragon; coordinates
+        # must stay ASCII decimals regardless of locale (json.dumps uses '.').
         self.client.force_login(self.user)
         with translation.override("de"):
             response = self.client.get(reverse("document_detail", args=[self.document.pk]), {"page": 1})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'x="0.1"')
-        self.assertNotContains(response, 'x="0,1"')
-        self.assertContains(response, "left:10.0000%;")
+        self.assertContains(response, '"left": 0.1')
+        self.assertContains(response, '"top": 0.2')
+        self.assertNotContains(response, '"left": 0,1')
 
     def test_workspace_and_image_are_forbidden_to_unrelated_user(self):
         unrelated = User.objects.create_user(username="workspace-unrelated", password="testpass123")
@@ -1246,10 +1248,11 @@ class DocumentWorkspaceTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["document"], self.document)
         self.assertEqual(response.context["source_document"], self.source)
-        self.assertContains(
-            response,
-            f"/documents/{self.source.pk}/?revision={self.document.pk}&page=1&region={self.region.pk}",
-        )
+        # The shell records source/revision/region so the client reconstructs
+        # deep-link state without a per-region reload.
+        self.assertContains(response, f'data-source-id="{self.source.pk}"')
+        self.assertContains(response, f'data-revision-id="{self.document.pk}"')
+        self.assertContains(response, f'data-selected-region="{self.region.pk}"')
 
     def test_revision_deep_link_cannot_cross_source_documents(self):
         other_source = SourceDocument.objects.create(

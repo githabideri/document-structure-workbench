@@ -99,6 +99,12 @@ class Command(BaseCommand):
             "region_a": regions[0].id,
             "region_b": regions[1].id,
             "region_c": regions[2].id,
+            "active_corrections": RegionCorrection.objects.filter(
+                document__collection=project, status="active",
+            ).count(),
+            "ocr_requests": OcrRequest.objects.filter(
+                document__collection=project,
+            ).count(),
         }
         if options["json"]:
             self.stdout.write(json.dumps(result, sort_keys=True))

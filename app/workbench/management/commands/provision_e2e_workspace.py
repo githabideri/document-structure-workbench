@@ -122,7 +122,7 @@ class Command(BaseCommand):
         if not user.is_active:
             user.is_active = True
             changed = True
-        if password:
+        if password and not user.check_password(password):
             user.set_password(password)
             changed = True
         if changed:

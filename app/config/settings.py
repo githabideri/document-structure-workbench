@@ -79,6 +79,9 @@ DATABASES = {
         "NAME": Path(os.environ.get(
             "DSW_DATABASE_PATH", BASE_DIR / "db.sqlite3"
         )),
+        # SQLite is used by the current deployment; allow short-lived web/
+        # worker writes to serialize without making fixture provisioning flaky.
+        "OPTIONS": {"timeout": int(os.environ.get("DSW_DATABASE_TIMEOUT", "30"))},
     }
 }
 

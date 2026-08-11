@@ -291,7 +291,7 @@ export function createViewer(host, {imageUrl = null, imageLevels = null, regions
   let deepLevel = null; // highest-resolution level index (null for single image)
   const stats = {
     generation: 1,
-    imageLoads: 0,
+    imageLoads: (imageLevels || imageUrl) ? 1 : 0,
     selectionChanges: 0,
     focusChanges: 0,
     stateChanges: 0,
@@ -335,8 +335,18 @@ export function createViewer(host, {imageUrl = null, imageLevels = null, regions
 
   viewer.addHandler("open-failed", () => {
     ready = false;
-    status.set("error");
-    track("error");
+    status.set("error"); track("error");
+  });
+
+  // A single source whose image fails to load surfaces as tile-load failures
+  // (for a plain image source there is exactly one tile). Escalate to error only
+  // while the world is empty (i.e. a genuine first load that produced nothing);
+  // a transient failure while replacing an already-visible image is not fatal.
+  viewer.addHandler("tile-load-failed", () => {
+    if (status.state === "loading" && viewer.world.getItemCount() === 0) {
+      ready = false;
+      status.set("error"); track("error");
+    }
   });
 
   // First real imagery drawn beats any loading state.
@@ -395,6 +405,9 @@ export function createViewer(host, {imageUrl = null, imageLevels = null, regions
       viewer.open(source);
     } else {
       ready = false;
+      // no image: close any previously-visible page so we never show stale
+      // content or float region overlays over the previous scan
+      viewer.close();
       status.set("empty");
       track("empty");
     }
@@ -441,7 +454,7 @@ export function createViewer(host, {imageUrl = null, imageLevels = null, regions
       pendingFocus = focus && selectedId
         ? (regionList.find((r) => String(r.id) === String(selectedId)) || {}).bbox || null
         : null;
-      const levels = imageLevels || (imageUrl ? {fullUrl: imageUrl, fullSize: null} : null);
+      const levels = imageLevels || (imageUrl ? [{url: imageUrl, width: null, height: null}] : null);
       openSource(levels);
     },
     drawHtrLines(lines, crop) { overlay.drawHtrLines(lines, crop); },

@@ -2362,7 +2362,8 @@ def page_image(request, page_id):
 
     resolved = _resolve_artifact_path(page.image_path)
     response = FileResponse(open(resolved, "rb"), content_type="image/png")
-    return cache_control(max_age=3600, s_maxage=0, private=True, immutable=True)(response)
+    response["Cache-Control"] = "private, max-age=3600, immutable"
+    return response
 
 
 @login_required

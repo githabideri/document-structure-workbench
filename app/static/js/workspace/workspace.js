@@ -56,6 +56,7 @@ function initWorkspace(shell) {
 
   const host = document.getElementById("viewer-host");
   const statusEl = document.getElementById("viewer-status");
+  let pagePollTimer = null; // hoisted: used by wirePageInspectorRoot during init
   const viewer = createViewer(host, {
     imageLevels: state.imageLevels || null,
     imageUrl: state.imageUrl || null,
@@ -391,7 +392,6 @@ function initWorkspace(shell) {
   }
 
   // ---- Page pane wiring (split buttons + lightweight pending polling) ----
-  let pagePollTimer = null;
   function wirePageInspectorRoot() {
     clearTimeout(pagePollTimer);
     const pane = document.getElementById("inspector-pane-page");

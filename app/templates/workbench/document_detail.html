@@ -124,7 +124,7 @@
     {# Page dimension metadata (logical Docling vs actual raster) for diagnostics. #}
     <script type="application/json" id="page-meta-data">{{ page_meta_json|default:"null"|safe }}</script>
     {# Region-tab defaults for overlays (e.g. filter). #}
-    <script type="application/json" id="workspace-config-data">{"htrEnabled": {{ htr_enabled|yesno:"true,false" }}, "visionEnabled": {{ vision_enabled|yesno:"true,false" }}}</script>
+    <script type="application/json" id="workspace-config-data">{"htrEnabled": {{ htr_enabled|yesno:"true,false" }}, "visionEnabled": {{ vision_enabled|yesno:"true,false" }}, "e2eTestHooksEnabled": {{ e2e_test_hooks_enabled|yesno:"true,false" }}, "testDrawnFallback": {{ e2e_test_drawn_fallback|yesno:"true,false" }}}</script>
 </div>
 {% endblock %}
 

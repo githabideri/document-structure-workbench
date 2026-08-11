@@ -9,6 +9,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security
 SECRET_KEY = os.environ.get("DSW_DJANGO_SECRET_KEY", "django-insecure-change-me")
 DEBUG = os.environ.get("DSW_DEBUG", "false").lower() == "true"
+# Test-only browser hooks require an explicit deployment opt-in; DEBUG is not
+# sufficient. Ordinary users cannot activate the tile-loaded draw fallback by
+# adding a query parameter alone.
+DSW_E2E_TEST_HOOKS_ENABLED = os.environ.get(
+    "DSW_E2E_TEST_HOOKS_ENABLED", "false"
+).lower() in {"true", "1", "yes"}
 ALLOWED_HOSTS = os.environ.get(
     "DSW_ALLOWED_HOSTS", "localhost,127.0.0.1"
 ).split(",")

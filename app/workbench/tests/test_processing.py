@@ -1123,6 +1123,37 @@ class ResultImporterTest(TestCase):
         self.assertEqual(page.image_height, 1682)
 
     @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_import_raster_decode_failure_leaves_dimensions_unknown(self):
+        """A failed staged header decode never falls back to logical units."""
+        from io import BytesIO
+        import base64
+        from pathlib import Path
+        from PIL import Image as PILImage
+        from workbench.processors.base import ProcessorResult
+        from workbench.processors.importer import ResultImporter
+
+        buf = BytesIO()
+        PILImage.new("RGB", (1190, 1682), "white").save(buf, "PNG")
+        result = ProcessorResult(
+            pages_processed=1,
+            tables_found=0,
+            page_images={1: {"data": base64.b64encode(buf.getvalue()).decode("ascii"), "format": "png"}},
+            processor_metadata={
+                "processor": "docling",
+                "page_dimensions": {1: {"width": 595, "height": 841}},
+            },
+        )
+        job = self._create_job()
+        importer = ResultImporter(job)
+        importer._artifact_read_path = lambda _rel: Path("/does/not/exist.png")
+        with self.assertLogs("workbench.processors.importer", level="ERROR"):
+            importer.import_results(result)
+        page = Page.objects.get(document=job.result_document_id, page_number=1)
+        self.assertEqual((page.width, page.height), (595, 841))
+        self.assertIsNone(page.image_width)
+        self.assertIsNone(page.image_height)
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_reimport_no_duplicate(self):
         """Re-importing same job updates records without duplicates."""
         from workbench.processors.base import ProcessorResult

@@ -58,6 +58,7 @@ function initWorkspace(shell) {
     rasterSize: readJSON("page-meta-data", null)?.raster ?? null,
     regionFilter: {type: "all", showSuppressed: false},
   };
+  const workspaceConfig = readJSON("workspace-config-data", {});
 
   const host = document.getElementById("viewer-host");
   const statusEl = document.getElementById("viewer-status");
@@ -100,9 +101,10 @@ function initWorkspace(shell) {
     onSelect: (regionId, opts) => selectRegion(regionId, opts),
     statusEl,
     onRetry: () => viewer.openPage(pageOpenArgs({focus: !!state.regionId})),
-    // Test-only draw fallback (see viewer.js): only when the smoke explicitly
-    // requests it via ?test_drawn=1. Production never uses it.
-    initialTestDrawnFallback: new URLSearchParams(location.search).has("test_drawn"),
+    // Test-only draw fallback (see viewer.js): the server must explicitly
+    // enable hooks and the smoke must explicitly request ?test_drawn=1.
+    initialTestDrawnFallback: Boolean(workspaceConfig.e2eTestHooksEnabled)
+      && new URLSearchParams(location.search).has("test_drawn"),
   });
   window.__DSW_WORKSPACE__ = {viewer, state, selectRegion, loadPage, refreshRegions, setInspectorTab, applyRegionFilter};
   // Unified load path: the same openPage() used for page switches opens the

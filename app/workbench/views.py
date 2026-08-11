@@ -1070,6 +1070,11 @@ def document_detail(request, document_id):
         "page_image_levels_json": json.dumps(_page_image_levels(page)) if page and page.image_path else "null",
         "region_inspector_url": reverse("region_inspector", args=[selected_region.id]) if selected_region else "",
         "page_workspace_data_url": reverse("page_workspace_data", args=[page.id]) if page else "",
+        "e2e_test_hooks_enabled": getattr(settings, "DSW_E2E_TEST_HOOKS_ENABLED", False),
+        "e2e_test_drawn_fallback": (
+            getattr(settings, "DSW_E2E_TEST_HOOKS_ENABLED", False)
+            and request.GET.get("test_drawn") == "1"
+        ),
     }
     if page:
         from .imaging import logical_size, raster_size

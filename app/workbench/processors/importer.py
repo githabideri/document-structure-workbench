@@ -279,8 +279,12 @@ class ResultImporter:
             # Prefer decoding the actual on-disk file so the viewer geometry is
             # always correct even if Docling's logical size differs from the
             # rendered raster. This is a one-time import-time cost.
-            image_width = page_width
-            image_height = page_height
+            # Raster dimensions are unknown until the actual image header is
+            # decoded. Never substitute Docling's logical dimensions here: the
+            # two spaces can legitimately differ (and doing so misleads the
+            # viewer into using logical units as pixels).
+            image_width = None
+            image_height = None
             if image_path:
                 from PIL import Image as _PILImage
                 try:
@@ -291,7 +295,11 @@ class ResultImporter:
                     with _PILImage.open(_sp) as _img:
                         image_width, image_height = _img.size
                 except Exception:
-                    logger.exception("Could not decode raster dims for page %d", page_num)
+                    logger.exception(
+                        "Could not decode raster dimensions for imported page %d; "
+                        "leaving image_width/image_height NULL",
+                        page_num,
+                    )
 
             page, created = Page.objects.update_or_create(
                 document=document,

@@ -55,6 +55,20 @@ class WorkspaceInspectorTests(TestCase):
         self.w = _world()
         self.client.force_login(self.w["owner"])
 
+    def test_draw_fallback_requires_server_hook_and_query_flag(self):
+        url = reverse("document_detail", args=[self.w["document"].id])
+        off = self.client.get(url + "?test_drawn=1")
+        self.assertContains(off, '"e2eTestHooksEnabled": false')
+        self.assertContains(off, '"testDrawnFallback": false')
+
+        with override_settings(DSW_E2E_TEST_HOOKS_ENABLED=True):
+            no_query = self.client.get(url)
+            self.assertContains(no_query, '"e2eTestHooksEnabled": true')
+            self.assertContains(no_query, '"testDrawnFallback": false')
+            with_query = self.client.get(url + "?test_drawn=1")
+            self.assertContains(with_query, '"e2eTestHooksEnabled": true')
+            self.assertContains(with_query, '"testDrawnFallback": true')
+
     def test_inspector_partial_authorized_for_member(self):
         url = reverse("region_inspector", args=[self.w["region"].pk])
         response = self.client.get(url)

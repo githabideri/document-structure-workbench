@@ -139,7 +139,7 @@ export function wireSplitButtons(root) {
     group.dataset.wired = "1";
     const fieldName = group.dataset.selectionField;
     const hidden = fieldName
-      ? group.querySelector(`input[name="${CSS.escape(fieldName)}"]`)
+      ? [...group.querySelectorAll("input[type='hidden']")].find((input) => input.name === fieldName)
       : group.querySelector("input[type='hidden']:not([name='csrfmiddlewaretoken'])");
     const modelLabel = group.querySelector("[data-recog-model]");
     const options = group.querySelectorAll("[data-recog-option]");

@@ -27,6 +27,8 @@ region_b="${DSW_WS_REGION_B:-3}"
 region_c="${DSW_WS_REGION_C:-1}"
 output_dir="${DSW_BROWSER_OUTPUT_DIR:-/tmp/dsw-workspace-smoke-$(date +%Y%m%d-%H%M%S)}"
 allow_remote="${DSW_BROWSER_ALLOW_REMOTE:-0}"
+recognition_kind="${DSW_WS_RECOGNITION:-auto}"
+real_htr=0
 browser="$(dirname "$0")/agent-browser-dsw"
 session="dsw-workspace-smoke-$(date +%s)"
 
@@ -51,6 +53,8 @@ Options:
   --region-b ID       A second region to select (default 3).
   --output-dir PATH   Artifact directory.
   --allow-remote      Permit non-local BASE_URL (required for staging).
+  --recognition KIND   Recognition candidate: auto, htr, or vision.
+  --real-htr           Require HTR, verify line overlays, and capture canary evidence.
 
 Requires a running server with an OpenSeadragon-served page image and at least
 two detected regions, plus a fixture user who can edit the document.
@@ -70,10 +74,16 @@ while (($#)); do
     --region-c) region_c="${2:?missing region c}"; shift 2;;
     --output-dir) output_dir="${2:?missing output directory}"; shift 2;;
     --allow-remote) allow_remote=1; shift;;
+    --recognition) recognition_kind="${2:?missing recognition kind}"; shift 2;;
+    --real-htr) real_htr=1; recognition_kind=htr; shift;;
     *) echo "workspace-smoke: unknown option $1" >&2; usage >&2; exit 2;;
   esac
 done
 
+case "$recognition_kind" in
+  auto|htr|vision) ;;
+  *) echo "workspace-smoke: recognition must be auto, htr, or vision" >&2; exit 2;;
+esac
 case "$base_url" in
   http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*) ;;
   *) [[ "$allow_remote" == 1 ]] || { echo "workspace-smoke: remote URL requires --allow-remote" >&2; exit 2; };;
@@ -196,12 +206,11 @@ cleanup_fixture
 sleep 0.5
 echo "workspace-smoke: cleaned previous manual-save correction (revert POSTed)"
 
-# ---- Run a recognition job (Vision when configured, else HTR); version rail becomes
-#      pending without recreating anything. Server should use fixture mode so no real
-#      provider work is incurred.
-step_assert run-vision-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const before=ws.viewer.stats();const btn=document.querySelector('.split-button[data-split-button=vision] .split-button-main')||document.querySelector('.split-button[data-split-button=htr] .split-button-main');if(!btn)throw new Error('no recognition button');btn.click();let pending=false;for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,300));const v=document.querySelector('#inspector-versions');if(v&&v.dataset.pending==='true'){pending=true;break;}}const after=ws.viewer.stats();if(after.imageLoads!==before.imageLoads)throw new Error('viewer reloaded');if(!document.querySelector('#inspector-editor'))throw new Error('editor lost');if(!pending)throw new Error('rail did not become pending');return JSON.stringify({imageLoads:after.imageLoads,selectionChanges:after.selectionChanges,pending:true});})()" || fail "recognition run recreated the viewer or did not update the rail"
+# ---- Run recognition; the rail becomes pending without recreating anything.
+# In live HTR mode this is explicitly the HTR control, never Vision.
+step_assert run-${recognition_kind}-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const before=ws.viewer.stats();const requested='$recognition_kind';const btn=requested==='htr'?document.querySelector('.split-button[data-split-button=htr] .split-button-main'):requested==='vision'?document.querySelector('.split-button[data-split-button=vision] .split-button-main'):(document.querySelector('.split-button[data-split-button=vision] .split-button-main')||document.querySelector('.split-button[data-split-button=htr] .split-button-main'));if(!btn)throw new Error('no '+requested+' recognition button');btn.click();let pending=false;for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,300));const v=document.querySelector('#inspector-versions');if(v&&v.dataset.pending==='true'){pending=true;break;}}const after=ws.viewer.stats();if(after.imageLoads!==before.imageLoads)throw new Error('viewer reloaded');if(!document.querySelector('#inspector-editor'))throw new Error('editor lost');if(!pending)throw new Error('rail did not become pending');return JSON.stringify({imageLoads:after.imageLoads,selectionChanges:after.selectionChanges,pending:true,requested});})()" || fail "recognition run recreated the viewer or did not update the rail"
 
-record finish pass "imageLoads stayed constant through selection, save and vision run"
+record finish pass "imageLoads stayed constant through selection, save and ${recognition_kind} run"
 
 # ---- Recognition completes across >=2 rail replacements, then 'Use
 #      transcription' must persist the accepted candidate through event
@@ -236,8 +245,15 @@ except Exception:
 done
 if [ "$step_pending" = "1" ]; then fail "recognition never completed within timeout"; fi
 if [ "$max_repl" -lt 2 ]; then fail "expected >=2 rail replacements, got $max_repl"; fi
-# Select the HTR/Vision candidate (starts the comparison) then click Use transcription.
-"$browser" --session "$session" eval '(async()=>{const kind=document.querySelector(".split-button[data-split-button=vision]")?"vision":"htr";const v=document.querySelector("#inspector-versions");const cand=[...v.querySelectorAll(".version-item.kind-"+kind+",.version-item.kind-vision,.version-item.kind-htr")].find(it=>!it.classList.contains("is-pending"));cand.querySelector("[data-version-select]").click();return "sel";})()' >/dev/null 2>&1
+# Select the requested candidate (starts the comparison), optionally show HTR
+# lines, then click Use transcription.
+kind="$recognition_kind"
+"$browser" --session "$session" eval '(async()=>{const requested="'$kind'";const kind=requested==="auto"?(document.querySelector(".split-button[data-split-button=vision]")?"vision":"htr"):requested;const v=document.querySelector("#inspector-versions");const cand=[...v.querySelectorAll(".version-item.kind-"+kind)].find(it=>!it.classList.contains("is-pending")&&it.querySelector("[data-version-select]"));if(!cand)throw new Error("no completed "+kind+" candidate");cand.querySelector("[data-version-select]").click();return "sel-"+kind;})()' >/dev/null 2>&1 || fail "requested recognition candidate was not selectable"
+if [ "$real_htr" = 1 ]; then
+  "$browser" --session "$session" screenshot "$output_dir/htr-completed.png" >/dev/null 2>&1 || true
+  "$browser" --session "$session" eval '(async()=>{const b=document.querySelector("[data-version-lines]");if(!b)throw new Error("HTR Lines control missing");b.click();for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,100));if(document.querySelectorAll(".htr-line-overlay").length)return JSON.stringify({lines:document.querySelectorAll(".htr-line-overlay").length});}throw new Error("HTR lines did not render");})()' >/dev/null 2>&1 || fail "HTR line overlays were not rendered"
+  "$browser" --session "$session" screenshot "$output_dir/htr-lines.png" >/dev/null 2>&1 || true
+fi
 "$browser" --session "$session" eval 'const a=document.querySelector("#version-compare-accept");if(!a||a.hidden||!a.dataset.acceptUrl)throw new Error("no accept url");a.click();"clicked"' >/dev/null 2>&1 || fail "Use transcription not offered / no accept url"
 # Wait for the effective textarea to change away from the pre-accept value.
 step_applied=1
@@ -247,8 +263,9 @@ for _ in $(seq 1 40); do
   sleep 0.5
 done
 if [ "$step_applied" = "1" ]; then fail "Use transcription did not change the effective textarea"; fi
-# Assert Current became HTR/Vision, the editor survives, and the viewer did not reload.
-step_assert recognition-completes-use-transcription "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!document.querySelector('#inspector-editor'))throw new Error('editor lost after accept');const src=(document.querySelector('.version-current-source')?.textContent||'').toLowerCase();if(src.indexOf('vision')===-1&&src.indexOf('htr')===-1&&src.indexOf('kurrent')===-1)throw new Error('Current did not become HTR/Vision: '+src);const s=ws.viewer.stats();return JSON.stringify({currentSource:src,imageLoads:s.imageLoads,repl:$max_repl});})()" || fail "recognition completion / Use transcription acceptance failed"
+# Assert Current became the requested provider, the editor survives, and the
+# viewer did not reload.
+step_assert recognition-completes-use-transcription "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!document.querySelector('#inspector-editor'))throw new Error('editor lost after accept');const src=(document.querySelector('.version-current-source')?.textContent||'').toLowerCase();if('$real_htr'==='1'&&(src.indexOf('htr')===-1&&src.indexOf('kurrent')===-1))throw new Error('Current did not become HTR: '+src);if('$real_htr'!=='1'&&src.indexOf('vision')===-1&&src.indexOf('htr')===-1&&src.indexOf('kurrent')===-1)throw new Error('Current did not become HTR/Vision: '+src);const s=ws.viewer.stats();return JSON.stringify({currentSource:src,imageLoads:s.imageLoads,repl:$max_repl});})()" || fail "recognition completion / Use transcription acceptance failed"
 
 # Hygiene: best-effort revert of the correction accepted above so repeated runs do
 # not accumulate active corrections on the shared fixture.

@@ -475,6 +475,116 @@ class UploadServiceTest(TestCase):
             )
 
 
+class BulkRetryTest(TestCase):
+    """DocumentIngestionService.bulk_retry — re-queue all eligible stuck uploads."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="editor", password="pw123456")
+        self.collection = _create_collection(self.user)
+        self.preset = _create_preset()
+
+    def _stuck_job(self, *, collection=None, state="submission_uncertain", filename="doc.pdf"):
+        collection = collection or self.collection
+        sd = SourceDocument.objects.create(
+            collection=collection,
+            source_type="upload",
+            filename=filename,
+            sha256=hashlib.sha256(filename.encode()).hexdigest()[:16],
+        )
+        return ProcessingJob.objects.create(
+            source_document=sd, preset=self.preset, state=state, created_by=self.user,
+        )
+
+    def test_retries_all_stuck_states(self):
+        from workbench.services import DocumentIngestionService
+        self._stuck_job(state="submission_uncertain", filename="a.pdf")
+        self._stuck_job(state="failed", filename="b.pdf")
+        self._stuck_job(state="interrupted", filename="c.pdf")
+        result = DocumentIngestionService(user=self.user).bulk_retry()
+        self.assertEqual((result["queued"], result["skipped"]), (3, 0))
+        self.assertEqual(ProcessingJob.objects.filter(state="queued").count(), 3)
+
+    def test_dedupes_one_attempt_per_source(self):
+        from workbench.services import DocumentIngestionService
+        dup = self._stuck_job(state="submission_uncertain", filename="dup.pdf")
+        ProcessingJob.objects.create(
+            source_document=dup.source_document, preset=self.preset,
+            state="failed", created_by=self.user,
+        )
+        result = DocumentIngestionService(user=self.user).bulk_retry()
+        self.assertEqual(result["queued"], 1)
+
+    def test_skips_sources_with_active_attempt(self):
+        from workbench.services import DocumentIngestionService
+        stuck = self._stuck_job(state="failed", filename="x.pdf")
+        ProcessingJob.objects.create(
+            source_document=stuck.source_document, preset=self.preset,
+            state="processing", created_by=self.user,
+        )
+        result = DocumentIngestionService(user=self.user).bulk_retry()
+        self.assertEqual((result["queued"], result["skipped"]), (0, 1))
+
+    def test_scoped_to_editable_projects(self):
+        from workbench.services import DocumentIngestionService
+        other_owner = User.objects.create_user(username="owner2", password="pw123456")
+        foreign = _create_collection(other_owner, name="Other Project")  # self.user has no membership
+        self._stuck_job(collection=foreign, filename="nope.pdf")
+        self._stuck_job(filename="mine.pdf")
+        result = DocumentIngestionService(user=self.user).bulk_retry()
+        self.assertEqual(result["queued"], 1)  # only the editable project's job
+
+    def test_project_scoped(self):
+        from workbench.services import DocumentIngestionService
+        other = _create_collection(self.user, name="Second Project")
+        self._stuck_job(filename="in.pdf")
+        self._stuck_job(collection=other, filename="out.pdf")
+        result = DocumentIngestionService(user=self.user).bulk_retry(project=other)
+        self.assertEqual(result["queued"], 1)
+
+    def test_project_scope_requires_edit_access(self):
+        from workbench.services import DocumentIngestionService, IngestionError
+        owner3 = User.objects.create_user(username="owner3", password="pw123456")
+        foreign = _create_collection(owner3, name="Foreign")
+        with self.assertRaises(IngestionError):
+            DocumentIngestionService(user=self.user).bulk_retry(project=foreign)
+
+
+class BulkRetryViewTest(TestCase):
+    """The bulk-retry POST endpoints (dashboard + per-project)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="editor", password="pw123456")
+        self.collection = _create_collection(self.user)
+        self.preset = _create_preset()
+        self.client = Client()
+        self.client.login(username="editor", password="pw123456")
+
+    def _stuck_job(self, filename="d.pdf"):
+        sd = SourceDocument.objects.create(
+            collection=self.collection, source_type="upload",
+            filename=filename, sha256=hashlib.sha256(filename.encode()).hexdigest()[:16],
+        )
+        return ProcessingJob.objects.create(
+            source_document=sd, preset=self.preset, state="submission_uncertain", created_by=self.user,
+        )
+
+    def test_post_retries_and_redirects_to_dashboard(self):
+        self._stuck_job("a.pdf")
+        resp = self.client.post(reverse("bulk_retry_all"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, reverse("dashboard"))
+        self.assertEqual(ProcessingJob.objects.filter(state="queued").count(), 1)
+
+    def test_post_project_scoped_redirects_to_project(self):
+        self._stuck_job("b.pdf")
+        resp = self.client.post(reverse("bulk_retry_project", args=[self.collection.id]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, reverse("collection_detail", args=[self.collection.id]))
+
+    def test_get_not_allowed(self):
+        self.assertEqual(self.client.get(reverse("bulk_retry_all")).status_code, 405)
+
+
 class JobTransitionTest(TestCase):
     """Test ProcessingJob state transitions."""
 

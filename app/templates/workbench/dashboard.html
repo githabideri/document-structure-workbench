@@ -66,7 +66,10 @@
 
     {% if attention_jobs %}
     <section class="dashboard-section">
-        <h2>{% trans "Items needing attention" %}</h2>
+        <div class="section-heading">
+            <h2>{% trans "Items needing attention" %}</h2>
+            <form method="post" action="{% url 'bulk_retry_all' %}">{% csrf_token %}<button class="btn btn-secondary" type="submit" onclick="return confirm('{% trans "Queue a new processing attempt for every stuck upload you can edit?" %}')">{% trans "Retry all stuck uploads" %}</button></form>
+        </div>
         <div class="item-list">
             {% for job in attention_jobs %}
             <a href="{% url 'job_status' job.id %}" class="item-row">

@@ -57,6 +57,8 @@ urlpatterns = [
     path("projects/<int:project_id>/process/", views.project_process, name="project_process"),
     path("jobs/<int:job_id>/", views.job_status, name="job_status"),
     path("jobs/<int:job_id>/recovery/", views.job_recovery_action, name="job_recovery_action"),
+    path("jobs/retry-all/", views.bulk_retry, name="bulk_retry_all"),
+    path("collections/<int:collection_id>/retry-all/", views.bulk_retry, name="bulk_retry_project"),
     path("uploads/<int:source_id>/archive/", views.source_archive, name="source_archive"),
 
     # Secure artifact serving

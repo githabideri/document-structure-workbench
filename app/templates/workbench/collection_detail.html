@@ -8,6 +8,7 @@
         <div><p class="eyebrow">{% trans "Project" %}</p><h1>{{ collection.name }}</h1><p class="page-intro">{{ collection.description }}</p></div>
         <div>
             {% if can_edit_project %}<a href="{% url 'document_new' %}?project={{ collection.id }}" class="btn btn-primary">{% trans "Add document" %}</a>{% endif %}
+            {% if can_edit_project and stuck_job_count %}<form method="post" action="{% url 'bulk_retry_project' collection.id %}" style="display:inline">{% csrf_token %}<button class="btn btn-secondary" type="submit" onclick="return confirm('{% trans "Queue a new processing attempt for every stuck upload in this project?" %}')">{% blocktrans %}Retry all stuck ({{ stuck_job_count }}){% endblocktrans %}</button></form>{% endif %}
             <details class="export-menu">
                 <summary class="btn btn-secondary" aria-label="{% trans 'Export project' %}">{% trans "Export project" %}</summary>
                 <div class="export-menu-items">

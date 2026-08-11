@@ -183,6 +183,10 @@ class ProjectAccessPolicy:
             return membership is not None and membership.can_edit
         elif self.token:
             return self._check_token_access(project, min_role="editor")
+
+    def editable_projects(self):
+        """Projects the identity can edit (upload, retry, bulk-retry)."""
+        return [project for project in self.visible_projects() if self.can_edit(project)]
         return False
 
     def can_review(self, project):

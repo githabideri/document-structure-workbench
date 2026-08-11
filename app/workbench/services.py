@@ -829,6 +829,63 @@ class DocumentIngestionService:
             )
         return retry
 
+    def bulk_retry(self, *, project=None):
+        """Re-queue new processing attempts for all eligible stuck uploads.
+
+        Scoped to projects the caller can edit (optionally a single project).
+        Returns a summary dict::
+
+            {"queued": int, "skipped": int, "errors": [str, ...]}
+
+        Stuck states are the same set the per-job "retry" action accepts.
+        Exactly one new attempt is queued per stuck source document; sources
+        that already have an active processing attempt are skipped (never
+        double-queued). Permission is re-enforced by ``retry_existing``.
+        """
+        if project is not None:
+            if not self.policy.can_edit(project):
+                raise IngestionError("You do not have edit access to this project.")
+            scope = [project]
+        else:
+            scope = self.policy.editable_projects()
+        if not scope:
+            return {"queued": 0, "skipped": 0, "errors": []}
+
+        stuck_states = ["submission_uncertain", "interrupted", "partial", "failed", "cancelled"]
+        stuck = (
+            ProcessingJob.objects.filter(
+                source_document__collection__in=scope,
+                source_document__is_archived=False,
+                state__in=stuck_states,
+            )
+            .select_related("source_document")
+            .order_by("-id")
+        )
+
+        # One representative stuck job per source document (most recent first).
+        candidates, seen = [], set()
+        for job in stuck:
+            sid = job.source_document_id
+            if sid in seen:
+                continue
+            seen.add(sid)
+            candidates.append(job)
+
+        queued = 0
+        skipped = 0
+        errors = []
+        for job in candidates:
+            try:
+                self.retry_existing(job=job)
+            except IngestionError as exc:
+                skipped += 1
+                if "active processing attempt" not in str(exc):
+                    name = job.source_document.filename or f"document {job.source_document_id}"
+                    errors.append(f"{name}: {exc}")
+            else:
+                queued += 1
+        return {"queued": queued, "skipped": skipped, "errors": errors}
+
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------

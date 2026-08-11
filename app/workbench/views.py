@@ -269,6 +269,7 @@ def source_archive(request, source_id):
 
 @login_required
 def collection_detail(request, collection_id):
+    from .models import ProcessingJob
     from .policy import ProjectAccessPolicy
     collection = get_object_or_404(Collection, pk=collection_id)
     policy = ProjectAccessPolicy(user=request.user)
@@ -284,6 +285,11 @@ def collection_detail(request, collection_id):
         source.latest_job = source.processing_jobs.first()
     tables = TableCandidate.objects.filter(document__collection=collection)
     reviews = Review.objects.filter(review_task__table_candidate__document__collection=collection)
+    stuck_job_count = ProcessingJob.objects.filter(
+        source_document__collection=collection,
+        source_document__is_archived=False,
+        state__in=["submission_uncertain", "interrupted", "partial", "failed", "cancelled"],
+    ).count()
 
     return render(request, "workbench/collection_detail.html", {
         "collection": collection,
@@ -292,6 +298,7 @@ def collection_detail(request, collection_id):
         "total_tables": tables.count(),
         "total_reviews": reviews.count(),
         "show_archived": show_archived,
+        "stuck_job_count": stuck_job_count,
     })
 
 
@@ -2447,6 +2454,47 @@ def job_recovery_action(request, job_id):
     else:
         messages.error(request, _("This job cannot be resumed from its current state."))
     return redirect("job_status", job_id=job.id)
+
+
+@login_required
+@require_POST
+def bulk_retry(request, collection_id=None):
+    """Re-queue all eligible stuck uploads.
+
+    With collection_id: scoped to that project (must be editable).
+    Without: every project the user can edit.
+    """
+    from .policy import ProjectAccessPolicy
+    from .services import DocumentIngestionService, IngestionError
+
+    project = None
+    if collection_id is not None:
+        project = get_object_or_404(Collection, pk=collection_id)
+        if not ProjectAccessPolicy(user=request.user).can_edit(project):
+            messages.error(request, _("You do not have edit access to this project."))
+            return redirect("collection_detail", collection_id=collection_id)
+
+    try:
+        result = DocumentIngestionService(user=request.user).bulk_retry(project=project)
+    except IngestionError as exc:
+        messages.error(request, str(exc))
+    else:
+        queued, skipped, errors = result["queued"], result["skipped"], result["errors"]
+        if queued:
+            msg = _("Queued %(n)s new processing attempt(s).") % {"n": queued}
+            if skipped:
+                msg += " " + _("%(s)s already had an active attempt and were skipped.") % {"s": skipped}
+            messages.success(request, msg)
+        elif skipped:
+            messages.info(request, _("No new attempts queued; %(s)s upload(s) already had an active attempt.") % {"s": skipped})
+        else:
+            messages.info(request, _("No stuck uploads to retry."))
+        for err in errors:
+            messages.warning(request, err)
+
+    if project is not None:
+        return redirect("collection_detail", collection_id=collection_id)
+    return redirect("dashboard")
 
 
 # --- Secure artifact serving ---

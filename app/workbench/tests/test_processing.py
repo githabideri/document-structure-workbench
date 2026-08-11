@@ -1072,6 +1072,57 @@ class ResultImporterTest(TestCase):
         self.assertEqual(artifact.data["text"], "Full page text content from museum document.")
 
     @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
+    def test_import_persists_raster_dimensions_from_staged_image(self):
+        """A real import decodes raster dims from the STAGED image, never the
+        logical Docling page size.
+
+        Regression: raster dims were decoded from the final artifact path before
+        the staged image was promoted, so the fallback stored the LOGICAL size as
+        the raster size (e.g. 595x841 for a real 1190x1682 PNG), reintroducing
+        the image/region alignment bug for newly imported documents.
+        """
+        from io import BytesIO
+
+        import base64
+
+        from PIL import Image as PILImage
+
+        from workbench.processors.base import ProcessorResult
+        from workbench.processors.importer import ResultImporter
+
+        # Genuine 1190x1682 PNG (real raster pixels).
+        buf = BytesIO()
+        PILImage.new("RGB", (1190, 1682), "white").save(buf, "PNG")
+        png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+        job = self._create_job()
+        # Docling LOGICAL size differs from the raster in both axes.
+        result = ProcessorResult(
+            pages_processed=1,
+            tables_found=0,
+            page_images={1: {"data": png_b64, "format": "png"}},
+            page_texts={1: "Imported page text"},
+            regions=[],
+            processor_metadata={
+                "processor": "docling",
+                "version": "2.5.0",
+                "page_dimensions": {1: {"width": 595, "height": 841}},
+            },
+        )
+
+        importer = ResultImporter(job)
+        counts = importer.import_results(result)
+        self.assertEqual(counts["pages"], 1)
+
+        page = Page.objects.get(page_number=1)
+        # Logical Docling size preserved for bbox normalization.
+        self.assertEqual(page.width, 595)
+        self.assertEqual(page.height, 841)
+        # Authoritative raster dims decoded from the real staged image.
+        self.assertEqual(page.image_width, 1190)
+        self.assertEqual(page.image_height, 1682)
+
+    @override_settings(ARTIFACTS_BASE_DIR=tempfile.mkdtemp())
     def test_reimport_no_duplicate(self):
         """Re-importing same job updates records without duplicates."""
         from workbench.processors.base import ProcessorResult

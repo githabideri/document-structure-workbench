@@ -3,10 +3,17 @@ set -uo pipefail
 
 # Document workspace regression smoke. Verifies the core rework invariant:
 # once a page image is loaded, region-level work (selection, transcription
-# save, recognition run) must NEVER recreate the OpenSeadragon viewer or reload
-# the page. Asserts via window.__DSW_WORKSPACE__.viewer.stats():
+# save, recognition run and its completion + 'Use transcription' accept) must
+# NEVER recreate the OpenSeadragon viewer or reload the page. Asserts via
+# window.__DSW_WORKSPACE__.viewer.stats():
 #   generation/imageLoads must not change during region work,
 #   selectionChanges/focusChanges must advance.
+# The recognition step also waits for the run to COMPLETE across >=2 rail
+# replacements and applies the accepted HTR/Vision candidate, which is the
+# regression that only appears once the disposable version rail is replaced
+# several times (the 'Use transcription' handler must survive rail swaps).
+# The server must run with DSW_HTR_FIXTURE_MODE=true and an OCR worker active
+# so the fixture recognition run actually completes.
 #
 # Credentials and targets come from the environment only (never the result).
 base_url="${DSW_BROWSER_BASE_URL:-http://127.0.0.1:8000}"
@@ -88,6 +95,15 @@ step_assert() { # $1 name, $2 js
   record "$1" fail "$2"; return 1
 }
 
+# Best-effort fixture hygiene: revert the currently-active correction on the
+# selected region by re-fetching the inspector and POSTing its Revert action
+# (a rail-only save does not re-render the Revert button into the DOM itself).
+# Kept as one short single-line eval; each call revokes one active correction.
+cleanup_fixture() {
+  "$browser" --session "$session" eval '(async()=>{const ws=window.__DSW_WORKSPACE__;const rid=ws.state.regionId;const pane=document.getElementById("inspector-pane-region");try{const resp=await fetch("/regions/"+rid+"/inspector/",{credentials:"same-origin",headers:{Accept:"text/html","HX-Request":"true"}});if(resp.ok)pane.innerHTML=await resp.text();}catch(e){}if(window.htmx)window.htmx.process(pane);const btn=document.querySelector("[data-transcription-action=revert]");if(!btn)return "no-revert-btn";const url=btn.getAttribute("hx-post");let csrf="";const meta=document.querySelector("meta[name=csrf-token]");if(meta)csrf=meta.content;const hid=document.querySelector("[name=csrfmiddlewaretoken]");if(!csrf&&hid)csrf=hid.value;const r=await fetch(url,{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":csrf,"HX-Request":"true"}});return "revert "+r.status+" "+url;})()' >/dev/null 2>&1
+  sleep 1
+}
+
 finish() {
   local status=$?
   "$browser" --session "$session" console >"$output_dir/console.log" 2>&1 || true
@@ -111,10 +127,14 @@ sleep 0.3
 sleep 1.5
 
 # ---- Open a deep link; wait for the viewer ----
-url="$base_url/documents/$source_id/?revision=$revision_id&page=$page_number&region=$region_a"
+url="$base_url/documents/$source_id/?revision=$revision_id&page=$page_number&region=$region_a&test_drawn=1"
 "$browser" --session "$session" open "$url" >/dev/null 2>&1 || fail "workspace deep link did not open"
-for _ in $(seq 1 30); do
-  if "$browser" --session "$session" eval 'window.__DSW_WORKSPACE__ && window.__DSW_WORKSPACE__.viewer.isReady() ? "ready" : "no"' 2>/dev/null | grep -q ready; then break; fi
+# This harness runs headless where OSD tile-drawn may never fire, so it opts
+# into the test-only draw fallback (tile-loaded proxies drawing) and then waits
+# for real imagery to be signalled — status leaves 'loading'. Production never
+# reveals overlays on tile-loaded; only this test hook does.
+for _ in $(seq 1 40); do
+  if "$browser" --session "$session" eval 'window.__DSW_WORKSPACE__ && (window.__DSW_WORKSPACE__.viewer.setTestDrawnFallback(true), window.__DSW_WORKSPACE__.viewer.status()!=="loading") ? "yes":"no"' 2>/dev/null | grep -q yes; then break; fi
   sleep 0.5
 done
 step_assert deep-link-restored "(()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const s=ws.viewer.stats();if((s.imageLoads!==1)||ws.state.regionId!=='$region_a')throw new Error('deep link state');return JSON.stringify({imageLoads:s.imageLoads,regionId:ws.state.regionId});})()" || fail "deep link did not restore + open viewer"
@@ -171,9 +191,9 @@ step_assert manual-save-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;
 #      should run with DSW_HTR_FIXTURE_MODE=true so recognition is simulated.
 #      A rail-only save does not re-render the editor, so we re-fetch the region
 #      inspector (making the Revert button reflect the new active correction),
-#      then click Revert to restore the prior effective text.
-"$browser" --session "$session" eval "(async()=>{\nconst ws=window.__DSW_WORKSPACE__;const rid=ws.state.regionId;const pane=document.getElementById('inspector-pane-region');\ntry{const resp=await fetch('/regions/'+rid+'/inspector/',{credentials:'same-origin',headers:{Accept:'text/html','HX-Request':'true'}});if(resp.ok)pane.innerHTML=await resp.text();}catch(e){}\nif(window.htmx)window.htmx.process(pane);\nconst btn=document.querySelector('[data-transcription-action=revert]');if(!btn)return 'no-revert-btn';\nconst url=btn.getAttribute('hx-post');\nlet csrf='';const meta=document.querySelector('meta[name=csrf-token]');if(meta)csrf=meta.content;const hid=document.querySelector('[name=csrfmiddlewaretoken]');if(!csrf&&hid)csrf=hid.value;\nawait fetch(url,{method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrf,'HX-Request':'true'}});\nreturn 'reverted '+url;})()" >/dev/null 2>&1
-sleep 1
+#      then POST Revert to restore the prior effective text.
+cleanup_fixture
+sleep 0.5
 echo "workspace-smoke: cleaned previous manual-save correction (revert POSTed)"
 
 # ---- Run a recognition job (Vision when configured, else HTR); version rail becomes
@@ -182,5 +202,60 @@ echo "workspace-smoke: cleaned previous manual-save correction (revert POSTed)"
 step_assert run-vision-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const before=ws.viewer.stats();const btn=document.querySelector('.split-button[data-split-button=vision] .split-button-main')||document.querySelector('.split-button[data-split-button=htr] .split-button-main');if(!btn)throw new Error('no recognition button');btn.click();let pending=false;for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,300));const v=document.querySelector('#inspector-versions');if(v&&v.dataset.pending==='true'){pending=true;break;}}const after=ws.viewer.stats();if(after.imageLoads!==before.imageLoads)throw new Error('viewer reloaded');if(!document.querySelector('#inspector-editor'))throw new Error('editor lost');if(!pending)throw new Error('rail did not become pending');return JSON.stringify({imageLoads:after.imageLoads,selectionChanges:after.selectionChanges,pending:true});})()" || fail "recognition run recreated the viewer or did not update the rail"
 
 record finish pass "imageLoads stayed constant through selection, save and vision run"
+
+# ---- Recognition completes across >=2 rail replacements, then 'Use
+#      transcription' must persist the accepted candidate through event
+#      delegation on the persistent region pane (the accept button physically
+#      lives inside the disposable rail, so a listener wired only to a rail
+#      button would be lost). Each browser eval stays SHORT (well under the CDP
+#      eval timeout); waiting is driven from bash. ----
+# Capture the editor text before we accept, so we can prove it actually changed.
+tb="$("$browser" --session "$session" eval '(document.querySelector("#transcription-area")||{}).value||""' 2>/dev/null)"
+# Install a rail-replacement counter BEFORE polling finishes so we can prove the
+# accept survived at least a couple of rail swaps (the class of bug being
+# regressed); repeated innerHTML swaps of #inspector-versions are counted.
+"$browser" --session "$session" eval 'window.__RAIL_REPLACES__=0;try{const pm=document.getElementById("inspector-pane-region");if(pm&&!pm.__wsmo){pm.__wsmo=new MutationObserver(muts=>{for(const m of muts){if(m.addedNodes.length&&[...m.addedNodes].some(n=>n&&n.id==="inspector-versions"))window.__RAIL_REPLACES__=(window.__RAIL_REPLACES__||0)+1;}});pm.__wsmo.observe(pm,{childList:true,subtree:true});}}catch(e){}ok' >/dev/null 2>&1
+# Wait for the run to complete and a selectable HTR/Vision candidate to appear.
+step_pending=1
+max_repl=0
+for _ in $(seq 1 60); do
+  out="$("$browser" --session "$session" eval '(async()=>{const v=document.querySelector("#inspector-versions");if(!v)return JSON.stringify({p:"",cand:false,repl:(window.__RAIL_REPLACES__||0)});const cand=[...v.querySelectorAll(".version-item.kind-htr,.version-item.kind-vision")].some(it=>!it.classList.contains("is-pending")&&!((it.querySelector("[data-version-select]")||{}).disabled));return JSON.stringify({p:v.dataset.pending,cand:!!cand,repl:(window.__RAIL_REPLACES__||0)});})()' 2>/dev/null)"
+  # The browser CLI returns the eval result double-JSON-encoded; decode it here.
+  set -- $(printf '%s' "$out" | python3 -c 'import json,sys
+line=sys.stdin.read().strip()
+try:
+  d=json.loads(json.loads(line) if line.startswith("\"") else line)
+  p=d.get("p",""); c=d.get("cand",""); r=d.get("repl",0)
+  print(p, str(c).lower(), r)
+except Exception:
+  print("","","")')
+  pk="$1"; ck="$2"; repl="$3"
+  [ -n "$repl" ] && [ "$repl" -gt "$max_repl" ] 2>/dev/null && max_repl=$repl
+  if [ "$pk" = "false" ] && [ "$ck" = "true" ]; then step_pending=0; break; fi
+  sleep 1
+done
+if [ "$step_pending" = "1" ]; then fail "recognition never completed within timeout"; fi
+if [ "$max_repl" -lt 2 ]; then fail "expected >=2 rail replacements, got $max_repl"; fi
+# Select the HTR/Vision candidate (starts the comparison) then click Use transcription.
+"$browser" --session "$session" eval '(async()=>{const kind=document.querySelector(".split-button[data-split-button=vision]")?"vision":"htr";const v=document.querySelector("#inspector-versions");const cand=[...v.querySelectorAll(".version-item.kind-"+kind+",.version-item.kind-vision,.version-item.kind-htr")].find(it=>!it.classList.contains("is-pending"));cand.querySelector("[data-version-select]").click();return "sel";})()' >/dev/null 2>&1
+"$browser" --session "$session" eval 'const a=document.querySelector("#version-compare-accept");if(!a||a.hidden||!a.dataset.acceptUrl)throw new Error("no accept url");a.click();"clicked"' >/dev/null 2>&1 || fail "Use transcription not offered / no accept url"
+# Wait for the effective textarea to change away from the pre-accept value.
+step_applied=1
+for _ in $(seq 1 40); do
+  now="$("$browser" --session "$session" eval '(document.querySelector("#transcription-area")||{}).value||""' 2>/dev/null)"
+  if [ -n "$now" ] && [ "$now" != "$tb" ]; then step_applied=0; break; fi
+  sleep 0.5
+done
+if [ "$step_applied" = "1" ]; then fail "Use transcription did not change the effective textarea"; fi
+# Assert Current became HTR/Vision, the editor survives, and the viewer did not reload.
+step_assert recognition-completes-use-transcription "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!document.querySelector('#inspector-editor'))throw new Error('editor lost after accept');const src=(document.querySelector('.version-current-source')?.textContent||'').toLowerCase();if(src.indexOf('vision')===-1&&src.indexOf('htr')===-1&&src.indexOf('kurrent')===-1)throw new Error('Current did not become HTR/Vision: '+src);const s=ws.viewer.stats();return JSON.stringify({currentSource:src,imageLoads:s.imageLoads,repl:$max_repl});})()" || fail "recognition completion / Use transcription acceptance failed"
+
+# Hygiene: best-effort revert of the correction accepted above so repeated runs do
+# not accumulate active corrections on the shared fixture.
+cleanup_fixture
+sleep 0.5
+echo "workspace-smoke: cleaned recognition-accepted correction (revert POSTed)"
+
+record finish pass "recognition completes and 'Use transcription' persists (regression for delegated accept)"
 "$browser" --session "$session" screenshot "$output_dir/final.png" >/dev/null 2>&1 || true
 echo "workspace-smoke: PASS — imageLoads stayed constant through all region-level actions"

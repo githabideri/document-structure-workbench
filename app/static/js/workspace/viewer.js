@@ -314,7 +314,7 @@ function buildTileSource(levels) {
   return only && only.url ? {type: "image", url: only.url} : null;
 }
 
-export function createViewer(host, {regions = [], initialSelectedId = null, onSelect, statusEl = null, onRetry} = {}) {
+export function createViewer(host, {regions = [], initialSelectedId = null, onSelect, statusEl = null, onRetry, initialTestDrawnFallback = false} = {}) {
   if (!window.OpenSeadragon) throw new Error("OpenSeadragon is not loaded.");
   const viewer = OpenSeadragon({
     element: host,
@@ -345,6 +345,12 @@ export function createViewer(host, {regions = [], initialSelectedId = null, onSe
   let pendingFocus = null;
   let activeSelectedId = initialSelectedId;
   let deepLevel = null; // highest-resolution level index (null for single image)
+  // Test-only: in headless/offscreen contexts tile-drawn may never fire, so a
+  // smoke/CI harness can enable a tile-loaded draw fallback. Production keeps
+  // the strict semantics — overlays appear only once pixels are actually drawn
+  // (tile-drawn / fully-loaded-change). Armed at init (before the image opens)
+  // so it is never missed by a first-load event.
+  let testDrawnFallback = initialTestDrawnFallback;
   let currentLevels = [];
   let logicalSize = null;
   let rasterSize = null;
@@ -410,12 +416,12 @@ export function createViewer(host, {regions = [], initialSelectedId = null, onSe
     onFirstDraw();
   });
 
-  // tile-loaded is a robust alternative signal that real image data exists: in
-  // headless/offscreen contexts tile-drawn may never fire. The first loaded tile
-  // shows overlays; once a tile at the highest level loads, the page is usable.
+  // tile-loaded is a load-complete signal; it must NOT reveal overlays in
+  // production (image data may be buffered but not yet painted). Under the
+  // test-only fallback it serves as a draw proxy for headless harnesses.
   viewer.addHandler("tile-loaded", (event) => {
     if (!ready) return;
-    onFirstDraw();
+    if (testDrawnFallback) onFirstDraw();
     if (deepLevel != null && status.state === "preview" && event && event.tile && event.tile.level === deepLevel) {
       status.set("ready"); track("ready");
     }
@@ -510,6 +516,8 @@ export function createViewer(host, {regions = [], initialSelectedId = null, onSe
 
   return {
     viewer,
+    // Test-only draw fallback for headless harnesses (see tile-loaded above).
+    setTestDrawnFallback(v) { testDrawnFallback = !!v; },
     isReady: () => ready,
     status: () => status.state,
     activeSelectedId: () => activeSelectedId,

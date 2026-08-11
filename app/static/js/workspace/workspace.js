@@ -16,7 +16,7 @@
 // current one. Stale responses can never overwrite newer state.
 import {createViewer} from "./viewer.js";
 import {initLayout} from "./splitter.js";
-import {isInspectorDirty, stopPolling, wireInspector, wireSplitButtons, wireVersionRail} from "./inspector.js";
+import {isInspectorDirty, stopPolling, wireInspector, wireSplitButtons, wireVersionRail, ensureCompareAcceptDelegation} from "./inspector.js";
 import {publishDiagnostics} from "../core/diagnostics.js";
 import {t} from "../core/i18n.js";
 
@@ -100,6 +100,9 @@ function initWorkspace(shell) {
     onSelect: (regionId, opts) => selectRegion(regionId, opts),
     statusEl,
     onRetry: () => viewer.openPage(pageOpenArgs({focus: !!state.regionId})),
+    // Test-only draw fallback (see viewer.js): only when the smoke explicitly
+    // requests it via ?test_drawn=1. Production never uses it.
+    initialTestDrawnFallback: new URLSearchParams(location.search).has("test_drawn"),
   });
   window.__DSW_WORKSPACE__ = {viewer, state, selectRegion, loadPage, refreshRegions, setInspectorTab, applyRegionFilter};
   // Unified load path: the same openPage() used for page switches opens the
@@ -437,6 +440,10 @@ function initWorkspace(shell) {
   }
 
   function wireInspectorInternal(root) {
+    ensureCompareAcceptDelegation(root, {
+      viewer,
+      onFocusRegion: () => viewer.focusSelected(),
+    });
     wireInspector(root, {
       viewer,
       onFocusRegion: () => viewer.focusSelected(),

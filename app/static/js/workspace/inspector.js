@@ -278,27 +278,38 @@ export function wireVersionRail(root, ctx) {
   startPolling(root, ctx);
 }
 
+// "Use transcription" (accept/re-apply the selected version) is wired via event
+// delegation on the PERSISTENT region pane, because the #version-compare-accept
+// button physically lives inside #inspector-versions — the disposable rail that
+// recognition polling replaces wholesale. A direct listener attached to a rail
+// button would be lost on every rail swap; delegation on the surviving pane
+// parent can never be orphaned by future rail replacements. Guarded by the
+// shared dirty check (destructive only if it replaces the editor).
+export function ensureCompareAcceptDelegation(root, ctx) {
+  if (!root || root.dataset.wiredCompareAccept === "1") return;
+  root.dataset.wiredCompareAccept = "1";
+  root.addEventListener("click", (event) => {
+    const btn = event.target && event.target.closest
+      ? event.target.closest("#version-compare-accept")
+      : null;
+    if (!btn || btn.dataset.acceptUrl == null) return;
+    const url = btn.dataset.acceptUrl || "";
+    if (!url) return;
+    if (!guardDirtyInspector(root)) return;
+    if (window.htmx) window.htmx.ajax("POST", url, {target: "#inspector-pane-region", swap: "innerHTML"});
+  });
+}
+
 export function wireInspector(root, ctx) {
   wireEditor(root, ctx);
   wireSplitButtons(root);
   wireVersionRail(root, ctx);
-  // Focus region button inside the actions menu + compare-accept live in the
-  // inspector shell; mark them so re-wirings are idempotent.
+  ensureCompareAcceptDelegation(root, ctx);
+  // Focus region button inside the actions menu lives in the inspector shell;
+  // mark it so re-wirings are idempotent.
   const focusBtn = root.querySelector("[data-inspector-action='focus-region']");
   if (focusBtn && focusBtn.dataset.wiredAction !== "1") {
     focusBtn.dataset.wiredAction = "1";
     focusBtn.addEventListener("click", () => ctx.onFocusRegion?.());
-  }
-  const acceptBtn = root.querySelector("#version-compare-accept");
-  if (acceptBtn && acceptBtn.dataset.wiredAccept !== "1") {
-    acceptBtn.dataset.wiredAccept = "1";
-    // "Use transcription" → accept/re-apply the selected version. Guarded by the
-    // shared dirty check (destructive only if it replaces the editor).
-    acceptBtn.addEventListener("click", (event) => {
-      const url = event.currentTarget.dataset.acceptUrl;
-      if (!url) return;
-      if (!guardDirtyInspector(root)) return;
-      if (window.htmx) window.htmx.ajax("POST", url, {target: "#inspector-pane-region", swap: "innerHTML"});
-    });
   }
 }

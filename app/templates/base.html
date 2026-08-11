@@ -60,6 +60,18 @@
     </footer>
 
     <script src="{% url 'serve_htmx' %}"></script>
+    <script>
+      // Attach Django's CSRF token to every htmx request (including the
+      // programmatic htmx.ajax() calls whose trigger is not a form carrying an
+      // inline {% csrf_token %}). Without this, JS-initiated POSTs such as
+      // "Use transcription" (compare-accept) fail with a 403.
+      document.addEventListener("htmx:configRequest", function (e) {
+        var m = document.cookie.match(/(?:^|; )csrftoken=([^;]*)/);
+        if (m && e.detail && e.detail.headers) {
+          e.detail.headers["X-CSRFToken"] = decodeURIComponent(m[1]);
+        }
+      });
+    </script>
     <script type="module" src="{% static 'js/core/diagnostics.js' %}"></script>
     {% block extra_scripts %}{% endblock %}
 </body>

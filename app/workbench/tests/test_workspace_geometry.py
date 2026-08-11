@@ -10,7 +10,9 @@ import tempfile
 from pathlib import Path
 
 from django.contrib.auth.models import User
-from django.test import TestCase, override_settings
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from PIL import Image
 
@@ -306,3 +308,116 @@ class PageInspectorPollUrlTests(TestCase):
         self.assertContains(response, "is-completed")
         self.assertNotContains(response, "version-dot kind-vision is-current")
         self.assertContains(response, "Imported page text")
+@override_settings(STORAGES=ST, ARTIFACTS_BASE_DIR=ART)
+class SourceOcrRequestBackfillMigrationTests(TransactionTestCase):
+    """Migration 0025 permanently links pre-existing accepted corrections to the
+    recognition request that produced them.
+
+    Regression: 0024 added RegionCorrection.source_ocr_request but left
+    already-accepted corrections with NULL, so provenance resolution would call
+    them Manual and the UI could show a Vision/HTR candidate AND a Manual
+    correction as 'current' for the same text. 0025 backfills from the
+    OcrRequest.accepted_correction shortcut.
+    """
+
+    migrate_from = [("workbench", "0024_page_image_height_page_image_width_and_more")]
+    migrate_to = [("workbench", "0025_backfill_correction_source_ocr_request")]
+
+    def _world_old(self, Old):
+        user = Old.get_model("auth", "User").objects.create(username="migration-user")
+        project = Old.get_model("workbench", "Collection").objects.create(name="Mig", created_by_id=user.pk)
+        source = Old.get_model("workbench", "SourceDocument").objects.create(
+            collection_id=project.pk, filename="a.pdf", sha256="s", uploaded_by_id=user.pk,
+        )
+        preset = Old.get_model("workbench", "ProcessingPreset").objects.create(slug="mig", name="m")
+        job = Old.get_model("workbench", "ProcessingJob").objects.create(
+            source_document_id=source.pk, preset_id=preset.pk, state="completed",
+        )
+        doc = Old.get_model("workbench", "Document").objects.create(
+            collection_id=project.pk, external_id="r1", filename="a.pdf", page_count=1,
+        )
+        page = Old.get_model("workbench", "Page").objects.create(document_id=doc.pk, page_number=1)
+        region = Old.get_model("workbench", "PageRegion").objects.create(
+            source_document_id=source.pk, job_id=job.pk, page_id=page.pk,
+            page_number=1, region_type="text", left=.1, top=.1, right=.7, bottom=.5,
+            text="Machine",
+        )
+        return project, region
+
+    def test_backfill_links_old_accepted_correction_to_request(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+        project, region = self._world_old(old_apps)
+
+        Corr = old_apps.get_model("workbench", "RegionCorrection")
+        Req = old_apps.get_model("workbench", "OcrRequest")
+
+        corr = Corr.objects.create(
+            region_id=region.pk, document_id=region.page.document_id,
+            created_by_id=None, operation="text", before={"text": "Machine"},
+            after={"text": "HTR text"}, status="active",
+        )
+        req = Req.objects.create(
+            source_document_id=region.source_document_id,
+            document_id=region.page.document_id, page_id=region.page_id,
+            region_id=region.pk, target="region", provider="htr", prompt="htr",
+            state="completed", candidate_text="HTR text", accepted_correction_id=corr.pk,
+        )
+        # Pre-migration provenance: accepted but source_ocr_request is NULL.
+        fresh = Req.objects.get(pk=req.pk)
+        self.assertIsNone(Req.objects.filter(pk=req.pk).values_list("accepted_correction__source_ocr_request_id", flat=True).first())
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_to)
+
+        NewCorr = executor.loader.project_state(self.migrate_to).apps.get_model("workbench", "RegionCorrection")
+        migrated = NewCorr.objects.get(pk=corr.pk)
+        self.assertEqual(migrated.source_ocr_request_id, req.pk)
+        # Same correction is still the accepted shortcut on the request.
+        NewReq = executor.loader.project_state(self.migrate_to).apps.get_model("workbench", "OcrRequest")
+        self.assertEqual(NewReq.objects.get(pk=req.pk).accepted_correction_id, corr.pk)
+
+    def test_backfill_preserves_existing_source_link(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+        project, region = self._world_old(old_apps)
+
+        Corr = old_apps.get_model("workbench", "RegionCorrection")
+        Req = old_apps.get_model("workbench", "OcrRequest")
+
+        # Two requests, both accepted; the second correction already points at
+        # the first request (manual/populated link must be preserved).
+        corr_a = Corr.objects.create(
+            region_id=region.pk, document_id=region.page.document_id, operation="text",
+            before={"text": "Machine"}, after={"text": "A"}, status="active",
+        )
+        corr_b = Corr.objects.create(
+            region_id=region.pk, document_id=region.page.document_id, operation="text",
+            before={"text": "Machine"}, after={"text": "B"}, status="active",
+        )
+        req_a = Req.objects.create(
+            source_document_id=region.source_document_id, document_id=region.page.document_id,
+            page_id=region.page_id, region_id=region.pk, target="region",
+            provider="vision", prompt="p", state="completed", candidate_text="A",
+            accepted_correction_id=corr_a.pk,
+        )
+        Req.objects.create(
+            source_document_id=region.source_document_id, document_id=region.page.document_id,
+            page_id=region.page_id, region_id=region.pk, target="region",
+            provider="htr", prompt="h", state="completed", candidate_text="B",
+            accepted_correction_id=corr_b.pk,
+        )
+        # corr_b already has a populated provenance link (to req_a) — the
+        # backfill must not overwrite a non-NULL source_ocr_request.
+        corr_b.source_ocr_request_id = req_a.pk
+        corr_b.save()
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_to)
+
+        NewCorr = executor.loader.project_state(self.migrate_to).apps.get_model("workbench", "RegionCorrection")
+        self.assertEqual(NewCorr.objects.get(pk=corr_a.pk).source_ocr_request_id, req_a.pk)
+        # corr_b's pre-existing link to req_a is preserved, NOT overwritten.
+        self.assertEqual(NewCorr.objects.get(pk=corr_b.pk).source_ocr_request_id, req_a.pk)

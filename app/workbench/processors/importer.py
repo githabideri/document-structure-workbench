@@ -284,7 +284,10 @@ class ResultImporter:
             if image_path:
                 from PIL import Image as _PILImage
                 try:
-                    _sp = Path(self.artifacts_base) / image_path
+                    # Resolve through the staging-aware helper: a freshly imported
+                    # page image is staged under .staging and only atomically
+                    # promoted later, so the final artifact path may not exist yet.
+                    _sp = self._artifact_read_path(image_path)
                     with _PILImage.open(_sp) as _img:
                         image_width, image_height = _img.size
                 except Exception:

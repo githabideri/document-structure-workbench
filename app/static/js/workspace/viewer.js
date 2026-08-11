@@ -289,6 +289,7 @@ export function createViewer(host, {imageUrl = null, imageLevels = null, regions
   let pendingFocus = null;
   let selectedId = initialSelectedId;
   let deepLevel = null; // highest-resolution level index (null for single image)
+  let currentLevels = imageLevels || [];
   const stats = {
     generation: 1,
     imageLoads: (imageLevels || imageUrl) ? 1 : 0,
@@ -454,11 +455,22 @@ export function createViewer(host, {imageUrl = null, imageLevels = null, regions
       pendingFocus = focus && selectedId
         ? (regionList.find((r) => String(r.id) === String(selectedId)) || {}).bbox || null
         : null;
+      currentLevels = imageLevels || (imageUrl ? [{url: imageUrl, width: null, height: null}] : []);
       const levels = imageLevels || (imageUrl ? [{url: imageUrl, width: null, height: null}] : null);
       openSource(levels);
     },
     drawHtrLines(lines, crop) { overlay.drawHtrLines(lines, crop); },
     clearHtrLines() { overlay.clearHtrLines(); },
+    // Simple viewer load diagnostics: state-machine events + per-level resource
+    // timings (thumbnail/preview/full). Use to decide whether true tiling is needed.
+    diagnostics() {
+      const timings = currentLevels.map((l) => {
+        const e = performance.getEntriesByName(l.url).pop();
+        return {url: l.url, width: l.width || null, height: l.height || null,
+                duration: e ? Math.round(e.duration) : null, transferSize: e ? e.transferSize : null};
+      });
+      return {events: stats.loadEvents.map((e) => ({...e})), levels: timings};
+    },
     zoomBy(factor) { viewer.viewport.zoomBy(factor); },
     fitWidth() { if (ready) viewer.viewport.fitHorizontally(true); },
     fitPage() { if (ready) viewer.viewport.goHome(); },

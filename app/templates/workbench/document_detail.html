@@ -112,7 +112,7 @@
             </div>
 
             <div id="inspector-pane-page"{% if selected_region %} hidden{% endif %} data-ui-id="page-pane">
-                {% if selected_page.image_path %}{% include "workbench/_page_inspector.html" %}{% endif %}
+                {% if selected_page %}{% include "workbench/_page_inspector.html" %}{% endif %}
             </div>
         </aside>
     </div>

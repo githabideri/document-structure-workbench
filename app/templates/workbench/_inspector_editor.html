@@ -27,7 +27,7 @@
 
     <div class="recognition-controls">
     {% if htr_enabled %}
-        <form class="split-button" data-split-button="htr"
+        <form class="split-button" data-split-button="htr" data-selection-field="pipeline_id"
               hx-post="{% url 'create_region_htr' selected_region.id %}" hx-target="#inspector-versions" hx-swap="outerHTML" hx-disabled-elt="button">
             {% csrf_token %}
             <input type="hidden" name="pipeline_id" value="{{ htr_pipeline }}">
@@ -47,7 +47,7 @@
     {% endif %}
 
     {% if vision_enabled %}
-        <form class="split-button" data-split-button="vision"
+        <form class="split-button" data-split-button="vision" data-selection-field="provider"
               hx-post="{% url 'create_ocr_request' selected_region.id %}" hx-target="#inspector-versions" hx-swap="outerHTML" hx-disabled-elt="button">
             {% csrf_token %}
             <input type="hidden" name="provider" value="{{ vision_provider }}">

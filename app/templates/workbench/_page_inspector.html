@@ -23,7 +23,7 @@
     <section class="inspector-editor" aria-label="{% trans 'Full-page Vision OCR' %}">
         <div class="inspector-section-label">{% trans "Full-page Vision OCR" %}</div>
         {% if vision_enabled %}
-        <form class="split-button" data-split-button="page-vision"
+        <form class="split-button" data-split-button="page-vision" data-selection-field="provider"
               hx-post="{% url 'create_page_ocr_request' selected_page.id %}" hx-target="#inspector-page" hx-swap="innerHTML" hx-disabled-elt="button">
             {% csrf_token %}
             <input type="hidden" name="provider" value="{{ vision_provider }}">

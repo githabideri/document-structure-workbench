@@ -139,12 +139,10 @@ sleep 1.5
 # ---- Open a deep link; wait for the viewer ----
 url="$base_url/documents/$source_id/?revision=$revision_id&page=$page_number&region=$region_a&test_drawn=1"
 "$browser" --session "$session" open "$url" >/dev/null 2>&1 || fail "workspace deep link did not open"
-# This harness runs headless where OSD tile-drawn may never fire, so it opts
-# into the test-only draw fallback (tile-loaded proxies drawing) and then waits
-# for real imagery to be signalled — status leaves 'loading'. Production never
-# reveals overlays on tile-loaded; only this test hook does.
+# The production viewer uses the Canvas drawer, whose tile-drawn event is the
+# real first-paint signal. No browser-side setter may bypass the server gate.
 for _ in $(seq 1 40); do
-  if "$browser" --session "$session" eval 'window.__DSW_WORKSPACE__ && (window.__DSW_WORKSPACE__.viewer.setTestDrawnFallback(true), window.__DSW_WORKSPACE__.viewer.status()!=="loading") ? "yes":"no"' 2>/dev/null | grep -q yes; then break; fi
+  if "$browser" --session "$session" eval 'window.__DSW_WORKSPACE__ && window.__DSW_WORKSPACE__.viewer.status()!=="loading" ? "yes":"no"' 2>/dev/null | grep -q yes; then break; fi
   sleep 0.5
 done
 step_assert deep-link-restored "(()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const s=ws.viewer.stats();if((s.imageLoads!==1)||ws.state.regionId!=='$region_a')throw new Error('deep link state');return JSON.stringify({imageLoads:s.imageLoads,regionId:ws.state.regionId});})()" || fail "deep link did not restore + open viewer"
@@ -205,6 +203,11 @@ step_assert manual-save-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;
 cleanup_fixture
 sleep 0.5
 echo "workspace-smoke: cleaned previous manual-save correction (revert POSTed)"
+
+# Exercise a non-default split-button choice and verify the named hidden field
+# changes (then restore the original choice so the canary provider remains
+# deterministic).
+step_assert non-default-recognition-selection "(()=>{const g=document.querySelector('[data-split-button=htr]');if(!g)return 'htr-disabled';const field=g.querySelector('input[name=pipeline_id]');const opts=[...g.querySelectorAll('[data-recog-option]')];if(!field||opts.length<2)throw new Error('alternate HTR option unavailable');const original=field.value;const alt=opts.find(o=>o.dataset.recogOption!==original);if(!alt)throw new Error('no non-default HTR option');alt.click();if(field.value!==alt.dataset.recogOption)throw new Error('pipeline field did not change');const back=opts.find(o=>o.dataset.recogOption===original);back.click();if(field.value!==original)throw new Error('pipeline field did not restore');return JSON.stringify({selected:alt.dataset.recogOption,restored:field.value});})()" || fail "split-button selection did not update the recognition field"
 
 # ---- Run recognition; the rail becomes pending without recreating anything.
 # In live HTR mode this is explicitly the HTR control, never Vision.

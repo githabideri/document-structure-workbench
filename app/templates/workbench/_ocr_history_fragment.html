@@ -9,7 +9,7 @@
         {% if candidate.state == "completed" %}
         <pre>{{ candidate.candidate_text }}</pre>
         {% if candidate.region_id and not candidate.accepted_correction_id and can_edit_document %}
-        <form method="post" action="{% url 'accept_ocr_request' candidate.id %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">{% trans "Accept candidate" %}</button></form>
+        <form method="post" action="{% url 'accept_ocr_request' candidate.id %}">{% csrf_token %}<input type="hidden" name="expected_current_text" value="{{ candidate.region.effective_text }}"><button class="btn btn-sm btn-primary" type="submit">{% trans "Accept candidate" %}</button></form>
         {% endif %}
         {% elif candidate.error_message %}
         <p class="progress-message error">{{ candidate.error_message }}</p>

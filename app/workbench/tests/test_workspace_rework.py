@@ -86,7 +86,9 @@ class WorkspaceInspectorTests(TestCase):
         with override_settings(DSW_HTR_ENABLED=True, DSW_CHAT_BASE_URL="http://vision.test/v1"):
             response = self.client.get(reverse("region_inspector", args=[self.w["region"].pk]))
         self.assertContains(response, "Run HTR")
+        self.assertContains(response, 'data-selection-field="pipeline_id"')
         self.assertContains(response, "Run Vision")
+        self.assertContains(response, 'data-selection-field="provider"')
         # The button label exposes the currently-selected model/pipeline.
         self.assertContains(response, "TrOCR")  # default HTR pipeline label
         self.assertContains(response, "Qwen")   # default vision provider label
@@ -203,7 +205,7 @@ class WorkspaceRecognitionTests(TestCase):
         self.assertTrue(region.ocr_requests.filter(provider="paddleocr-vl").exists())
 
     @override_settings(DSW_HTR_ENABLED=True)
-    def test_htr_run_remembers_last_pipeline(self):
+    def test_htr_non_default_pipeline_is_stored_on_request(self):
         region = self.w["region"]
         response = self.client.post(
             reverse("create_region_htr", args=[region.pk]),
@@ -211,6 +213,8 @@ class WorkspaceRecognitionTests(TestCase):
             **HTMX_HEADERS,
         )
         self.assertEqual(response.status_code, 200)
+        request = region.ocr_requests.get(provider="htr")
+        self.assertEqual(request.metadata["pipeline_id"], "htrflow-trocr-prototype")
         prefs = UserPreferences.get_or_create_for_user(self.w["owner"])
         prefs.refresh_from_db()
         self.assertEqual(prefs.last_htr_pipeline, "htrflow-trocr-prototype")
@@ -242,6 +246,20 @@ class WorkspaceRecognitionTests(TestCase):
         self.assertEqual(item.accepted_correction_id, first_correction.pk)
         self.assertEqual(region.corrections.filter(operation="text").count(), 1)
 
+    def test_accept_rejects_stale_expected_current_text(self):
+        region = self.w["region"]
+        item = OcrService.create(page=self.w["page"], region=region, provider="qwen", model="m", user=self.w["owner"])
+        item.state = "completed"
+        item.candidate_text = "Accepted text"
+        item.save(update_fields=["state", "candidate_text"])
+        response = self.client.post(
+            reverse("accept_ocr_request", args=[item.pk]),
+            data={"expected_current_text": "stale"}, **HTMX_HEADERS,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "changed before this correction")
+        self.assertFalse(region.corrections.exists())
+
     def test_htmx_accept_returns_inspector_partial_not_redirect(self):
         region = self.w["region"]
         item = OcrService.create(page=self.w["page"], region=region, provider="qwen", model="m", user=self.w["owner"])
@@ -262,6 +280,11 @@ class WorkspacePageDataTests(TestCase):
     def setUp(self):
         self.w = _world()
         self.client.force_login(self.w["owner"])
+
+    def test_initial_page_inspector_renders_without_page_image(self):
+        response = self.client.get(reverse("document_detail", args=[self.w["source"].pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="inspector-page-text"')
 
     def test_page_workspace_data_returns_region_adapter(self):
         response = self.client.get(reverse("page_workspace_data", args=[self.w["page"].pk]))

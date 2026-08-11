@@ -137,7 +137,10 @@ export function wireSplitButtons(root) {
   for (const group of root.querySelectorAll("[data-split-button]")) {
     if (group.dataset.wired === "1") continue; // idempotent: buttons stay mounted
     group.dataset.wired = "1";
-    const hidden = group.querySelector("input[type='hidden']");
+    const fieldName = group.dataset.selectionField;
+    const hidden = fieldName
+      ? group.querySelector(`input[name="${CSS.escape(fieldName)}"]`)
+      : group.querySelector("input[type='hidden']:not([name='csrfmiddlewaretoken'])");
     const modelLabel = group.querySelector("[data-recog-model]");
     const options = group.querySelectorAll("[data-recog-option]");
     const menu = group.querySelector(".split-button-menu");
@@ -296,7 +299,12 @@ export function ensureCompareAcceptDelegation(root, ctx) {
     const url = btn.dataset.acceptUrl || "";
     if (!url) return;
     if (!guardDirtyInspector(root)) return;
-    if (window.htmx) window.htmx.ajax("POST", url, {target: "#inspector-pane-region", swap: "innerHTML"});
+    const area = root.querySelector("#transcription-area");
+    const expected = area ? area.dataset.expectedCurrent || "" : "";
+    if (window.htmx) window.htmx.ajax("POST", url, {
+      target: "#inspector-pane-region", swap: "innerHTML",
+      values: {expected_current_text: expected},
+    });
   });
 }
 

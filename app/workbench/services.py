@@ -517,6 +517,8 @@ class OcrService:
                 raise PermissionError("You do not have permission to edit this project.")
             if locked.state != "completed" or not locked.region_id:
                 raise ValueError("Only completed region OCR candidates can be accepted.")
+            if expected_current is not None and locked.region.effective_text != expected_current:
+                raise CorrectionError("The region changed before this correction was applied.")
             existing = locked.accepted_correction
             # Idempotence means "this candidate's correction is the *current/
             # effective* transcription", not merely "it once produced an active
@@ -586,6 +588,8 @@ class HtrService:
                 raise PermissionError("You do not have permission to edit this project.")
             if locked.provider != HTR_PROVIDER or locked.state != "completed" or not locked.region_id:
                 raise ValueError("Only completed region HTR candidates can be accepted.")
+            if expected_current is not None and locked.region.effective_text != expected_current:
+                raise CorrectionError("The region changed before this correction was applied.")
             existing = locked.accepted_correction
             # Idempotence = this candidate's correction is the current/effective one.
             current_active = (

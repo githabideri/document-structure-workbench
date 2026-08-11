@@ -759,6 +759,12 @@ def _is_htmx(request):
     return request.headers.get("HX-Request") == "true"
 
 
+def _workspace_success(request, message):
+    """Flash workspace notices only on full navigations."""
+    if not _is_htmx(request):
+        messages.success(request, message)
+
+
 def _inspector_response(request, region, scope="full", error=None):
     """Render the appropriate inspector partial for HTMX, else deep-link redirect.
 
@@ -1153,7 +1159,7 @@ def correct_region_text(request, region_id):
             "effective_text": region.effective_text,
             "versions_html": versions_html,
         })
-    messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
+    _workspace_success(request, _("Correction saved. The original machine extraction remains unchanged."))
     return _inspector_response(request, region)
 
 
@@ -1192,7 +1198,7 @@ def correct_region(request, region_id):
         )
     except CorrectionError as exc:
         return _inspector_response(request, region, error=_(str(exc)))
-    messages.success(request, _("Correction saved. The original machine extraction remains unchanged."))
+    _workspace_success(request, _("Correction saved. The original machine extraction remains unchanged."))
     return _inspector_response(request, region)
 
 
@@ -1261,7 +1267,7 @@ def create_ocr_request(request, region_id):
         recognition.remember_vision_provider(request.user, provider)
     except (PermissionError, ValueError) as exc:
         return _inspector_response(request, region, scope="versions", error=_(str(exc)))
-    messages.success(request, _("Visual OCR candidate queued. This will not change the current text automatically."))
+    _workspace_success(request, _("Visual OCR candidate queued. This will not change the current text automatically."))
     # Only the version rail swaps so an in-progress transcription edit survives.
     return _inspector_response(request, region, scope="versions")
 
@@ -1313,11 +1319,12 @@ def accept_ocr_request(request, request_id):
     item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(item.document.collection):
         raise PermissionDenied
-    from .services import OcrService
+    from .services import CorrectionError, OcrService
+    expected = request.POST.get("expected_current_text")
     try:
-        OcrService.accept(item=item, user=request.user)
-        messages.success(request, _("Visual OCR text accepted as a reversible correction."))
-    except (PermissionError, ValueError) as exc:
+        OcrService.accept(item=item, user=request.user, expected_current=expected)
+        _workspace_success(request, _("Visual OCR text accepted as a reversible correction."))
+    except (PermissionError, ValueError, CorrectionError) as exc:
         return _inspector_response(request, item.region, error=_(str(exc)))
     return _inspector_response(request, item.region)
 
@@ -1347,7 +1354,7 @@ def create_region_htr(request, region_id):
         recognition.remember_htr_pipeline(request.user, pipeline_id)
     except (PermissionError, ValueError) as exc:
         return _inspector_response(request, region, scope="versions", error=_(str(exc)))
-    messages.success(request, _("HTR run queued. The result is a candidate until you accept it."))
+    _workspace_success(request, _("HTR run queued. The result is a candidate until you accept it."))
     return _inspector_response(request, region, scope="versions")
 
 
@@ -1360,9 +1367,10 @@ def accept_region_htr(request, request_id):
     item = get_object_or_404(OcrRequest.objects.select_related("region", "document__collection"), pk=request_id)
     if not ProjectAccessPolicy(user=request.user).can_edit(item.document.collection):
         raise PermissionDenied
+    expected = request.POST.get("expected_current_text")
     try:
-        HtrService.accept(item=item, user=request.user)
-        messages.success(request, _("HTR transcription accepted as a reversible correction."))
+        HtrService.accept(item=item, user=request.user, expected_current=expected)
+        _workspace_success(request, _("HTR transcription accepted as a reversible correction."))
     except (PermissionError, ValueError) as exc:
         return _inspector_response(request, item.region, error=_(str(exc)))
     except CorrectionError as exc:
@@ -1408,6 +1416,7 @@ def reapply_region_correction(request, correction_id):
             return JsonResponse({"error": "permission_denied"}, status=403)
         raise PermissionDenied
     text = correction.after.get("text", "")
+    expected = request.POST.get("expected_current_text")
     if not text.strip():
         return _inspector_response(request, correction.region, error=_("That version has no text to apply."))
     try:
@@ -1415,10 +1424,11 @@ def reapply_region_correction(request, correction_id):
             region=correction.region, user=request.user, operation="text",
             before={"text": correction.region.effective_text}, after={"text": text},
             reason=f"Re-applied manual version #{correction.pk}",
+            expected_current=expected,
         )
     except CorrectionError as exc:
         return _inspector_response(request, correction.region, error=_(str(exc)))
-    messages.success(request, _("Saved version as the current transcription."))
+    _workspace_success(request, _("Saved version as the current transcription."))
     return _inspector_response(request, correction.region)
 
 
@@ -1439,17 +1449,18 @@ def accept_imported_text(request, region_id):
         if _is_htmx(request):
             return JsonResponse({"error": "permission_denied"}, status=403)
         raise PermissionDenied
+    expected = request.POST.get("expected_current_text")
     if not region.text.strip():
         return _inspector_response(request, region, error=_("The imported text for this region is empty."))
     try:
         CorrectionService.apply(
             region=region, user=request.user, operation="text",
             before={"text": region.effective_text}, after={"text": region.text},
-            reason="Restored imported transcription",
+            reason="Restored imported transcription", expected_current=expected,
         )
     except CorrectionError as exc:
         return _inspector_response(request, region, error=_(str(exc)))
-    messages.success(request, _("Restored the imported transcription."))
+    _workspace_success(request, _("Restored the imported transcription."))
     return _inspector_response(request, region)
 
 

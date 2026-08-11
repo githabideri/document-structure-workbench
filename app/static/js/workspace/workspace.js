@@ -72,6 +72,10 @@ function initWorkspace(shell) {
   const pageReq = {gen: 0, controller: null};
   const pagePaneReq = {gen: 0, controller: null};
   const refreshReq = {gen: 0, controller: null};
+  // Selection is committed only after its inspector has loaded successfully.
+  // This intent also serializes concurrent region clicks without exposing a
+  // stale editor when a later request fails.
+  let selectionIntent = state.regionId;
 
   function abort(res) {
     if (res && res.controller) { try { res.controller.abort(); } catch { /* ignore */ } }
@@ -89,7 +93,7 @@ function initWorkspace(shell) {
       .then((resp) => ({resp, gen, signal}))
       .catch((err) => {
         if (err && err.name === "AbortError") return {aborted: true, gen};
-        return {aborted: true, gen}; // transient network error → treat as no-op
+        return {failed: true, error: err, gen};
       });
   }
 
@@ -192,44 +196,72 @@ function initWorkspace(shell) {
     history.pushState({}, "", buildUrl({page, region}));
   }
 
-  async function selectRegion(regionId, {focus = true, push = true, fromCanvas = false} = {}) {
+  async function selectRegion(regionId, {focus = true, push = true, fromCanvas = false, skipDirty = false} = {}) {
     if (regionId == null || String(regionId) === String(state.regionId)) {
+      selectionIntent = state.regionId;
+      abort(regionReq);
       if (focus && regionId != null) viewer.selectRegion(regionId, {focus});
-      return;
+      return true;
     }
-    if (isInspectorDirty(document.getElementById("inspector-pane-region"))) {
-      if (!confirm(t("You have unsaved transcription changes. Leave this region anyway?"))) return;
+    if (!skipDirty && isInspectorDirty(document.getElementById("inspector-pane-region"))) {
+      if (!confirm(t("You have unsaved transcription changes. Leave this region anyway?"))) return false;
     }
-    state.regionId = String(regionId);
-    viewer.selectRegion(regionId, {focus});
-    updateFocusButton(regionId);
+    const requested = String(regionId);
+    selectionIntent = requested;
+    const loaded = await swapInspector(reverse("region_inspector", requested), requested);
+    if (!loaded || selectionIntent !== requested) return false;
+    state.regionId = requested;
+    viewer.selectRegion(requested, {focus});
+    updateFocusButton(requested);
     setInspectorTab("region");
-    await swapInspector(reverse("region_inspector", state.regionId));
-    if (push) pushState({region: state.regionId});
+    if (push) pushState({region: requested});
     publishDiagnostics();
+    return true;
   }
 
-  async function swapInspector(url) {
-    const requested = state.regionId;
+  function showInspectorLoadError(target, message) {
+    if (!target) return;
+    let alert = target.querySelector("[data-workspace-load-error]");
+    if (!alert) {
+      alert = document.createElement("div");
+      alert.className = "inspector-alert inspector-status";
+      alert.dataset.workspaceLoadError = "1";
+      target.prepend(alert);
+    }
+    alert.hidden = false;
+    alert.dataset.kind = "error";
+    alert.textContent = message;
+  }
+
+  async function swapInspector(url, requested = selectionIntent) {
     const target = document.getElementById("inspector-pane-region");
-    const {resp, gen, aborted} = await fetchGuarded(regionReq, url, {headers: {"Accept": "text/html", "HX-Request": "true"}});
-    if (aborted || !isCurrent(regionReq, gen)) return; // superseded or aborted
-    if (String(requested) !== String(state.regionId)) return; // selection moved on
-    if (!resp || !resp.ok || !target) return;
-    const html = await resp.text();
-    if (!isCurrent(regionReq, gen) || String(requested) !== String(state.regionId)) return;
+    const {resp, gen, aborted, failed} = await fetchGuarded(regionReq, url, {headers: {"Accept": "text/html", "HX-Request": "true"}});
+    if (aborted || !isCurrent(regionReq, gen) || selectionIntent !== String(requested)) return false;
+    if (failed || !resp || !resp.ok || !target) {
+      showInspectorLoadError(target, t("Could not load the selected region. The previous editor is unchanged."));
+      return false;
+    }
+    let html;
+    try { html = await resp.text(); } catch {
+      showInspectorLoadError(target, t("Could not load the selected region. The previous editor is unchanged."));
+      return false;
+    }
+    if (!isCurrent(regionReq, gen) || selectionIntent !== String(requested)) return false;
     target.innerHTML = html;
-    target.dataset.regionId = state.regionId || "";
+    target.dataset.regionId = String(requested);
     window.htmx?.process(target);
     wireInspectorRoot();
     publishDiagnostics();
+    return true;
   }
 
   function clearInspector() {
+    abort(regionReq);
     const target = document.getElementById("inspector-pane-region");
     target.innerHTML = emptyRegionHtml();
     target.dataset.regionId = "";
     state.regionId = null;
+    selectionIntent = null;
     viewer.clearSelection();
     updateFocusButton(null);
     setInspectorTab("page");
@@ -237,13 +269,18 @@ function initWorkspace(shell) {
   }
 
   // ---- Page switching (may load another image; keeps the shell stable) ----
-  async function loadPage(pageId, {regionId = null, focus = false, push = true} = {}) {
-    if (!pageId) return;
-    const {resp, gen, aborted} = await fetchGuarded(pageReq, reverse("page_workspace_data", pageId), {headers: {"Accept": "application/json"}});
-    if (aborted || !isCurrent(pageReq, gen)) return;
-    if (!resp || !resp.ok) return;
-    const data = await resp.json();
-    if (!isCurrent(pageReq, gen)) return;
+  async function loadPage(pageId, {regionId = null, focus = false, push = true, skipDirty = false} = {}) {
+    if (!pageId) return false;
+    if (!skipDirty && String(pageId) !== String(state.pageId)
+        && isInspectorDirty(document.getElementById("inspector-pane-region"))) {
+      if (!confirm(t("You have unsaved transcription changes. Leave this page anyway?"))) return false;
+    }
+    const {resp, gen, aborted, failed} = await fetchGuarded(pageReq, reverse("page_workspace_data", pageId), {headers: {"Accept": "application/json"}});
+    if (aborted || !isCurrent(pageReq, gen)) return false;
+    if (failed || !resp || !resp.ok) return false;
+    let data;
+    try { data = await resp.json(); } catch { return false; }
+    if (!isCurrent(pageReq, gen)) return false;
     // The page identity is fixed by the request; only a newer page load may
     // supersede it. Region-level interactions never supersede a page load.
     state.pageId = String(data.page_id);
@@ -254,6 +291,13 @@ function initWorkspace(shell) {
     state.logicalSize = data.logical_size || null;
     state.rasterSize = data.raster_size || null;
     state.regionId = regionId ? String(regionId) : null;
+    selectionIntent = state.regionId;
+    // Do not leave the previous page's editor mounted while the new region
+    // inspector is loading; a failed request must never look like the new page.
+    if (state.regionId) {
+      const regionPane = document.getElementById("inspector-pane-region");
+      if (regionPane) regionPane.innerHTML = emptyRegionHtml();
+    }
     shell.dataset.pageId = state.pageId;
     shell.dataset.pageNumber = state.pageNumber;
     viewer.openPage(pageOpenArgs({focus}));
@@ -264,13 +308,15 @@ function initWorkspace(shell) {
     if (!isCurrent(pageReq, gen)) return;
     if (state.regionId) {
       setInspectorTab("region");
-      await swapInspector(reverse("region_inspector", state.regionId));
+      const loaded = await swapInspector(reverse("region_inspector", state.regionId), state.regionId);
+      if (!loaded) return false;
     } else {
       setInspectorTab("page");
       clearInspector();
     }
     if (push) pushState({page: state.pageNumber, region: state.regionId});
     publishDiagnostics();
+    return true;
   }
 
   async function loadPagePane() {
@@ -287,21 +333,44 @@ function initWorkspace(shell) {
   }
 
   // ---- URL reconciliation (deep links + back/forward) ----
+  function restoreCanonicalUrl() {
+    history.replaceState({}, "", buildUrl({page: state.pageNumber, region: state.regionId}));
+  }
+
+  function guardUrlTransition(urlPage, urlRegion) {
+    const pageChanged = urlPage && String(urlPage) !== String(state.pageNumber);
+    const regionChanged = String(urlRegion || "") !== String(state.regionId || "");
+    if (!pageChanged && !regionChanged) return true;
+    if (!isInspectorDirty(document.getElementById("inspector-pane-region"))) return true;
+    return confirm(t("You have unsaved transcription changes. Continue to this workspace location?"));
+  }
+
   async function applyUrlState({fromPop = false} = {}) {
     const params = new URLSearchParams(location.search);
     const urlRegion = params.get("region");
     const urlPage = params.get("page");
+    if (!guardUrlTransition(urlPage, urlRegion)) {
+      restoreCanonicalUrl();
+      return false;
+    }
     const samePage = urlPage && String(urlPage) === String(state.pageNumber);
     if (!samePage && urlPage) {
       const pageId = pageIdFromNumber(urlPage);
-      if (pageId) { await loadPage(pageId, {regionId: urlRegion, focus: !!urlRegion, push: false}); return; }
+      if (pageId) {
+        const loaded = await loadPage(pageId, {regionId: urlRegion, focus: !!urlRegion, push: false, skipDirty: true});
+        if (!loaded && fromPop) restoreCanonicalUrl();
+        return loaded;
+      }
     }
     if (urlRegion && String(urlRegion) !== String(state.regionId)) {
-      await selectRegion(urlRegion, {focus: fromPop, push: false});
+      const selected = await selectRegion(urlRegion, {focus: fromPop, push: false, skipDirty: true});
+      if (!selected && fromPop) restoreCanonicalUrl();
+      return selected;
     } else if (!urlRegion && state.regionId) {
       viewer.clearSelection();
       clearInspector();
     }
+    return true;
   }
 
   function pageIdFromNumber(num) {
@@ -373,9 +442,6 @@ function initWorkspace(shell) {
       if (!item) return;
       const pageId = item.dataset.pageId;
       if (pageId === state.pageId) return;
-      if (isInspectorDirty(document.getElementById("inspector-pane-region"))) {
-        if (!confirm(t("You have unsaved transcription changes. Leave this page anyway?"))) return;
-      }
       loadPage(pageId, {push: true});
     });
   }

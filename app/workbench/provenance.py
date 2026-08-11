@@ -39,6 +39,11 @@ def _current_summary(region, active_correction, active_ocr):
 
     ``active_correction`` is the single active text correction (or None).
     ``active_ocr`` is the recognition request that produced it (or None).
+
+    Provenance is read from ``active_correction.source_ocr_request`` (set once
+    at acceptance time), so a candidate-derived correction keeps its HTR/Vision
+    source forever even after the ``OcrRequest.accepted_correction`` shortcut is
+    repointed by a later accept/revert/re-accept cycle.
     """
     text = region.effective_text
     if active_correction is None:
@@ -47,6 +52,7 @@ def _current_summary(region, active_correction, active_ocr):
             "text": text, "source": "imported",
             "source_label": str(_("Imported")), "updated_at": _ts(None),
         }
+    active_ocr = active_ocr or getattr(active_correction, "source_ocr_request", None)
     if active_ocr is not None:
         if active_ocr.provider == "htr":
             pipeline = (active_ocr.metadata or {}).get("pipeline_id", "")
@@ -78,17 +84,19 @@ def build_region_versions(region):
         any_pending:    True if any recognition candidate is queued/processing
     """
     text_corrections = list(
-        region.corrections.filter(operation="text").select_related("created_by").order_by("-created_at", "-id")
+        region.corrections.filter(operation="text").select_related("created_by", "source_ocr_request").order_by("-created_at", "-id")
     )
     ocr_items = list(region.ocr_requests.all().order_by("-created_at", "-id"))
-    ocr_by_correction = {
-        item.accepted_correction_id: item
-        for item in ocr_items if item.accepted_correction_id
-    }
     active_text = next((c for c in text_corrections if c.status == "active"), None)
-    active_ocr = ocr_by_correction.get(active_text.pk) if active_text else None
+    active_ocr = getattr(active_text, "source_ocr_request", None) if active_text else None
     current = _current_summary(region, active_text, active_ocr)
     current_id = active_text.pk if active_text else None
+    # A version is re-applicable (its "Use transcription" action is offered)
+    # only when it differs from the current effective transcription.
+    effective_text = region.effective_text
+
+    def reappliable(text):
+        return bool(text) and text != effective_text
 
     entries = []
 
@@ -109,7 +117,8 @@ def build_region_versions(region):
         "created_at": _ts(getattr(region.job, "created_at", None)) if hasattr(region.job, "created_at") else None,
         "finished_at": None,
         "selectable": bool(region.text),
-        "accept_url": "",
+        "reappliable": reappliable(region.text),
+        "accept_url": reverse("accept_imported_text", args=[region.pk]) if reappliable(region.text) else "",
         "detail_url": "",
     })
 
@@ -127,6 +136,7 @@ def build_region_versions(region):
             sublabel = item.model or item.provider
             model = item.model or item.provider
         is_current = current_id is not None and item.accepted_correction_id == current_id
+        cand_text = item.candidate_text if item.state == "completed" else ""
         entries.append({
             "id": f"ocr-{item.pk}",
             "kind": kind,
@@ -135,31 +145,32 @@ def build_region_versions(region):
             "provider": item.provider,
             "model": model,
             "pipeline_id": pipeline if is_htr else "",
-            "text": item.candidate_text if item.state == "completed" else "",
+            "text": cand_text,
             "state": item.state,
             "status": "",
             "accepted": is_current,
             "created_by": _user_label(item.created_by),
             "created_at": _ts(item.created_at),
             "finished_at": _ts(item.finished_at),
-            "selectable": item.state == "completed" and bool(item.candidate_text),
+            "selectable": item.state == "completed" and bool(cand_text),
+            "reappliable": reappliable(cand_text),
             "accept_url": (
-                reverse("accept_region_htr", args=[item.pk]) if is_htr
-                else reverse("accept_ocr_request", args=[item.pk])
+                (reverse("accept_region_htr", args=[item.pk]) if is_htr else reverse("accept_ocr_request", args=[item.pk]))
+                if reappliable(cand_text) else ""
             ),
             "detail_url": (reverse("api_htr_run_detail", args=[item.pk]) if is_htr else ""),
         })
 
-    # Manual text corrections that are NOT the result of an accepted recognition
-    # candidate (those are already represented by their ocr-* entry above, which
-    # carries the correct HTR/Vision label). Only truly manual edits get their
-    # own entry.
-    accepted_ocr_correction_ids = {item.accepted_correction_id for item in ocr_items if item.accepted_correction_id}
+    # Truly manual text corrections (no recognition source). Candidate-derived
+    # corrections are already represented by their ocr-* entry, which carries the
+    # correct HTR/Vision label. Historical manual versions remain selectable so
+    # they stay inspectable even when imported (or another) text is current.
     for corr in text_corrections:
-        if corr.pk in accepted_ocr_correction_ids:
+        if corr.source_ocr_request_id is not None:
             continue
         user = _user_label(corr.created_by)
         label = f"{_('Manual')} · {user}" if user and str(user) != str(_("system")) else str(_("Manual"))
+        corr_text = corr.after.get("text", "")
         entries.append({
             "id": f"corr-{corr.pk}",
             "kind": "manual",
@@ -168,15 +179,16 @@ def build_region_versions(region):
             "provider": "",
             "model": "",
             "pipeline_id": "",
-            "text": corr.after.get("text", ""),
+            "text": corr_text,
             "state": "completed",
             "status": corr.status,
             "accepted": corr.pk == current_id,
             "created_by": _user_label(corr.created_by),
             "created_at": _ts(corr.created_at),
             "finished_at": _ts(corr.created_at),
-            "selectable": current_id is not None,  # manual edits are always selectable
-            "accept_url": "",
+            "selectable": True,  # historical manual versions always inspectable
+            "reappliable": reappliable(corr_text),
+            "accept_url": reverse("reapply_region_correction", args=[corr.pk]) if reappliable(corr_text) else "",
             "detail_url": "",
         })
 

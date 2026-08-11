@@ -723,7 +723,7 @@ def _workspace_recognition_context(request):
         "htr_pipelines": recognition.available_htr_pipelines(),
         "htr_pipeline": recognition.effective_htr_pipeline(request.user),
         "vision_enabled": recognition.vision_enabled(),
-        "vision_models": recognition.available_vision_models(),
+        "vision_models": recognition.runnable_vision_models(),
         "vision_provider": recognition.effective_vision_provider(request.user),
         "default_vision_provider": recognition.default_vision_provider(),
         "default_htr_pipeline": recognition.default_htr_pipeline(),
@@ -804,7 +804,7 @@ def _page_inspector_context(request, page):
         "workspace_revision_id": page.document_id,
         "poll_url": request.build_absolute_uri(
             reverse("page_inspector", args=[page.pk])
-        ) if _is_htmx(request) else "",
+        ),
     }
     ctx.update(_workspace_recognition_context(request))
     return ctx
@@ -862,32 +862,74 @@ def _page_image_levels(page):
     """The viewer's page representation: thumbnail → preview → full levels.
 
     Returns ``None`` when the page has no image. Each level carries its URL and
-    pixel dimensions. The same shape is used for initial render and for
-    client-side page switching so there is only one image-loading path."""
+    **actual/expected pixel dimensions** — logical Docling page dimensions are
+    never used here (see ``imaging.raster_size``). Thumbnail/preview sizes are
+    deterministic and header-cached, never generated synchronously while
+    rendering workspace metadata (the derivative endpoint creates them lazily).
+
+    Levels are validated: strictly ascending resolution and matching aspect
+    ratio. If the level list is malformed, the page falls back to a single full
+    image source rather than rendering an invalid pyramid."""
+    import logging as _logging
     from django.urls import reverse as _reverse
-    from .imaging import ensure_derivative, full_size
+    from .imaging import derivative_info, raster_size
     if not page.image_path:
         return None
-    full = full_size(page)
+    full = raster_size(page)
     if not full:
         return None
+    full_w, full_h = full
+    if full_w <= 0 or full_h <= 0:
+        return None
     levels = []
-    thumb = ensure_derivative(page, "thumbnail")
+    thumb = derivative_info(page, "thumbnail")
     if thumb:
         levels.append({
             "url": _reverse("page_image_derivative", args=[page.pk, "thumbnail"]),
-            "width": thumb[1][0], "height": thumb[1][1],
+            "width": thumb[0], "height": thumb[1],
         })
-    preview = ensure_derivative(page, "preview")
+    preview = derivative_info(page, "preview")
     if preview:
         levels.append({
             "url": _reverse("page_image_derivative", args=[page.pk, "preview"]),
-            "width": preview[1][0], "height": preview[1][1],
+            "width": preview[0], "height": preview[1],
         })
     levels.append({
         "url": _reverse("page_image", args=[page.pk]),
-        "width": full[0], "height": full[1],
+        "width": full_w, "height": full_h,
     })
+
+    # Validate: each level has positive dims, aspect matches the full image, and
+    # resolution increases strictly with level index (thumbnail < preview < full).
+    def aspect(size):
+        w, h = size
+        return w / h if w and h else 0.0
+
+    full_aspect = aspect((full_w, full_h))
+    ok = True
+    previous_height = 0
+    for level in levels:
+        w, h = level["width"], level["height"]
+        if not w or not h or h <= previous_height:
+            _logging.getLogger(__name__).warning(
+                "page %s level %dx%d not strictly ascending", page.pk, w, h,
+            )
+            ok = False
+            break
+        if abs(aspect((w, h)) - full_aspect) > 0.03:  # ~3% tolerance
+            _logging.getLogger(__name__).warning(
+                "page %s level %dx%d aspect %.4f differs from full %.4f",
+                page.pk, w, h, aspect((w, h)), full_aspect,
+            )
+            ok = False
+            break
+        previous_height = h
+    if not ok:
+        _logging.getLogger(__name__).warning(
+            "page %s pyramid malformed (%s); falling back to single image",
+            page.pk, [(l["width"], l["height"]) for l in levels],
+        )
+        return [levels[-1]]
     return levels
 
 
@@ -911,6 +953,7 @@ def page_workspace_data(request, page_id):
     next_page = pages[index + 1] if 0 <= index < len(pages) - 1 else None
     source = getattr(getattr(page.document, "processing_job", None), "source_document", None)
     image_url = reverse("page_image", args=[page.pk]) if page.image_path else None
+    from .imaging import logical_size, raster_size
     return JsonResponse({
         "page_id": page.pk,
         "page_number": page.page_number,
@@ -919,6 +962,8 @@ def page_workspace_data(request, page_id):
         "image_url": image_url,
         "has_image": bool(page.image_path),
         "image_levels": _page_image_levels(page),
+        "logical_size": logical_size(page),
+        "raster_size": raster_size(page),
         "regions": [_region_adapter(r) for r in regions],
         "prev_page_id": prev_page.pk if prev_page else None,
         "next_page_id": next_page.pk if next_page else None,
@@ -1026,6 +1071,12 @@ def document_detail(request, document_id):
         "region_inspector_url": reverse("region_inspector", args=[selected_region.id]) if selected_region else "",
         "page_workspace_data_url": reverse("page_workspace_data", args=[page.id]) if page else "",
     }
+    if page:
+        from .imaging import logical_size, raster_size
+        context["page_meta_json"] = json.dumps({
+            "logical": logical_size(page),
+            "raster": raster_size(page),
+        })
     context.update(_workspace_recognition_context(request))
     if page:
         context.update(_page_inspector_context(request, page))
@@ -1329,6 +1380,72 @@ def revert_region_correction(request, correction_id):
     except CorrectionError as exc:
         return _inspector_response(request, correction.region, error=_(str(exc)))
     return _inspector_response(request, correction.region)
+
+
+@login_required
+@require_POST
+def reapply_region_correction(request, correction_id):
+    """Re-apply a historical manual text correction as a *fresh* correction.
+
+    ``Use transcription`` on a historical version never mutates the old row; it
+    creates a new manual correction with the same text so the timeline stays
+    auditable and the version becomes effective/current again."""
+    from .policy import ProjectAccessPolicy
+    from .services import CorrectionError, CorrectionService
+    correction = get_object_or_404(
+        RegionCorrection.objects.select_related("document__collection", "region", "created_by"),
+        pk=correction_id,
+    )
+    if correction.operation != "text":
+        return _inspector_response(request, correction.region, error=_("Only text versions can be re-applied."))
+    if not ProjectAccessPolicy(user=request.user).can_edit(correction.document.collection):
+        if _is_htmx(request):
+            return JsonResponse({"error": "permission_denied"}, status=403)
+        raise PermissionDenied
+    text = correction.after.get("text", "")
+    if not text.strip():
+        return _inspector_response(request, correction.region, error=_("That version has no text to apply."))
+    try:
+        CorrectionService.apply(
+            region=correction.region, user=request.user, operation="text",
+            before={"text": correction.region.effective_text}, after={"text": text},
+            reason=f"Re-applied manual version #{correction.pk}",
+        )
+    except CorrectionError as exc:
+        return _inspector_response(request, correction.region, error=_(str(exc)))
+    messages.success(request, _("Saved version as the current transcription."))
+    return _inspector_response(request, correction.region)
+
+
+@login_required
+@require_POST
+def accept_imported_text(request, region_id):
+    """Restore the machine-imported transcription as the effective text.
+
+    Creates a fresh manual correction carrying the immutable raw region text so
+    the restore is itself auditable and reversible."""
+    from .policy import ProjectAccessPolicy
+    from .services import CorrectionError, CorrectionService
+    region = get_object_or_404(
+        PageRegion.objects.select_related("page__document__collection").prefetch_related("corrections", "ocr_requests"),
+        pk=region_id,
+    )
+    if not ProjectAccessPolicy(user=request.user).can_edit(region.page.document.collection):
+        if _is_htmx(request):
+            return JsonResponse({"error": "permission_denied"}, status=403)
+        raise PermissionDenied
+    if not region.text.strip():
+        return _inspector_response(request, region, error=_("The imported text for this region is empty."))
+    try:
+        CorrectionService.apply(
+            region=region, user=request.user, operation="text",
+            before={"text": region.effective_text}, after={"text": region.text},
+            reason="Restored imported transcription",
+        )
+    except CorrectionError as exc:
+        return _inspector_response(request, region, error=_(str(exc)))
+    messages.success(request, _("Restored the imported transcription."))
+    return _inspector_response(request, region)
 
 
 # --- Reviews ---

@@ -76,11 +76,22 @@ def available_vision_models():
     return rows
 
 
+def runnable_vision_models():
+    """Return ``[(provider, label, default_model), ...]`` for the Vision dropdown,
+    restricted to providers whose endpoint is actually configured.
+
+    Presenting a provider that is certain to fail (its endpoint is missing) is
+    a poor UX; the UI only offers runnable providers. The full catalogue remains
+    available via ``available_vision_models()`` for internal knowledge and the
+    server-side provider guard."""
+    return [(p, l, m) for p, l, m in available_vision_models() if _vision_base_url(p)]
+
+
 def vision_enabled():
     """Whether any visual-OCR provider has a configured endpoint.
 
     Independent of HTR: disabling HTR must never hide Vision (and vice versa)."""
-    return any(_vision_base_url(provider) for provider, _, _ in available_vision_models())
+    return bool(runnable_vision_models())
 
 
 def default_vision_provider():
@@ -114,14 +125,25 @@ def effective_htr_pipeline(user, explicit=None):
 
 
 def effective_vision_provider(user, explicit=None):
-    """Resolve the visual OCR provider for a new run (see ``effective_htr_pipeline``)."""
+    """Resolve the visual OCR provider for a new run (see ``effective_htr_pipeline``).
+
+    The user's stored provider is used only if it is still *runnable* with the
+    current server configuration; otherwise we silently fall back to the
+    configured default (if runnable) or the first runnable provider. A provider
+    whose endpoint is missing is never returned, so the UI never offers a
+    dropdown option that is guaranteed to fail."""
     if explicit:
         return explicit
     prefs = _prefs(user)
     stored = prefs.last_vision_provider if prefs else ""
-    if stored and any(provider == stored for provider, _, _ in available_vision_models()):
+    runnable = {p for p, _, _ in runnable_vision_models()}
+    if stored and stored in runnable:
         return stored
-    return default_vision_provider()
+    default = default_vision_provider()
+    if default in runnable:
+        return default
+    rows = runnable_vision_models()
+    return rows[0][0] if rows else ""
 
 
 def remember_htr_pipeline(user, pipeline_id):

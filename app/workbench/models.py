@@ -122,7 +122,21 @@ class Document(models.Model):
 
 
 class Page(models.Model):
-    """A single page within a document."""
+    """A single page within a document.
+
+    Coordinate model (two distinct, documented spaces):
+
+    - ``width`` / ``height`` are the **logical** Docling page dimensions
+      (e.g. 595×841). They are used only to normalize Docling bounding boxes
+      into page-relative [0,1] coordinates at import time. They are *not*
+      pixel dimensions of the persisted image.
+    - ``image_width`` / ``image_height`` are the authoritative **raster**
+      pixel dimensions of the persisted page image (e.g. 1190×1682). They
+      are what OpenSeadragon geometry and all pyramid levels must use.
+
+    The two spaces normally share an aspect ratio but have different
+    resolutions; never feed logical dimensions into the viewer.
+    """
 
     id = models.AutoField(primary_key=True)
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="pages")
@@ -130,6 +144,8 @@ class Page(models.Model):
     image_path = models.CharField(max_length=1000, blank=True)
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)
+    image_width = models.PositiveIntegerField(null=True, blank=True)
+    image_height = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         unique_together = ["document", "page_number"]
@@ -1081,6 +1097,14 @@ class RegionCorrection(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="reverted_region_corrections",
         help_text="Who reverted this correction. Null for historical rows.",
+    )
+    source_ocr_request = models.ForeignKey(
+        "OcrRequest", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="accepted_corrections",
+        help_text="The recognition candidate that produced this correction, if any. "
+                  "Set once at acceptance time so a correction permanently retains "
+                  "its HTR/Vision provenance even after repeated accept/revert/re-accept "
+                  "cycles repoint the OcrRequest.accepted_correction shortcut.",
     )
 
     class Meta:

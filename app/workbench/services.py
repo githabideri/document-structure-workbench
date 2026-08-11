@@ -428,7 +428,7 @@ class CorrectionService:
     """Single application boundary for human corrections."""
 
     @staticmethod
-    def apply(*, region, user, operation, before, after, reason="", policy=None, expected_current=None):
+    def apply(*, region, user, operation, before, after, reason="", policy=None, expected_current=None, source_ocr_request=None):
         from .policy import ProjectAccessPolicy
 
         policy = policy or ProjectAccessPolicy(user=user)
@@ -447,6 +447,7 @@ class CorrectionService:
         correction = RegionCorrection(
             region=region, document=region.page.document, created_by=user,
             operation=operation, before=before, after=after, reason=reason,
+            source_ocr_request=source_ocr_request,
         )
         try:
             with transaction.atomic():
@@ -517,16 +518,23 @@ class OcrService:
             if locked.state != "completed" or not locked.region_id:
                 raise ValueError("Only completed region OCR candidates can be accepted.")
             existing = locked.accepted_correction
-            if existing and existing.status == "active":
-                # Already accepted and still current → return it (idempotent).
+            # Idempotence means "this candidate's correction is the *current/
+            # effective* transcription", not merely "it once produced an active
+            # row". If a later manual edit superseded it, explicitly re-selecting
+            # this candidate must create a fresh correction.
+            current_active = (
+                RegionCorrection.objects.filter(
+                    region=locked.region, operation="text", status="active",
+                ).order_by("-created_at", "-id").first()
+            )
+            if existing and existing.pk and current_active and existing.pk == current_active.pk:
                 return existing
-            # Otherwise the previous acceptance was reverted: re-accepting creates
-            # a fresh correction — never recycle a reverted one.
             correction = CorrectionService.apply(
                 region=locked.region, user=user, policy=policy, operation="text",
                 before={"text": locked.region.effective_text}, after={"text": locked.candidate_text},
                 reason=f"Accepted visual OCR candidate #{locked.pk}",
                 expected_current=expected_current,
+                source_ocr_request=locked,
             )
             locked.accepted_correction = correction
             locked.save(update_fields=["accepted_correction"])
@@ -579,18 +587,25 @@ class HtrService:
             if locked.provider != HTR_PROVIDER or locked.state != "completed" or not locked.region_id:
                 raise ValueError("Only completed region HTR candidates can be accepted.")
             existing = locked.accepted_correction
-            if existing and existing.status == "active":
+            # Idempotence = this candidate's correction is the current/effective one.
+            current_active = (
+                RegionCorrection.objects.filter(
+                    region=locked.region, operation="text", status="active",
+                ).order_by("-created_at", "-id").first()
+            )
+            if existing and existing.pk and current_active and existing.pk == current_active.pk:
                 return existing
             text = (locked.candidate_text or "").strip()
             if not text:
                 raise ValueError("This HTR candidate has no text to accept.")
-            # Re-use after revert: create a fresh correction, never recycle a
-            # previously reverted one.
+            # Re-use after revert/supersession: create a fresh correction, never
+            # recycle a previously reverted or superseded one.
             correction = CorrectionService.apply(
                 region=locked.region, user=user, policy=policy, operation="text",
                 before={"text": locked.region.effective_text}, after={"text": text},
                 reason=f"Accepted HTR transcription #{locked.pk}",
                 expected_current=expected_current,
+                source_ocr_request=locked,
             )
             locked.accepted_correction = correction
             locked.save(update_fields=["accepted_correction"])

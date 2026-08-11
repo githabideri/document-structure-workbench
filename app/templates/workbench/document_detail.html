@@ -12,7 +12,7 @@
      data-selected-region="{{ selected_region.id|default:'' }}"
      data-inspector-url="{{ region_inspector_url }}"
      data-page-data-url="{{ page_workspace_data_url }}"
-     data-page-inspector-url="{% if page %}{% url 'page_inspector' page.id %}{% endif %}"
+     data-page-inspector-url="{% if selected_page %}{% url 'page_inspector' selected_page.id %}{% endif %}"
      data-image-url="{{ page_image_url }}"
      data-ui-id="document-workspace">
     <header class="workspace-header">
@@ -112,7 +112,7 @@
             </div>
 
             <div id="inspector-pane-page"{% if selected_region %} hidden{% endif %} data-ui-id="page-pane">
-                {% if page.image_path %}{% include "workbench/_page_inspector.html" %}{% endif %}
+                {% if selected_page.image_path %}{% include "workbench/_page_inspector.html" %}{% endif %}
             </div>
         </aside>
     </div>
@@ -121,6 +121,8 @@
     <script type="application/json" id="page-regions-data">{{ page_regions_json|safe }}</script>
     {# Page image pyramid levels (thumbnail → preview → full) with pixel sizes. #}
     <script type="application/json" id="page-image-data">{{ page_image_levels_json|safe }}</script>
+    {# Page dimension metadata (logical Docling vs actual raster) for diagnostics. #}
+    <script type="application/json" id="page-meta-data">{{ page_meta_json|default:"null"|safe }}</script>
     {# Region-tab defaults for overlays (e.g. filter). #}
     <script type="application/json" id="workspace-config-data">{"htrEnabled": {{ htr_enabled|yesno:"true,false" }}, "visionEnabled": {{ vision_enabled|yesno:"true,false" }}}</script>
 </div>

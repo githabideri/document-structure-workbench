@@ -46,6 +46,8 @@ urlpatterns = [
     path("htr/runs/<int:request_id>/accept/", views.accept_region_htr, name="accept_region_htr"),
     path("regions/<int:region_id>/correct/", views.correct_region, name="correct_region"),
     path("corrections/<int:correction_id>/revert/", views.revert_region_correction, name="revert_region_correction"),
+    path("corrections/<int:correction_id>/reapply/", views.reapply_region_correction, name="reapply_region_correction"),
+    path("regions/<int:region_id>/accept-imported/", views.accept_imported_text, name="accept_imported_text"),
 
     # Help
     path("help/", views.help_page, name="help"),

@@ -13,9 +13,10 @@
         </div>
     </header>
 
-    <section class="inspector-editor" id="inspector-page-text" aria-label="{% trans 'Complete page text' %}">
-        <div class="inspector-section-label">{% trans "Complete page text" %}</div>
+    <section class="inspector-editor" id="inspector-page-text" aria-label="{% trans 'Imported page text' %}">
+        <div class="inspector-section-label">{% trans "Imported page text" %}</div>
         <pre class="page-full-text">{{ page_full_text|default:_("No text was extracted for this page.") }}</pre>
+        <p class="help-text">{% trans "This is the immutable machine extraction. Region corrections are shown in Region mode; an effective assembled page transcription is not yet generated." %}</p>
     </section>
 
     {% if can_edit_document %}
@@ -53,7 +54,7 @@
             {% for cand in page_ocr_candidates %}
             <li class="version-item kind-vision{% if cand.state == 'queued' or cand.state == 'processing' %} is-pending{% endif %}">
                 <span class="version-rail-main">
-                    <span class="version-dot kind-vision{% if cand.state == 'completed' %} is-current{% endif %}" aria-hidden="true"></span>
+                    <span class="version-dot kind-vision{% if cand.state == 'completed' %} is-completed{% endif %}" aria-hidden="true"></span>
                     {% trans "Vision" %} · {{ cand.model|default:cand.provider }}
                 </span>
                 <span class="version-rail-meta">

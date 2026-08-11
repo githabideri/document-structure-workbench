@@ -275,6 +275,21 @@ class ResultImporter:
             page_width = dims.get("width", 0)
             page_height = dims.get("height", 0)
 
+            # Authoritative raster dimensions: decode the persisted image header.
+            # Prefer decoding the actual on-disk file so the viewer geometry is
+            # always correct even if Docling's logical size differs from the
+            # rendered raster. This is a one-time import-time cost.
+            image_width = page_width
+            image_height = page_height
+            if image_path:
+                from PIL import Image as _PILImage
+                try:
+                    _sp = Path(self.artifacts_base) / image_path
+                    with _PILImage.open(_sp) as _img:
+                        image_width, image_height = _img.size
+                except Exception:
+                    logger.exception("Could not decode raster dims for page %d", page_num)
+
             page, created = Page.objects.update_or_create(
                 document=document,
                 page_number=page_num,
@@ -282,6 +297,8 @@ class ResultImporter:
                     "image_path": image_path,
                     "width": page_width,
                     "height": page_height,
+                    "image_width": image_width or None,
+                    "image_height": image_height or None,
                 },
             )
             if created:

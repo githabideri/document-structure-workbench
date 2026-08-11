@@ -274,7 +274,8 @@ class RecognitionPreferenceFallbackTests(TestCase):
     def test_effective_selection_uses_default_without_preference(self):
         from workbench import recognition
         self.assertEqual(recognition.effective_htr_pipeline(self.w["owner"]), recognition.default_htr_pipeline())
-        self.assertEqual(recognition.effective_vision_provider(self.w["owner"]), recognition.default_vision_provider())
+        with override_settings(DSW_CHAT_BASE_URL="http://example.com/chat", DSW_OCR_PROVIDER="qwen"):
+            self.assertEqual(recognition.effective_vision_provider(self.w["owner"]), "qwen")
 
     def test_stale_preference_falls_back_silently(self):
         from workbench import recognition
@@ -283,11 +284,26 @@ class RecognitionPreferenceFallbackTests(TestCase):
         prefs.last_vision_provider = "removed-provider"
         prefs.save(update_fields=["last_htr_pipeline", "last_vision_provider"])
         self.assertEqual(recognition.effective_htr_pipeline(self.w["owner"]), recognition.default_htr_pipeline())
-        self.assertEqual(recognition.effective_vision_provider(self.w["owner"]), recognition.default_vision_provider())
+        with override_settings(DSW_CHAT_BASE_URL="http://example.com/chat", DSW_OCR_PROVIDER="qwen"):
+            self.assertEqual(recognition.effective_vision_provider(self.w["owner"]), "qwen")
 
     def test_remembered_preference_is_used(self):
         from workbench import recognition
         recognition.remember_htr_pipeline(self.w["owner"], "htrflow-trocr-prototype")
-        recognition.remember_vision_provider(self.w["owner"], "paddleocr-vl")
-        self.assertEqual(recognition.effective_htr_pipeline(self.w["owner"]), "htrflow-trocr-prototype")
-        self.assertEqual(recognition.effective_vision_provider(self.w["owner"]), "paddleocr-vl")
+        with override_settings(DSW_OCR_BASE_URL="http://example.com/ocr", DSW_OCR_PROVIDER="paddleocr-vl"):
+            recognition.remember_vision_provider(self.w["owner"], "paddleocr-vl")
+            self.assertEqual(recognition.effective_vision_provider(self.w["owner"]), "paddleocr-vl")
+
+    def test_non_runnable_provider_falls_back_and_is_not_offered(self):
+        """A stored provider whose endpoint is missing must not be used/offered."""
+        from workbench import recognition
+        prefs = UserPreferences.get_or_create_for_user(self.w["owner"])
+        prefs.last_vision_provider = "paddleocr-vl"
+        prefs.save(update_fields=["last_vision_provider"])
+        # Only qwen's endpoint is configured → stored paddleocr-vl is not runnable.
+        with override_settings(DSW_CHAT_BASE_URL="http://example.com/chat", DSW_OCR_BASE_URL="", DSW_OCR_PROVIDER="qwen"):
+            models = recognition.runnable_vision_models()
+            offered = {p for p, _, _ in models}
+            self.assertIn("qwen", offered)
+            self.assertNotIn("paddleocr-vl", offered)
+            self.assertEqual(recognition.effective_vision_provider(self.w["owner"]), "qwen")

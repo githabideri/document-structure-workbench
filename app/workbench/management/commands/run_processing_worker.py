@@ -397,14 +397,31 @@ class Command(BaseCommand):
             job.submission_retries += 1
         remaining = max(retry_max - job.submission_retries, 0)
         if auto_retry and remaining > 0:
+            # Proven non-delivery (processor unreachable) with retries left.
             job.status_message = (
-                f"Submission was not delivered (processor unreachable); it will be "
-                f"retried automatically (attempt {job.submission_retries}/{retry_max}). "
+                f"The document processor could not be reached, so this upload has not "
+                f"been processed yet. It will be retried automatically "
+                f"(attempt {job.submission_retries}/{retry_max}). "
+                f"Operator detail: {error_message[:200]}"
+            )
+        elif auto_retry:
+            # Proven non-delivery but retries are exhausted: the processor is
+            # down. Safe to retry manually once it is back (no duplicate risk).
+            job.status_message = (
+                f"The document processor could not be reached after "
+                f"{job.submission_retries} automatic attempt(s), so this upload is "
+                f"held. The processor appears to be down \u2014 retry it once the "
+                f"processor is back, or contact your operator. "
                 f"Operator detail: {error_message[:200]}"
             )
         else:
+            # Genuinely uncertain (timeout): the file may have reached the
+            # processor, so a blind retry could duplicate work. Hold for an operator.
             job.status_message = (
-                "Submission outcome is uncertain and will not be retried automatically. "
+                "The document processor was contacted but did not confirm the result "
+                "within the time limit, so it may have started processing this file. "
+                "To avoid duplicate work this upload is held for an operator \u2014 "
+                "please check with them before retrying. "
                 f"Operator detail: {error_message[:200]}"
             )
         job.save(update_fields=[

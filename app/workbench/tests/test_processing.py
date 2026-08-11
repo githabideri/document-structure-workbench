@@ -2298,6 +2298,39 @@ class WorkerRecoveryTest(TestCase):
         self.assertEqual(job.submission_retries, 1)
         self.assertIn("will be retried automatically", job.status_message)
 
+    @override_settings(DSW_PROCESSING_SUBMIT_RETRY_MAX=3)
+    def test_not_delivered_exhausted_message_explains_processor_down(self):
+        """After retries are exhausted, a non-delivery explains the processor is
+        down and that the upload is held (no 'will be retried automatically')."""
+        from workbench.processors.docling_serve import SubmissionNotDelivered
+        job = self._job(state="submitting", external_job_id="", submission_retries=2)
+        command = self._command()
+        job.worker_id = command.worker_id
+        job.save(update_fields=["worker_id", "submission_retries"])
+        command.processor.submit.side_effect = SubmissionNotDelivered("host refused")
+        command._process_job(job, "submit")
+        job.refresh_from_db()
+        self.assertEqual(job.state, "submission_uncertain")
+        self.assertEqual(job.submission_retries, 3)
+        self.assertNotIn("will be retried automatically", job.status_message)
+        self.assertIn("could not be reached", job.status_message)
+
+    def test_timeout_uncertain_message_warns_of_possible_partial_work(self):
+        """A timeout (delivery genuinely uncertain) explains the file may have
+        been partially processed and is held for an operator (no auto-retry)."""
+        from workbench.processors.docling_serve import SubmissionUncertain
+        job = self._job(state="submitting", external_job_id="")
+        command = self._command()
+        job.worker_id = command.worker_id
+        job.save(update_fields=["worker_id"])
+        command.processor.submit.side_effect = SubmissionUncertain("timed out")
+        command._process_job(job, "submit")
+        job.refresh_from_db()
+        self.assertEqual(job.state, "submission_uncertain")
+        self.assertFalse(job.auto_retry_allowed)
+        self.assertNotIn("will be retried automatically", job.status_message)
+        self.assertIn("did not confirm", job.status_message)
+
     def test_stale_importing_job_is_reimported_idempotently_and_completed(self):
         from workbench.processors.base import ProcessorResult
         from workbench.processors.importer import ResultImporter

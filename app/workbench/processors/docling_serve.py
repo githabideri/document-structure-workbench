@@ -168,14 +168,16 @@ class DoclingServeProcessor(DocumentProcessor):
             # not reach the processor, so auto-retry is safe.
             logger.error("Cannot connect to Docling server at %s", self.server_url)
             raise SubmissionNotDelivered(
-                f"Docling submission was not delivered: {self.server_url}"
+                f"The document processor could not be reached, so this file was not "
+                f"delivered ({self.server_url})."
             ) from exc
         except requests.Timeout as exc:
             # Ambiguous: the request may have reached the processor. Keep this
             # manual (submission_uncertain, no auto-retry).
             logger.error("Docling submission timed out at %s", self.server_url)
             raise SubmissionUncertain(
-                f"Docling submission outcome is uncertain: {self.server_url}"
+                f"The document processor did not respond in time, so delivery is "
+                f"uncertain — it may have started processing ({self.server_url})."
             ) from exc
         except requests.HTTPError as exc:
             logger.error("Docling submission failed: %s", exc)

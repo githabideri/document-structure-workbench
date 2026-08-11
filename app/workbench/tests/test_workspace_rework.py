@@ -69,13 +69,25 @@ class WorkspaceInspectorTests(TestCase):
         self.assertIn(response.status_code, (302, 403))
 
     def test_inspector_shows_model_aware_recognition_controls(self):
-        with override_settings(DSW_HTR_ENABLED=True):
+        with override_settings(DSW_HTR_ENABLED=True, DSW_CHAT_BASE_URL="http://vision.test/v1"):
             response = self.client.get(reverse("region_inspector", args=[self.w["region"].pk]))
         self.assertContains(response, "Run HTR")
         self.assertContains(response, "Run Vision")
         # The button label exposes the currently-selected model/pipeline.
         self.assertContains(response, "TrOCR")  # default HTR pipeline label
         self.assertContains(response, "Qwen")   # default vision provider label
+
+    def test_vision_independent_of_htr(self):
+        # HTR disabled + Vision configured: Vision must still render.
+        with override_settings(DSW_HTR_ENABLED=False, DSW_CHAT_BASE_URL="http://vision.test/v1"):
+            response = self.client.get(reverse("region_inspector", args=[self.w["region"].pk]))
+        self.assertContains(response, "Run Vision")
+        self.assertNotContains(response, "Run HTR")
+        # HTR enabled but no Vision endpoint configured: only HTR renders.
+        with override_settings(DSW_HTR_ENABLED=True, DSW_CHAT_BASE_URL="", DSW_OCR_BASE_URL=""):
+            response = self.client.get(reverse("region_inspector", args=[self.w["region"].pk]))
+        self.assertContains(response, "Run HTR")
+        self.assertNotContains(response, "Run Vision")
 
     def test_versions_fragment_reports_pending_state(self):
         region = self.w["region"]

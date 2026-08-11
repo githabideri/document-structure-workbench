@@ -40,6 +40,7 @@ urlpatterns = [
     path("regions/<int:region_id>/ocr/", views.create_ocr_request, name="create_ocr_request"),
     path("regions/<int:region_id>/htr/", views.create_region_htr, name="create_region_htr"),
     path("pages/<int:page_id>/workspace-data/", views.page_workspace_data, name="page_workspace_data"),
+    path("pages/<int:page_id>/inspector/", views.page_inspector, name="page_inspector"),
     path("pages/<int:page_id>/ocr/", views.create_page_ocr_request, name="create_page_ocr_request"),
     path("ocr/requests/<int:request_id>/accept/", views.accept_ocr_request, name="accept_ocr_request"),
     path("htr/runs/<int:request_id>/accept/", views.accept_region_htr, name="accept_region_htr"),
@@ -58,6 +59,7 @@ urlpatterns = [
 
     # Secure artifact serving
     path("pages/<int:page_id>/image/", views.page_image, name="page_image"),
+    path("pages/<int:page_id>/derivative/<str:kind>/", views.page_image_derivative, name="page_image_derivative"),
     path("tables/<int:table_id>/crop/", views.table_crop, name="table_crop"),
     path("artifacts/<int:artifact_id>/content/", views.artifact_content, name="artifact_content"),
 

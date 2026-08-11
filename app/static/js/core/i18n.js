@@ -129,7 +129,16 @@ const de = {
   "Hide lines": "Zeilen ausblenden",
   "You have unsaved transcription changes. Leave this region anyway?": "Sie haben ungespeicherte Transkriptionsänderungen. Diesen Bereich trotzdem verlassen?",
   "You have unsaved transcription changes. Leave this page anyway?": "Sie haben ungespeicherte Transkriptionsänderungen. Diese Seite trotzdem verlassen?",
-  "No text was extracted for this region.": "Für diesen Bereich wurde kein Text extrahiert."
+  "No text was extracted for this region.": "Für diesen Bereich wurde kein Text extrahiert.",
+  "No page image is available for this page.": "Für diese Seite ist kein Seitenbild verfügbar.",
+  "Loading page image…": "Seitenbild wird geladen…",
+  "Loading full-resolution scan…": "Vollauflösung wird geladen…",
+  "The page image could not be loaded.": "Das Seitenbild konnte nicht geladen werden.",
+  "Retry": "Erneut versuchen",
+  "Show lines": "Zeilen anzeigen",
+  "You have unsaved transcription changes. Continue anyway?": "Sie haben ungespeicherte Transkriptionsänderungen. Trotzdem fortfahren?",
+  "You have unsaved transcription changes. Leave the transcription anyway?": "Sie haben ungespeicherte Transkriptionsänderungen. Transkription trotzdem verlassen?",
+  "You have unsaved transcription changes. Switch to the page view anyway?": "Sie haben ungespeicherte Transkriptionsänderungen. Trotzdem zur Seitenansicht wechseln?"
 };
 
 export function t(message, values = {}) {

@@ -14,7 +14,7 @@
             {% if can_edit_document and selected_region.active_text_correction %}
             <button type="button" class="btn btn-sm btn-secondary" data-transcription-action="revert"
                     hx-post="{% url 'revert_region_correction' selected_region.active_text_correction.id %}"
-                    hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="this">{% trans "Revert" %}</button>
+                    hx-target="#inspector-pane-region" hx-swap="innerHTML" hx-disabled-elt="this">{% trans "Revert" %}</button>
             {% endif %}
             {% if can_edit_document %}
             <button type="button" class="btn btn-sm btn-primary" data-transcription-action="save" disabled>{% trans "Save" %}</button>
@@ -25,8 +25,8 @@
     {% if can_edit_document %}
     <div class="inspector-alert inspector-status" id="inspector-status" role="status" aria-live="polite" hidden></div>
 
-    {% if htr_enabled %}
     <div class="recognition-controls">
+    {% if htr_enabled %}
         <form class="split-button" data-split-button="htr"
               hx-post="{% url 'create_region_htr' selected_region.id %}" hx-target="#inspector-versions" hx-swap="outerHTML" hx-disabled-elt="button">
             {% csrf_token %}
@@ -44,7 +44,9 @@
                 </div>
             </details>
         </form>
+    {% endif %}
 
+    {% if vision_enabled %}
         <form class="split-button" data-split-button="vision"
               hx-post="{% url 'create_ocr_request' selected_region.id %}" hx-target="#inspector-versions" hx-swap="outerHTML" hx-disabled-elt="button">
             {% csrf_token %}
@@ -63,9 +65,11 @@
                 </div>
             </details>
         </form>
-    </div>
-    {% else %}
+    {% endif %}
+
+    {% if not htr_enabled and not vision_enabled %}
     <p class="help-text">{% trans "Recognition is not enabled on this server." %}</p>
     {% endif %}
+    </div>
     {% endif %}
 </section>

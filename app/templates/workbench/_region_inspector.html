@@ -13,7 +13,7 @@
         <details class="inspector-menu">
             <summary aria-label="{% trans 'Region actions' %}">⋯</summary>
             <div class="inspector-menu-panel">
-                <form hx-post="{% url 'correct_region' selected_region.id %}" hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="button">
+                <form hx-post="{% url 'correct_region' selected_region.id %}" hx-target="#inspector-pane-region" hx-swap="innerHTML" hx-disabled-elt="button">
                     {% csrf_token %}
                     <input type="hidden" name="operation" value="type">
                     <input type="hidden" name="expected_current_value" value="{{ selected_region.effective_region_type }}">
@@ -23,12 +23,12 @@
                     <button class="btn btn-sm btn-secondary" type="submit">{% trans "Change type" %}</button>
                 </form>
                 {% if selected_region.suppression_correction %}
-                <form hx-post="{% url 'revert_region_correction' selected_region.suppression_correction.id %}" hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="button">
+                <form hx-post="{% url 'revert_region_correction' selected_region.suppression_correction.id %}" hx-target="#inspector-pane-region" hx-swap="innerHTML" hx-disabled-elt="button">
                     {% csrf_token %}
                     <button class="btn btn-sm btn-secondary" type="submit">{% trans "Restore region" %}</button>
                 </form>
                 {% else %}
-                <form hx-post="{% url 'correct_region' selected_region.id %}" hx-target="#region-inspector" hx-swap="innerHTML" hx-disabled-elt="button">
+                <form hx-post="{% url 'correct_region' selected_region.id %}" hx-target="#inspector-pane-region" hx-swap="innerHTML" hx-disabled-elt="button">
                     {% csrf_token %}
                     <input type="hidden" name="operation" value="suppress">
                     <input type="hidden" name="expected_current_value" value="false">

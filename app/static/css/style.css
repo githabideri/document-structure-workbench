@@ -352,7 +352,15 @@ body[data-workspace="document_detail"] .footer { display: none; }
 .viewer-page-indicator { font-size: .8rem; color: var(--secondary); min-width: 5rem; }
 .viewer-toolbar-spacer { flex: 1 1 auto; }
 .viewer-host { flex: 1 1 auto; position: relative; min-height: 0; overflow: hidden; }
-.viewer-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--secondary); padding: 2rem; text-align: center; }
+/* Truthful loading/empty/error states — these are driven by the viewer state
+   machine (never a timer) and "no image" is never used as a loading surrogate. */
+.viewer-status { position: absolute; inset: 0; display: grid; place-items: center; color: var(--secondary); padding: 2rem; text-align: center; pointer-events: none; }
+.viewer-status .is-loading { display: flex; align-items: center; gap: .6rem; }
+.viewer-status .is-preview { font-size: .8rem; color: var(--secondary); background: rgba(255,255,255,.7); padding: .25rem .6rem; border-radius: 999px; }
+.viewer-status .is-error { display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+.viewer-status[hidden] { display: none; }
+.viewer-spinner { width: 1.25rem; height: 1.25rem; border: 2.5px solid rgba(37,99,235,.2); border-top-color: var(--primary); border-radius: 50%; animation: viewer-spin .8s linear infinite; }
+@keyframes viewer-spin { to { transform: rotate(360deg); } }
 .viewer-legend { flex: 0 0 auto; padding: .4rem .65rem; background: #fff; border-top: 1px solid var(--border); color: var(--secondary); font-size: .75rem; }
 .legend-swatch { display: inline-block; width: .7rem; height: .7rem; margin-right: .3rem; vertical-align: -.05rem; border: 1px solid rgba(37,99,235,.7); background: rgba(37,99,235,.12); }
 
@@ -382,6 +390,27 @@ body.is-splitter-dragging { cursor: col-resize; user-select: none; }
 .inspector-empty { flex: 1 1 auto; display: grid; place-items: center; padding: 2rem; }
 .inspector-empty-card { color: var(--secondary); text-align: center; max-width: 24rem; }
 .inspector-empty-card h2 { margin: 0 0 .5rem; color: var(--text); }
+
+/* Persistent Region/Page tab shell (kept outside the swapped panes). */
+.inspector-tabs { flex: 0 0 auto; display: flex; gap: .25rem; padding: .5rem .8rem 0; }
+.inspector-tab { flex: 1 1 0; padding: .4rem .5rem; border: 1px solid var(--border); border-bottom: none; background: #f8fafc; border-radius: 7px 7px 0 0; color: var(--secondary); font-size: .85rem; cursor: pointer; }
+.inspector-tab.is-active { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 -1px 0 #fff; }
+.inspector-tab:disabled { opacity: .5; cursor: not-allowed; }
+#inspector-pane-region, #inspector-pane-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+/* Viewer region-filter controls (viewer concern, not inspector). */
+.viewer-filter { display: inline-flex; align-items: center; gap: .3rem; font-size: .75rem; color: var(--secondary); white-space: nowrap; }
+.viewer-filter select { padding: .2rem .35rem; font-size: .8rem; border: 1px solid var(--border); border-radius: 5px; }
+.viewer-filter-check input { margin: 0; }
+
+/* Page-tab inspector content. */
+.page-full-text { margin: .3rem .8rem .6rem; padding: .6rem; border: 1px solid var(--border); border-radius: 8px; background: #f9fafb; font-size: .88rem; line-height: 1.5; white-space: pre-wrap; max-height: 16rem; overflow-y: auto; }
+.page-table { margin: .3rem .8rem .5rem; }
+.page-table summary { cursor: pointer; font-size: .85rem; color: var(--primary); }
+.table-preview { margin-top: .4rem; font-size: .82rem; overflow-x: auto; }
+.table-preview table { border-collapse: collapse; width: 100%; }
+.table-preview td, .table-preview th { border: 1px solid var(--border); padding: .25rem .4rem; }
+
 .inspector { display: flex; flex-direction: column; gap: .1rem; }
 .inspector-alert { margin: .6rem .8rem 0; padding: .5rem .65rem; border-radius: 6px; background: #fef2f2; color: #b91c1c; font-size: .85rem; border: 1px solid #fecaca; }
 .inspector-status[data-kind="error"] { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }

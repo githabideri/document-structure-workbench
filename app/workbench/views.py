@@ -5,7 +5,6 @@ import csv
 import io
 import json
 import secrets
-from html.parser import HTMLParser
 from pathlib import Path
 
 from django.conf import settings
@@ -22,6 +21,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.views.decorators.cache import cache_control
 from django.contrib.auth import logout as auth_logout
 
 from .models import (
@@ -32,6 +32,7 @@ from .models import (
 )
 from .models import LANGUAGES
 from .export import DEFAULT_FORMAT, FORMATS, DocumentExportService
+from .textutil import page_text_to_plain  # noqa: F401 (re-exported for existing callers)
 
 
 # --- Permission helpers ---
@@ -667,94 +668,6 @@ def help_page(request):
     return render(request, "workbench/help.html")
 
 
-class _PageTextToPlain(HTMLParser):
-    """Convert raw (possibly HTML-laced) page text into readable plain text.
-
-    Visual-OCR models sometimes return the page transcription as HTML (e.g. an
-    inline ``<table>``). The "Complete page text" readout should not dump that
-    raw markup. This converter drops tags, breaks table rows/cells onto new
-    lines, and unescapes entities, yielding a legible transcript.
-    """
-
-    _BLOCK_TAGS = {
-        "tr", "p", "div", "li", "h1", "h2", "h3", "h4", "h5",
-        "table", "thead", "tbody", "tfoot", "caption", "ul", "ol",
-        "section", "blockquote", "pre", "br", "hr",
-    }
-    _CELL_TAGS = {"td", "th"}
-
-    def __init__(self):
-        super().__init__()
-        self._parts = []
-        self._pending_space = False
-
-    def handle_starttag(self, tag, attrs):
-        self._handle(tag)
-
-    def handle_startendtag(self, tag, attrs):
-        self._handle(tag)
-
-    def handle_endtag(self, tag):
-        if tag.lower() in self._BLOCK_TAGS:
-            self._emit_break()
-
-    def _handle(self, tag):
-        tag = tag.lower()
-        if tag in self._CELL_TAGS:
-            self._pending_space = True
-        elif tag in self._BLOCK_TAGS:
-            self._emit_break()
-
-    def handle_data(self, data):
-        text = data.replace("\u00a0", " ").strip()
-        if not text:
-            return
-        if self._pending_space and self._parts and not self._parts[-1].endswith(" "):
-            self._parts.append(" ")
-        self._pending_space = False
-        self._parts.append(text)
-
-    def _emit_break(self):
-        if self._parts and self._parts[-1] == " ":
-            self._parts.pop()
-        if self._parts and self._parts[-1].endswith("\n"):
-            return
-        self._parts.append("\n")
-        self._pending_space = False
-
-    def result(self):
-        text = "".join(self._parts)
-        lines = [line.rstrip() for line in text.split("\n")]
-        out = []
-        blank = False
-        for line in lines:
-            if not line.strip():
-                if blank:
-                    continue
-                blank = True
-            else:
-                blank = False
-            out.append(line)
-        return "\n".join(out).strip()
-
-
-def page_text_to_plain(text):
-    """Render raw page text as readable plain text (HTML if present)."""
-    if not text:
-        return ""
-    import html
-
-    if "<" in text and ">" in text:
-        parser = _PageTextToPlain()
-        try:
-            parser.feed(text)
-            parser.close()
-            return parser.result()
-        except Exception:
-            return html.unescape(text)
-    return html.unescape(text)
-
-
 # --- Document workspace: region adapter, inspector partials, deep-link state ---
 #
 # The workspace is a stable shell (collapsible page navigator, OpenSeadragon
@@ -809,6 +722,7 @@ def _workspace_recognition_context(request):
         "htr_enabled": getattr(settings, "DSW_HTR_ENABLED", False) or getattr(settings, "DSW_HTR_FIXTURE_MODE", False),
         "htr_pipelines": recognition.available_htr_pipelines(),
         "htr_pipeline": recognition.effective_htr_pipeline(request.user),
+        "vision_enabled": recognition.vision_enabled(),
         "vision_models": recognition.available_vision_models(),
         "vision_provider": recognition.effective_vision_provider(request.user),
         "default_vision_provider": recognition.default_vision_provider(),
@@ -859,12 +773,59 @@ def _inspector_response(request, region, scope="full", error=None):
         if error:
             ctx["inspector_error"] = error
         response = render(request, partial, ctx)
-        response.headers["HX-Retarget"] = "#inspector-versions" if scope == "versions" else "#region-inspector"
-        response.headers["HX-Reswap"] = "outerHTML" if scope == "versions" else "innerHTML"
+        if scope == "versions":
+            response.headers["HX-Retarget"] = "#inspector-versions"
+            response.headers["HX-Reswap"] = "outerHTML"
+        else:
+            response.headers["HX-Retarget"] = "#inspector-pane-region"
+            response.headers["HX-Reswap"] = "innerHTML"
         return response
     if error:
         messages.error(request, error)
     return _redirect_to_region(request, region)
+
+
+def _page_inspector_context(request, page):
+    """Context for the Page-tab inspector: full page text, OCR, tables."""
+    from .policy import ProjectAccessPolicy
+    from . import page_features
+    from .page_features import page_tables
+    source = getattr(getattr(page.document, "processing_job", None), "source_document", None)
+    candidates = page_features.page_ocr_candidates(page)
+    ctx = {
+        "selected_page": page,
+        "can_edit_document": ProjectAccessPolicy(user=request.user).can_edit(page.document.collection),
+        "page_image_levels": _page_image_levels(page),
+        "page_full_text": page_features.page_full_text(page),
+        "page_ocr_candidates": candidates,
+        "page_any_pending": page_features.page_any_pending(candidates),
+        "page_tables": page_tables(page),
+        "workspace_document_id": source.id if source else page.document_id,
+        "workspace_revision_id": page.document_id,
+        "poll_url": request.build_absolute_uri(
+            reverse("page_inspector", args=[page.pk])
+        ) if _is_htmx(request) else "",
+    }
+    ctx.update(_workspace_recognition_context(request))
+    return ctx
+
+
+def _page_inspector_response(request, page, error=None):
+    """Render the Page-tab partial for HTMX (no full reload)."""
+    if _is_htmx(request):
+        ctx = _page_inspector_context(request, page)
+        if error:
+            ctx["inspector_error"] = error
+        response = render(request, "workbench/_page_inspector.html", ctx)
+        response.headers["HX-Retarget"] = "#inspector-pane-page"
+        response.headers["HX-Reswap"] = "innerHTML"
+        return response
+    source = getattr(getattr(page.document, "processing_job", None), "source_document", None)
+    target = source.id if source else page.document_id
+    query = f"?revision={page.document_id}&page={page.page_number}" if source else f"?page={page.page_number}"
+    if error:
+        messages.error(request, error)
+    return redirect(f"{reverse('document_detail', args=[target])}{query}")
 
 
 @login_required
@@ -897,6 +858,39 @@ def region_versions_fragment(request, region_id):
     return render(request, "workbench/_inspector_versions.html", _inspector_context(request, region))
 
 
+def _page_image_levels(page):
+    """The viewer's page representation: thumbnail → preview → full levels.
+
+    Returns ``None`` when the page has no image. Each level carries its URL and
+    pixel dimensions. The same shape is used for initial render and for
+    client-side page switching so there is only one image-loading path."""
+    from django.urls import reverse as _reverse
+    from .imaging import ensure_derivative, full_size
+    if not page.image_path:
+        return None
+    full = full_size(page)
+    if not full:
+        return None
+    levels = []
+    thumb = ensure_derivative(page, "thumbnail")
+    if thumb:
+        levels.append({
+            "url": _reverse("page_image_derivative", args=[page.pk, "thumbnail"]),
+            "width": thumb[1][0], "height": thumb[1][1],
+        })
+    preview = ensure_derivative(page, "preview")
+    if preview:
+        levels.append({
+            "url": _reverse("page_image_derivative", args=[page.pk, "preview"]),
+            "width": preview[1][0], "height": preview[1][1],
+        })
+    levels.append({
+        "url": _reverse("page_image", args=[page.pk]),
+        "width": full[0], "height": full[1],
+    })
+    return levels
+
+
 @login_required
 def page_workspace_data(request, page_id):
     """JSON for client-side page switching (keeps the viewer shell stable).
@@ -916,13 +910,15 @@ def page_workspace_data(request, page_id):
     prev_page = pages[index - 1] if index > 0 else None
     next_page = pages[index + 1] if 0 <= index < len(pages) - 1 else None
     source = getattr(getattr(page.document, "processing_job", None), "source_document", None)
+    image_url = reverse("page_image", args=[page.pk]) if page.image_path else None
     return JsonResponse({
         "page_id": page.pk,
         "page_number": page.page_number,
         "revision_id": page.document_id,
         "source_document_id": source.pk if source else page.document_id,
-        "image_url": reverse("page_image", args=[page.pk]) if page.image_path else None,
+        "image_url": image_url,
         "has_image": bool(page.image_path),
+        "image_levels": _page_image_levels(page),
         "regions": [_region_adapter(r) for r in regions],
         "prev_page_id": prev_page.pk if prev_page else None,
         "next_page_id": next_page.pk if next_page else None,
@@ -1026,10 +1022,13 @@ def document_detail(request, document_id):
         "can_edit_document": can_edit_document,
         "thread_id": request.GET.get("thread", ""),
         "page_image_url": reverse("page_image", args=[page.id]) if page and page.image_path else "",
+        "page_image_levels_json": json.dumps(_page_image_levels(page)) if page and page.image_path else "null",
         "region_inspector_url": reverse("region_inspector", args=[selected_region.id]) if selected_region else "",
         "page_workspace_data_url": reverse("page_workspace_data", args=[page.id]) if page else "",
     }
     context.update(_workspace_recognition_context(request))
+    if page:
+        context.update(_page_inspector_context(request, page))
     if selected_region:
         context.update(_inspector_context(request, selected_region, can_edit_document=can_edit_document))
     return render(request, "workbench/document_detail.html", context)
@@ -1228,11 +1227,27 @@ def create_page_ocr_request(request, page_id):
             prompt=request.POST.get("prompt", ""), user=request.user,
         )
     except (PermissionError, ValueError) as exc:
+        if _is_htmx(request):
+            return _page_inspector_response(request, page, error=_(str(exc)))
         messages.error(request, _(str(exc)))
         return redirect(f"{reverse('document_detail', args=[page.document.processing_job.source_document.id])}?revision={page.document_id}&page={page.page_number}")
+    if _is_htmx(request):
+        # No full reload: rerender only the page-inspector partial so the viewer
+        # stays put and the new candidate appears in the page rail.
+        return _page_inspector_response(request, page)
     messages.success(request, _("Full-page visual OCR candidate queued."))
     source = page.document.processing_job.source_document
     return redirect(f"{reverse('document_detail', args=[source.id])}?revision={page.document_id}&page={page.page_number}")
+
+
+@login_required
+def page_inspector(request, page_id):
+    """Render the Page-tab inspector partial (full page text/OCR/tables)."""
+    from .policy import ProjectAccessPolicy
+    page = get_object_or_404(Page.objects.select_related("document__collection", "document__processing_job__source_document"), pk=page_id)
+    if not ProjectAccessPolicy(user=request.user).can_view(page.document.collection):
+        raise PermissionDenied
+    return render(request, "workbench/_page_inspector.html", _page_inspector_context(request, page))
 
 
 @login_required
@@ -2328,9 +2343,13 @@ def _resolve_artifact_path(relative_path: str) -> Path:
 
 @login_required
 def page_image(request, page_id):
-    """Serve a page image with permission check."""
+    """Serve the archival page image with permission + private immutable caching.
+
+    Page images belong to an immutable processed revision, so they are safe to
+    cache privately for a long time (never publicly)."""
     from .policy import ProjectAccessPolicy
     from django.http import FileResponse, Http404
+    from django.views.decorators.cache import cache_control
 
     page = get_object_or_404(Page, pk=page_id)
     policy = ProjectAccessPolicy(user=request.user)
@@ -2342,7 +2361,34 @@ def page_image(request, page_id):
         raise Http404("No image available for this page.")
 
     resolved = _resolve_artifact_path(page.image_path)
-    return FileResponse(open(resolved, "rb"), content_type="image/png")
+    response = FileResponse(open(resolved, "rb"), content_type="image/png")
+    return cache_control(max_age=3600, s_maxage=0, private=True, immutable=True)(response)
+
+
+@login_required
+@cache_control(max_age=86400, s_maxage=0, private=True, immutable=True)
+def page_image_derivative(request, page_id, kind):
+    """Serve a lazily-generated page image derivative (thumbnail/preview).
+
+    Derivatives are presentation copies derived once from the immutable page
+    image and cached at a deterministic path keyed by page id. This endpoint
+    never resizes the archival image on request."""
+    from .policy import ProjectAccessPolicy
+    from django.http import FileResponse, Http404
+
+    if kind not in ("thumbnail", "preview"):
+        raise Http404("Unknown derivative kind.")
+    page = get_object_or_404(Page, pk=page_id)
+    policy = ProjectAccessPolicy(user=request.user)
+    if not policy.can_view(page.document.collection):
+        messages.error(request, _("You do not have access to this document."))
+        return redirect("document_list")
+    from .imaging import ensure_derivative
+    result = ensure_derivative(page, kind)
+    if result is None:
+        raise Http404("No image available for this page.")
+    path, _size = result
+    return FileResponse(open(path, "rb"), content_type="image/png")
 
 
 @login_required

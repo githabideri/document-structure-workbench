@@ -5,6 +5,10 @@
 // transcription editor (and the viewer) never move while a job runs. Explicit
 // user actions may swap the whole inspector; the controller re-wires this module
 // after every swap.
+//
+// One central replaceVersionRail() path is shared by manual save, polling and
+// HTMX swaps so the freshly inserted rail is always wired and polling is always
+// restarted — no stale node can be retained across replacements.
 import {t} from "../core/i18n.js";
 
 const POLL_INTERVAL = 2500;
@@ -15,6 +19,14 @@ function csrfToken() {
   if (meta) return meta.content;
   const input = document.querySelector("[name='csrfmiddlewaretoken']");
   return input ? input.value : "";
+}
+
+// Centralized dirty-editor guard for any operation that replaces the whole
+// inspector (type/suppress/restore/revert/accept). Recognition run creation
+// only swaps the rail and never reaches here.
+export function guardDirtyInspector(root) {
+  if (!isInspectorDirty(root)) return true;
+  return window.confirm(t("You have unsaved transcription changes. Continue anyway?"));
 }
 
 // Simple word-level diff → HTML with <ins>/<del>. Good enough for transcription
@@ -90,20 +102,15 @@ async function saveTranscription(area, ctx) {
       if (saveBtn) saveBtn.disabled = false;
       return;
     }
-    // Success: new baseline, clear dirty, refresh the version rail in place.
+    // Success: new baseline, clear dirty, refresh the version rail in place (a
+    // fresh rail is wired immediately via replaceVersionRail).
     area.value = data.effective_text ?? text;
     area.dataset.expectedCurrent = area.value;
     autoSize(area);
     setDirty(area, false);
     if (status) { status.hidden = true; }
     if (data.versions_html) {
-      const versions = root.querySelector("#inspector-versions");
-      if (versions) {
-        const tmp = document.createElement("template");
-        tmp.innerHTML = data.versions_html.trim();
-        const fresh = tmp.content.firstElementChild;
-        if (fresh && versions.parentNode) versions.replaceWith(fresh);
-      }
+      replaceVersionRail(root, data.versions_html, ctx);
     }
   } catch (err) {
     if (status) { status.hidden = false; status.textContent = t("Network error — try again."); status.dataset.kind = "error"; }
@@ -124,7 +131,7 @@ function wireEditor(root, ctx) {
   });
 }
 
-function wireSplitButtons(root) {
+export function wireSplitButtons(root) {
   for (const group of root.querySelectorAll("[data-split-button]")) {
     const hidden = group.querySelector("input[type='hidden']");
     const modelLabel = group.querySelector("[data-recog-model]");
@@ -144,6 +151,35 @@ function wireSplitButtons(root) {
 
 function currentText(root) {
   return root.querySelector(".version-current-text")?.textContent || "";
+}
+
+// Wire the HTR lines toggle: Show → (draw, cached) → Hide → clear. Toggling
+// never refetches unless the button was recreated by a rail swap.
+async function wireLinesToggle(btn, item, ctx) {
+  btn.addEventListener("click", async () => {
+    const shown = btn.dataset.shown === "true";
+    if (shown) {
+      ctx?.viewer?.clearHtrLines();
+      btn.textContent = t("Show lines");
+      btn.dataset.shown = "false";
+      return;
+    }
+    if (!btn._lines) {
+      const url = item.dataset.detailUrl;
+      if (!url) return;
+      btn.disabled = true;
+      try {
+        const resp = await fetch(url, {credentials: "same-origin", headers: {"Accept": "application/json"}});
+        const run = await resp.json();
+        btn._lines = {lines: (run.result || {}).lines || [], crop: (run.result || {}).crop};
+      } catch { return; }
+      finally { btn.disabled = false; }
+    }
+    if (!btn._lines || !btn._lines.lines.length) return;
+    ctx?.viewer?.drawHtrLines(btn._lines.lines, btn._lines.crop);
+    btn.textContent = t("Hide lines");
+    btn.dataset.shown = "true";
+  });
 }
 
 function wireVersions(root, ctx) {
@@ -171,47 +207,57 @@ function wireVersions(root, ctx) {
       ctx.onCompareOpen?.(item);
     });
     const linesBtn = item.querySelector("[data-version-lines]");
-    linesBtn?.addEventListener("click", async () => {
-      const url = item.dataset.detailUrl;
-      if (!url) return;
-      linesBtn.disabled = true;
-      try {
-        const resp = await fetch(url, {credentials: "same-origin", headers: {"Accept": "application/json"}});
-        const run = await resp.json();
-        const result = run.result || {};
-        ctx.viewer?.drawHtrLines(result.lines || [], result.crop);
-        linesBtn.textContent = t("Hide lines");
-        linesBtn.dataset.shown = "true";
-      } catch { /* ignore transient errors */ }
-      finally { linesBtn.disabled = false; }
-    });
+    if (linesBtn) wireLinesToggle(linesBtn, item, ctx);
   }
   closer?.addEventListener("click", () => { if (compare) compare.hidden = true; });
 }
 
-// Poll the version rail while a recognition candidate is pending. Only the rail
-// swaps — the editor and viewer are untouched, so the user keeps reading/typing.
-export function startPolling(root, onVersionsSwapped) {
-  stopPolling();
+// Central helper: swap the #inspector-versions rail for fresh HTML, wire the
+// fresh controls immediately, and restart pending polling. Used by manual save
+// and polling alike so the two paths cannot diverge.
+function replaceVersionRail(root, html, ctx) {
   const versions = root.querySelector("#inspector-versions");
-  if (!versions || versions.dataset.pending !== "true") return;
-  async function tick() {
-    const url = versions.dataset.pollUrl;
+  if (!versions) return;
+  const tmp = document.createElement("template");
+  tmp.innerHTML = html.trim();
+  const fresh = tmp.content.firstElementChild;
+  if (!fresh || !versions.parentNode) return;
+  versions.replaceWith(fresh);
+  wireVersions(root, ctx);
+  startPolling(root, ctx);
+}
+
+// Poll the version rail while a recognition candidate is pending. Only the rail
+// swaps — the editor and viewer are untouched. Every iteration re-queries the
+// CURRENT #inspector-versions element so a replaced rail is never referenced
+// through a stale (detached) node.
+export function startPolling(root, ctx) {
+  stopPolling();
+  function tick() {
+    const current = root.querySelector("#inspector-versions");
+    if (!current || current.dataset.pending !== "true") return;
+    const url = current.dataset.pollUrl;
     if (!url) return;
-    try {
-      const resp = await fetch(url, {credentials: "same-origin", headers: {"Accept": "text/html"}});
-      if (resp.ok) {
-        const html = await resp.text();
+    fetch(url, {credentials: "same-origin", headers: {"Accept": "text/html"}})
+      .then((resp) => resp.ok ? resp.text() : null)
+      .then((html) => {
+        if (html == null) { pollTimer = setTimeout(tick, POLL_INTERVAL); return; }
         const tmp = document.createElement("template");
         tmp.innerHTML = html.trim();
         const fresh = tmp.content.firstElementChild;
-        if (fresh && versions.parentNode) {
-          versions.replaceWith(fresh);
-          onVersionsSwapped?.(fresh);
-          if (fresh.dataset.pending === "true") { pollTimer = setTimeout(tick, POLL_INTERVAL); return; }
+        const currentNow = root.querySelector("#inspector-versions");
+        if (fresh && currentNow && currentNow.parentNode) {
+          currentNow.replaceWith(fresh);
+          wireVersions(root, ctx);
+          if (fresh.dataset.pending === "true") {
+            pollTimer = setTimeout(tick, POLL_INTERVAL);
+          }
+        } else {
+          // Killed by a concurrent full swap — do not schedule another tick.
+          stopPolling();
         }
-      }
-    } catch { /* keep the current rail on transient errors */ }
+      })
+      .catch(() => { pollTimer = setTimeout(tick, POLL_INTERVAL); });
   }
   pollTimer = setTimeout(tick, POLL_INTERVAL);
 }
@@ -226,11 +272,12 @@ export function wireInspector(root, ctx) {
   wireVersions(root, ctx);
   // Focus region button inside the actions menu.
   root.querySelector("[data-inspector-action='focus-region']")?.addEventListener("click", () => ctx.onFocusRegion?.());
-  // "Use transcription" in the comparison area → accept candidate (HTMX full swap).
+  // "Use transcription" → accept candidate. Guarded by the shared dirty check.
   root.querySelector("#version-compare-accept")?.addEventListener("click", (event) => {
     const url = event.currentTarget.dataset.acceptUrl;
     if (!url) return;
+    if (!guardDirtyInspector(root)) return;
     if (window.htmx) window.htmx.ajax("POST", url, {target: "#region-inspector", swap: "innerHTML"});
   });
-  startPolling(root, (fresh) => wireVersions(root, ctx));
+  startPolling(root, ctx);
 }

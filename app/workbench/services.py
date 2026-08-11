@@ -516,8 +516,12 @@ class OcrService:
                 raise PermissionError("You do not have permission to edit this project.")
             if locked.state != "completed" or not locked.region_id:
                 raise ValueError("Only completed region OCR candidates can be accepted.")
-            if locked.accepted_correction_id:
-                return locked.accepted_correction
+            existing = locked.accepted_correction
+            if existing and existing.status == "active":
+                # Already accepted and still current → return it (idempotent).
+                return existing
+            # Otherwise the previous acceptance was reverted: re-accepting creates
+            # a fresh correction — never recycle a reverted one.
             correction = CorrectionService.apply(
                 region=locked.region, user=user, policy=policy, operation="text",
                 before={"text": locked.region.effective_text}, after={"text": locked.candidate_text},
@@ -574,11 +578,14 @@ class HtrService:
                 raise PermissionError("You do not have permission to edit this project.")
             if locked.provider != HTR_PROVIDER or locked.state != "completed" or not locked.region_id:
                 raise ValueError("Only completed region HTR candidates can be accepted.")
-            if locked.accepted_correction_id:
-                return locked.accepted_correction
+            existing = locked.accepted_correction
+            if existing and existing.status == "active":
+                return existing
             text = (locked.candidate_text or "").strip()
             if not text:
                 raise ValueError("This HTR candidate has no text to accept.")
+            # Re-use after revert: create a fresh correction, never recycle a
+            # previously reverted one.
             correction = CorrectionService.apply(
                 region=locked.region, user=user, policy=policy, operation="text",
                 before={"text": locked.region.effective_text}, after={"text": text},

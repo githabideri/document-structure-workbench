@@ -5,11 +5,17 @@ This does **not** introduce a competing persistence model: it combines the
 existing ``RegionCorrection`` and ``OcrRequest`` rows (section 13 of the plan)
 into a single, ordered, selectable list suitable for the inspector template.
 
-Text-bearing items (imported machine text, manual text corrections, completed
-HTR and vision candidates) become selectable "versions" that can be compared
-against the current effective transcription. Non-text corrections (type change,
-suppress/restore) and reverts are surfaced as compact activity entries under
-progressive disclosure.
+Exactly one provenance entry is ``current`` — the one matching the region's
+single active effective text correction. Its source is labelled truthfully:
+
+* accepted HTR candidate   -> ``HTR · <pipeline>``
+* accepted Vision candidate -> ``Vision · <provider/model>``
+* direct manual edit       -> ``Manual · <username>``
+* no effective correction  -> ``Imported``
+
+Reverting an accepted candidate's correction un-accepts the candidate: it stays
+historical, can be selected again, and re-accepting creates a *fresh* correction
+(never a recycled one).
 """
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
@@ -28,27 +34,37 @@ def _ts(value):
     return value
 
 
-def _current_summary(region, accepted=None):
-    """Describe the effective transcription and where it came from."""
+def _current_summary(region, active_correction, active_ocr):
+    """Describe the effective transcription and where it came from exactly once.
+
+    ``active_correction`` is the single active text correction (or None).
+    ``active_ocr`` is the recognition request that produced it (or None).
+    """
     text = region.effective_text
-    if accepted and accepted.status == "active" and accepted.operation == "text":
-        label = accepted.created_by and _("Manual") or _("Manual")
-        source = "manual"
-        updated = accepted.created_at
-    elif accepted is None:
+    if active_correction is None:
         # No active text correction → machine-imported text.
-        source = "imported"
-        label = _("Imported")
-        updated = None
-    else:
-        source = "manual"
-        label = _("Manual")
-        updated = accepted.created_at if accepted else None
+        return {
+            "text": text, "source": "imported",
+            "source_label": str(_("Imported")), "updated_at": _ts(None),
+        }
+    if active_ocr is not None:
+        if active_ocr.provider == "htr":
+            pipeline = (active_ocr.metadata or {}).get("pipeline_id", "")
+            source_label = f"{_('HTR')} · {pipeline}" if pipeline else str(_("HTR"))
+            source = "htr"
+        else:
+            model = active_ocr.model or active_ocr.provider or ""
+            source_label = f"{_('Vision')} · {model}" if model else str(_("Vision"))
+            source = "vision"
+        return {
+            "text": text, "source": source, "source_label": source_label,
+            "updated_at": _ts(active_ocr.finished_at or active_correction.created_at),
+        }
+    user = _user_label(active_correction.created_by)
+    source_label = f"{_('Manual')} · {user}" if user and str(user) != str(_("system")) else str(_("Manual"))
     return {
-        "text": text,
-        "source": source,
-        "source_label": str(label),
-        "updated_at": _ts(updated),
+        "text": text, "source": "manual", "source_label": source_label,
+        "updated_at": _ts(active_correction.created_at),
     }
 
 
@@ -56,7 +72,7 @@ def build_region_versions(region):
     """Assemble the version rail + activity for one region.
 
     Returns a dict:
-        current:        effective transcription summary
+        current:        effective transcription summary (one authoritative value)
         entries:        selectable text versions (newest first)
         activity:       non-text corrections (type/suppress) + reverts
         any_pending:    True if any recognition candidate is queued/processing
@@ -64,8 +80,15 @@ def build_region_versions(region):
     text_corrections = list(
         region.corrections.filter(operation="text").select_related("created_by").order_by("-created_at", "-id")
     )
+    ocr_items = list(region.ocr_requests.all().order_by("-created_at", "-id"))
+    ocr_by_correction = {
+        item.accepted_correction_id: item
+        for item in ocr_items if item.accepted_correction_id
+    }
     active_text = next((c for c in text_corrections if c.status == "active"), None)
-    current = _current_summary(region, active_text)
+    active_ocr = ocr_by_correction.get(active_text.pk) if active_text else None
+    current = _current_summary(region, active_text, active_ocr)
+    current_id = active_text.pk if active_text else None
 
     entries = []
 
@@ -81,7 +104,7 @@ def build_region_versions(region):
         "text": region.text,
         "state": "completed",
         "status": "",
-        "accepted": active_text is None,
+        "accepted": current_id is None,
         "created_by": None,
         "created_at": _ts(getattr(region.job, "created_at", None)) if hasattr(region.job, "created_at") else None,
         "finished_at": None,
@@ -90,41 +113,20 @@ def build_region_versions(region):
         "detail_url": "",
     })
 
-    # Manual text corrections (each is a selectable historical version).
-    for corr in text_corrections:
-        entries.append({
-            "id": f"corr-{corr.pk}",
-            "kind": "manual",
-            "label": str(_("Manual")),
-            "sublabel": corr.reason or "",
-            "provider": "",
-            "model": "",
-            "pipeline_id": "",
-            "text": corr.after.get("text", ""),
-            "state": "completed",
-            "status": corr.status,
-            "accepted": corr.status == "active",
-            "created_by": _user_label(corr.created_by),
-            "created_at": _ts(corr.created_at),
-            "finished_at": _ts(corr.created_at),
-            "selectable": True,
-            "accept_url": "",
-            "detail_url": "",
-        })
-
     # Recognition candidates (vision + HTR), newest first.
-    for item in region.ocr_requests.all().order_by("-created_at", "-id"):
+    for item in ocr_items:
         is_htr = item.provider == "htr"
         kind = "htr" if is_htr else "vision"
         if is_htr:
             label = str(_("HTR"))
-            sublabel = (item.metadata or {}).get("pipeline_id", "")
-            model = sublabel
+            pipeline = (item.metadata or {}).get("pipeline_id", "")
+            sublabel = pipeline
+            model = pipeline
         else:
             label = str(_("Vision"))
             sublabel = item.model or item.provider
             model = item.model or item.provider
-        text = item.candidate_text if item.state == "completed" else ""
+        is_current = current_id is not None and item.accepted_correction_id == current_id
         entries.append({
             "id": f"ocr-{item.pk}",
             "kind": kind,
@@ -132,15 +134,15 @@ def build_region_versions(region):
             "sublabel": sublabel,
             "provider": item.provider,
             "model": model,
-            "pipeline_id": (item.metadata or {}).get("pipeline_id", "") if is_htr else "",
-            "text": text,
+            "pipeline_id": pipeline if is_htr else "",
+            "text": item.candidate_text if item.state == "completed" else "",
             "state": item.state,
             "status": "",
-            "accepted": bool(item.accepted_correction_id),
+            "accepted": is_current,
             "created_by": _user_label(item.created_by),
             "created_at": _ts(item.created_at),
             "finished_at": _ts(item.finished_at),
-            "selectable": item.state == "completed" and bool(text),
+            "selectable": item.state == "completed" and bool(item.candidate_text),
             "accept_url": (
                 reverse("accept_region_htr", args=[item.pk]) if is_htr
                 else reverse("accept_ocr_request", args=[item.pk])
@@ -148,8 +150,37 @@ def build_region_versions(region):
             "detail_url": (reverse("api_htr_run_detail", args=[item.pk]) if is_htr else ""),
         })
 
-    # Newest first; imported stays conceptually oldest but keep it last for
-    # chronological ordering against corrections/candidates.
+    # Manual text corrections that are NOT the result of an accepted recognition
+    # candidate (those are already represented by their ocr-* entry above, which
+    # carries the correct HTR/Vision label). Only truly manual edits get their
+    # own entry.
+    accepted_ocr_correction_ids = {item.accepted_correction_id for item in ocr_items if item.accepted_correction_id}
+    for corr in text_corrections:
+        if corr.pk in accepted_ocr_correction_ids:
+            continue
+        user = _user_label(corr.created_by)
+        label = f"{_('Manual')} · {user}" if user and str(user) != str(_("system")) else str(_("Manual"))
+        entries.append({
+            "id": f"corr-{corr.pk}",
+            "kind": "manual",
+            "label": label,
+            "sublabel": corr.reason or "",
+            "provider": "",
+            "model": "",
+            "pipeline_id": "",
+            "text": corr.after.get("text", ""),
+            "state": "completed",
+            "status": corr.status,
+            "accepted": corr.pk == current_id,
+            "created_by": _user_label(corr.created_by),
+            "created_at": _ts(corr.created_at),
+            "finished_at": _ts(corr.created_at),
+            "selectable": current_id is not None,  # manual edits are always selectable
+            "accept_url": "",
+            "detail_url": "",
+        })
+
+    # Newest first; imported stays conceptually oldest but keep it last.
     def sort_key(entry):
         return entry["created_at"] or ""
 
@@ -179,8 +210,14 @@ def build_region_versions(region):
             "reverted_by": _user_label(corr.reverted_by) if corr.reverted_by_id else None,
         })
 
-    any_pending = region.ocr_requests.filter(state__in={"queued", "processing"}).exists()
-    return {"current": current, "entries": chronological, "activity": activity, "any_pending": any_pending}
+    any_pending = any(item.state in {"queued", "processing"} for item in ocr_items)
+    return {
+        "current": current,
+        "current_id": current_id,
+        "entries": chronological,
+        "activity": activity,
+        "any_pending": any_pending,
+    }
 
 
 def first_pending_detail_url(region):

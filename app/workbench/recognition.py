@@ -45,8 +45,22 @@ def _vision_model_for(provider):
     return getattr(settings, "DSW_OCR_MODEL", "") or provider
 
 
+def _vision_base_url(provider):
+    """The endpoint a provider would call; empty means it is not configured.
+
+    Qwen reuses the chat provider endpoint; the others use the dedicated OCR
+    endpoint."""
+    if provider == "qwen":
+        return getattr(settings, "DSW_CHAT_BASE_URL", "")
+    return getattr(settings, "DSW_OCR_BASE_URL", "")
+
+
 def available_vision_models():
-    """Return ``[(provider, label, default_model), ...]`` for the Vision dropdown."""
+    """Return ``[(provider, label, default_model), ...]`` for the Vision dropdown.
+
+    The full catalogue is always returned so provider selection and preference
+    memory work regardless of endpoint configuration; the UI only *shows* the
+    Vision control when ``vision_enabled()`` is true."""
     from .processors.vision_ocr import OCR_PROVIDERS
     # Keep a stable, user-facing order: qwen first (the default), then others.
     order = ["qwen", "paddleocr-vl", "openai-compatible"]
@@ -60,6 +74,13 @@ def available_vision_models():
         if provider not in seen:
             rows.append((provider, label, _vision_model_for(provider)))
     return rows
+
+
+def vision_enabled():
+    """Whether any visual-OCR provider has a configured endpoint.
+
+    Independent of HTR: disabling HTR must never hide Vision (and vice versa)."""
+    return any(_vision_base_url(provider) for provider, _, _ in available_vision_models())
 
 
 def default_vision_provider():

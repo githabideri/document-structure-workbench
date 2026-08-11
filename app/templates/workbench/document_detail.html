@@ -12,6 +12,7 @@
      data-selected-region="{{ selected_region.id|default:'' }}"
      data-inspector-url="{{ region_inspector_url }}"
      data-page-data-url="{{ page_workspace_data_url }}"
+     data-page-inspector-url="{% if page %}{% url 'page_inspector' page.id %}{% endif %}"
      data-image-url="{{ page_image_url }}"
      data-ui-id="document-workspace">
     <header class="workspace-header">
@@ -46,7 +47,8 @@
                         data-page-id="{{ item.id }}" data-page-number="{{ item.page_number }}"
                         aria-current="{% if item.id == selected_page.id %}page{% endif %}">
                     <span class="page-number">{{ item.page_number }}</span>
-                    {% if item.image_path %}<img src="{% url 'page_image' item.id %}" alt="" loading="lazy">{% endif %}
+                    {# Thumbnails use the lightweight derivative, never the full scan. #}
+                    {% if item.image_path %}<img src="{% url 'page_image_derivative' item.id 'thumbnail' %}" alt="" loading="lazy">{% endif %}
                 </button>
                 {% empty %}<p class="empty-state">{% trans "No pages were imported." %}</p>{% endfor %}
             </nav>
@@ -59,6 +61,17 @@
             <div class="viewer-toolbar" id="viewer-toolbar" role="toolbar" aria-label="{% trans 'Viewer controls' %}">
                 <span class="viewer-page-indicator" id="viewer-page-indicator">{% if selected_page %}{% trans "Page" %} {{ selected_page.page_number }}{% endif %}</span>
                 <div class="viewer-toolbar-spacer"></div>
+                <label class="viewer-filter" title="{% trans 'Filter regions' %}">
+                    <span>{% trans "Regions" %}</span>
+                    <select data-viewer-region-filter>
+                        <option value="all">{% trans "All" %}</option>
+                        {% for value, label in region_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label class="viewer-filter viewer-filter-check" title="{% trans 'Show suppressed regions' %}">
+                    <input type="checkbox" data-viewer-show-suppressed>
+                    <span>{% trans "Suppressed" %}</span>
+                </label>
                 <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="zoom-out" aria-label="{% trans 'Zoom out' %}">−</button>
                 <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="zoom-in" aria-label="{% trans 'Zoom in' %}">+</button>
                 <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="fit-width">{% trans "Fit width" %}</button>
@@ -66,7 +79,7 @@
                 <button type="button" class="btn btn-sm btn-secondary" data-viewer-action="focus-region" disabled>{% trans "Focus region" %}</button>
             </div>
             <div class="viewer-host" id="viewer-host">
-                <div class="viewer-empty" id="viewer-empty" hidden>{% trans "No page image is available for this page." %}</div>
+                <div class="viewer-status" id="viewer-status" data-state="loading">{% trans "Loading page image…" %}</div>
             </div>
             <div class="viewer-legend"><span class="legend-swatch"></span>{% trans "Detected structure" %} · {% trans "click a region to inspect it" %}</div>
         </section>
@@ -74,25 +87,42 @@
         {% comment %} Draggable vertical separator between viewer and inspector. {% endcomment %}
         <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="{% trans 'Resize inspector' %}" tabindex="0"></div>
 
-        {% comment %} Region inspector — independently reloadable. Selecting/acting on a region swaps #region-inspector, never the viewer. {% endcomment %}
-        <aside class="region-inspector" id="region-inspector" aria-label="{% trans 'Region inspector' %}" data-ui-id="read-panel" data-region-id="{{ selected_region.id|default:'' }}">
-            {% if selected_region %}
-                {% include "workbench/_region_inspector.html" %}
-            {% else %}
-                <div class="inspector-empty">
-                    <div class="inspector-empty-card">
-                        <h2>{% trans "Select a region" %}</h2>
-                        <p>{% trans "Click a detected region in the page to inspect and transcribe it. Drag the page to pan; Ctrl/⌘ + scroll to zoom." %}</p>
+        {% comment %} Inspector — persistent Region/Page tab shell. Only the active pane is swapped by HTMX; the viewer + selected region are never recreated. {% endcomment %}
+        <aside class="region-inspector" id="region-inspector" aria-label="{% trans 'Inspector' %}" data-ui-id="read-panel">
+            <div class="inspector-tabs" role="tablist" aria-label="{% trans 'Inspector mode' %}">
+                <button type="button" id="tab-region" class="inspector-tab{% if selected_region %} is-active{% endif %}"
+                        role="tab" aria-selected="{% if selected_region %}true{% else %}false{% endif %}"
+                        aria-controls="inspector-pane-region" data-inspector-tab="region">{% trans "Region" %}</button>
+                <button type="button" id="tab-page" class="inspector-tab{% if not selected_region %} is-active{% endif %}"
+                        role="tab" aria-selected="{% if not selected_region %}true{% else %}false{% endif %}"
+                        aria-controls="inspector-pane-page" data-inspector-tab="page">{% trans "Page" %}</button>
+            </div>
+
+            <div id="inspector-pane-region" data-region-id="{{ selected_region.id|default:'' }}"{% if not selected_region %} hidden{% endif %} data-ui-id="region-pane">
+                {% if selected_region %}
+                    {% include "workbench/_region_inspector.html" %}
+                {% else %}
+                    <div class="inspector-empty">
+                        <div class="inspector-empty-card">
+                            <h2>{% trans "Select a region" %}</h2>
+                            <p>{% trans "Click a detected region in the page to inspect and transcribe it. Drag the page to pan; Ctrl/⌘ + scroll to zoom." %}</p>
+                        </div>
                     </div>
-                </div>
-            {% endif %}
+                {% endif %}
+            </div>
+
+            <div id="inspector-pane-page"{% if selected_region %} hidden{% endif %} data-ui-id="page-pane">
+                {% if page.image_path %}{% include "workbench/_page_inspector.html" %}{% endif %}
+            </div>
         </aside>
     </div>
 
     {# Region overlay data for the OpenSeadragon viewer (normalized page-relative bounds). #}
     <script type="application/json" id="page-regions-data">{{ page_regions_json|safe }}</script>
-    {# HTR line overlays toggle against the existing viewer. #}
-    <script type="application/json" id="workspace-config-data">{"htrEnabled": {{ htr_enabled|yesno:"true,false" }}}</script>
+    {# Page image pyramid levels (thumbnail → preview → full) with pixel sizes. #}
+    <script type="application/json" id="page-image-data">{{ page_image_levels_json|safe }}</script>
+    {# Region-tab defaults for overlays (e.g. filter). #}
+    <script type="application/json" id="workspace-config-data">{"htrEnabled": {{ htr_enabled|yesno:"true,false" }}, "visionEnabled": {{ vision_enabled|yesno:"true,false" }}}</script>
 </div>
 {% endblock %}
 

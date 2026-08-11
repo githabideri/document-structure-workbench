@@ -1,0 +1,85 @@
+{% load i18n %}
+<div class="inspector inspector-page" id="inspector-page" data-region-id=""
+     data-poll-url="{% if page_any_pending %}{{ poll_url }}{% endif %}"
+     data-async-state="{% if page_any_pending %}pending{% else %}idle{% endif %}">
+    {% if inspector_error %}
+    <div class="inspector-alert" role="alert">{{ inspector_error }}</div>
+    {% endif %}
+
+    <header class="inspector-head">
+        <div class="inspector-head-main">
+            <h2>{% trans "Page" %} {{ selected_page.page_number }}</h2>
+            <span class="badge region-type-badge">{% trans "Full-page view" %}</span>
+        </div>
+    </header>
+
+    <section class="inspector-editor" id="inspector-page-text" aria-label="{% trans 'Complete page text' %}">
+        <div class="inspector-section-label">{% trans "Complete page text" %}</div>
+        <pre class="page-full-text">{{ page_full_text|default:_("No text was extracted for this page.") }}</pre>
+    </section>
+
+    {% if can_edit_document %}
+    <section class="inspector-editor" aria-label="{% trans 'Full-page Vision OCR' %}">
+        <div class="inspector-section-label">{% trans "Full-page Vision OCR" %}</div>
+        {% if vision_enabled %}
+        <form class="split-button" data-split-button="page-vision"
+              hx-post="{% url 'create_page_ocr_request' selected_page.id %}" hx-target="#inspector-page" hx-swap="innerHTML" hx-disabled-elt="button">
+            {% csrf_token %}
+            <input type="hidden" name="provider" value="{{ vision_provider }}">
+            <input type="hidden" name="model" value="">
+            <button type="submit" class="split-button-main">
+                <span class="split-button-label">{% trans "Run full-page Vision" %}</span>
+                <span class="split-button-model" data-recog-model>{% for provider, label, model in vision_models %}{% if provider == vision_provider %}{{ label }}{% endif %}{% endfor %}</span>
+            </button>
+            <details class="split-button-menu">
+                <summary aria-label="{% trans 'Choose vision model' %}">▾</summary>
+                <div class="split-button-menu-panel" role="menu">
+                    {% for provider, label, model in vision_models %}
+                    <button type="button" role="menuitemradio" aria-checked="{% if provider == vision_provider %}true{% else %}false{% endif %}" data-recog-option="{{ provider }}" data-recog-label="{{ label }}" data-recog-model="{{ model }}">{{ label }}</button>
+                    {% endfor %}
+                </div>
+            </details>
+        </form>
+        {% else %}
+        <p class="help-text">{% trans "Vision OCR is not enabled on this server." %}</p>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    <section class="inspector-versions" aria-label="{% trans 'Page OCR candidates' %}">
+        <div class="inspector-section-label">{% trans "Page OCR candidates" %}</div>
+        {% if page_ocr_candidates %}
+        <ul class="version-rail" role="list">
+            {% for cand in page_ocr_candidates %}
+            <li class="version-item kind-vision{% if cand.state == 'queued' or cand.state == 'processing' %} is-pending{% endif %}">
+                <span class="version-rail-main">
+                    <span class="version-dot kind-vision{% if cand.state == 'completed' %} is-current{% endif %}" aria-hidden="true"></span>
+                    {% trans "Vision" %} · {{ cand.model|default:cand.provider }}
+                </span>
+                <span class="version-rail-meta">
+                    {% if cand.state == 'queued' %}{% trans "queued" %}{% elif cand.state == 'processing' %}{% trans "running…" %}{% elif cand.state == 'failed' %}{% trans "failed" %}{% else %}{% trans "completed" %}{% endif %}
+                    {% if cand.created_by %} · {{ cand.created_by }}{% endif %}
+                    {% if cand.created_at %} · {{ cand.created_at|timesince }}{% endif %}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="help-text">{% trans "No full-page OCR candidates yet." %}</p>
+        {% endif %}
+    </section>
+
+    <section class="inspector-versions" aria-label="{% trans 'Tables on this page' %}">
+        <div class="inspector-section-label">{% trans "Detected tables" %}</div>
+        {% if page_tables %}
+        {% for table in page_tables %}
+        <details class="page-table">
+            <summary>{% trans "Table" %} {{ table.stable_table_id }}</summary>
+            {% for extraction in table.extractions.all %}{% if extraction.safe_html %}<div class="table-preview">{{ extraction.safe_html|safe }}</div>{% endif %}{% endfor %}
+        </details>
+        {% endfor %}
+        {% else %}
+        <p class="help-text">{% trans "No tables were detected on this page." %}</p>
+        {% endif %}
+    </section>
+</div>

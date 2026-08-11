@@ -318,6 +318,10 @@ export function createViewer(host, {regions = [], initialSelectedId = null, onSe
   if (!window.OpenSeadragon) throw new Error("OpenSeadragon is not loaded.");
   const viewer = OpenSeadragon({
     element: host,
+    // Canvas raises tile-drawn, unlike OSD's WebGLDrawer. This keeps the
+    // production first-draw contract observable and avoids a rejected-event
+    // console error; the test fallback remains an explicit opt-in only.
+    drawer: "canvas",
     tileSources: [],                       // opened via the unified openPage() path
     prefixUrl: "",
     showNavigationControl: false,

@@ -1136,7 +1136,7 @@ def correct_region_text(request, region_id):
             CorrectionService.apply(
                 region=region, user=request.user, operation="text",
                 before={"text": region.effective_text}, after={"text": replacement},
-                reason=reason,
+                reason=reason, expected_current=expected,
             )
         except CorrectionError as exc:
             error = _(str(exc))

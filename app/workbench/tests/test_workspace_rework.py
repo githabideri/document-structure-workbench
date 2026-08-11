@@ -15,7 +15,7 @@ from workbench.models import (
     ProcessingPreset, ProjectMembership, RegionCorrection, SourceDocument,
     UserPreferences,
 )
-from workbench.services import OcrService
+from workbench.services import CorrectionError, CorrectionService, OcrService
 
 User = get_user_model()
 
@@ -245,6 +245,20 @@ class WorkspaceRecognitionTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.accepted_correction_id, first_correction.pk)
         self.assertEqual(region.corrections.filter(operation="text").count(), 1)
+
+    def test_competing_candidate_acceptances_serialize_on_region(self):
+        region = self.w["region"]
+        first = OcrService.create(page=self.w["page"], region=region, provider="qwen", model="m", user=self.w["owner"])
+        second = OcrService.create(page=self.w["page"], region=region, provider="qwen", model="m", user=self.w["owner"])
+        for item, text in ((first, "first"), (second, "second")):
+            item.state = "completed"
+            item.candidate_text = text
+            item.save(update_fields=["state", "candidate_text"])
+        baseline = region.effective_text
+        OcrService.accept(item=first, user=self.w["owner"], expected_current=baseline)
+        with self.assertRaises(CorrectionError):
+            OcrService.accept(item=second, user=self.w["owner"], expected_current=baseline)
+        self.assertEqual(region.corrections.count(), 1)
 
     def test_accept_rejects_stale_expected_current_text(self):
         region = self.w["region"]

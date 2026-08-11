@@ -444,15 +444,37 @@ class CorrectionService:
             }.get(operation, "")
             if current != expected_current:
                 raise CorrectionError("The region changed before this correction was applied.")
-        correction = RegionCorrection(
-            region=region, document=region.page.document, created_by=user,
-            operation=operation, before=before, after=after, reason=reason,
-            source_ocr_request=source_ocr_request,
-        )
         try:
             with transaction.atomic():
+                # The region is the shared concurrency boundary. Candidate
+                # requests are independently lockable, but every correction
+                # must serialize against manual edits and other candidates.
+                locked_region = PageRegion.objects.select_for_update().select_related(
+                    "page__document__collection"
+                ).get(pk=region.pk)
+                current = {
+                    "text": locked_region.effective_text,
+                    "type": locked_region.effective_region_type,
+                    "suppress": "true" if locked_region.is_suppressed else "false",
+                }.get(operation, "")
+                if expected_current is not None and current != expected_current:
+                    raise CorrectionError("The region changed before this correction was applied.")
+                locked_before = dict(before or {})
+                if operation == "text":
+                    locked_before["text"] = current
+                elif operation == "type":
+                    locked_before["region_type"] = current
+                elif operation == "suppress":
+                    locked_before["suppressed"] = current == "true"
+                correction = RegionCorrection(
+                    region=locked_region, document=locked_region.page.document, created_by=user,
+                    operation=operation, before=locked_before, after=after, reason=reason,
+                    source_ocr_request=source_ocr_request,
+                )
                 correction.full_clean()
                 correction.save()
+        except PageRegion.DoesNotExist as exc:
+            raise CorrectionError("The region no longer exists.") from exc
         except ValidationError as exc:
             raise CorrectionError("The correction is not valid.") from exc
         return correction

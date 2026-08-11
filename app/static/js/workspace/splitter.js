@@ -13,8 +13,10 @@ function clampWidth(w, max) {
   return Math.max(MIN_INSPECTOR, Math.min(MAX_INSPECTOR, Math.min(w, max)));
 }
 
-export function initLayout({shell, splitter, inspector, navigator, opener}) {
+export function initLayout({shell, splitter, inspector, navigator, opener, onLayoutChange}) {
   if (!shell || !splitter || !inspector) return;
+
+  const resync = () => { try { onLayoutChange && onLayoutChange(); } catch { /* noop */ } };
 
   // --- Inspector width from localStorage (with a viewport-relative cap) ---
   function applyStoredWidth() {
@@ -22,6 +24,7 @@ export function initLayout({shell, splitter, inspector, navigator, opener}) {
     const max = Math.min(window.innerWidth - 360, MAX_INSPECTOR);
     const width = Number.isFinite(stored) && stored > 0 ? clampWidth(stored, max) : DEFAULT_INSPECTOR;
     inspector.style.width = `${width}px`;
+    resync();
   }
   applyStoredWidth();
 
@@ -43,6 +46,7 @@ export function initLayout({shell, splitter, inspector, navigator, opener}) {
     const max = Math.min(window.innerWidth - 360, MAX_INSPECTOR);
     const width = clampWidth(window.innerWidth - event.clientX, max);
     inspector.style.width = `${width}px`;
+    resync();
   }
 
   function endDrag(event) {
@@ -52,6 +56,7 @@ export function initLayout({shell, splitter, inspector, navigator, opener}) {
     splitter.classList.remove("is-dragging");
     document.body.classList.remove("is-splitter-dragging");
     localStorage.setItem(LS_SPLIT, String(parseInt(inspector.style.width, 10) || DEFAULT_INSPECTOR));
+    resync();
     publishDiagnostics();
   }
 
@@ -70,16 +75,19 @@ export function initLayout({shell, splitter, inspector, navigator, opener}) {
     event.preventDefault();
     inspector.style.width = `${width}px`;
     localStorage.setItem(LS_SPLIT, String(width));
+    resync();
     publishDiagnostics();
   });
 
   window.addEventListener("resize", applyStoredWidth);
+  window.addEventListener("resize", resync);
 
   // --- Collapsible page navigator ---
   function applyNavigator(collapsed) {
     navigator?.classList.toggle("is-collapsed", collapsed);
     navigator?.setAttribute("aria-hidden", collapsed ? "true" : "false");
     if (opener) opener.hidden = !collapsed;
+    resync();
     publishDiagnostics();
   }
   const storedCollapsed = localStorage.getItem(LS_PAGES) === "true";

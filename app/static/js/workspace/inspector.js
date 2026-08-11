@@ -121,6 +121,8 @@ async function saveTranscription(area, ctx) {
 function wireEditor(root, ctx) {
   const area = root.querySelector("#transcription-area");
   if (!area) return;
+  if (area.dataset.wiredEditor === "1") return; // idempotent: editor stays mounted
+  area.dataset.wiredEditor = "1";
   autoSize(area);
   area.addEventListener("input", () => { autoSize(area); setDirty(area, isInspectorDirty(root)); });
   const saveBtn = root.querySelector('[data-transcription-action="save"]');
@@ -133,6 +135,8 @@ function wireEditor(root, ctx) {
 
 export function wireSplitButtons(root) {
   for (const group of root.querySelectorAll("[data-split-button]")) {
+    if (group.dataset.wired === "1") continue; // idempotent: buttons stay mounted
+    group.dataset.wired = "1";
     const hidden = group.querySelector("input[type='hidden']");
     const modelLabel = group.querySelector("[data-recog-model]");
     const options = group.querySelectorAll("[data-recog-option]");
@@ -223,8 +227,7 @@ function replaceVersionRail(root, html, ctx) {
   const fresh = tmp.content.firstElementChild;
   if (!fresh || !versions.parentNode) return;
   versions.replaceWith(fresh);
-  wireVersions(root, ctx);
-  startPolling(root, ctx);
+  wireVersionRail(root, ctx);
 }
 
 // Poll the version rail while a recognition candidate is pending. Only the rail
@@ -266,18 +269,36 @@ export function stopPolling() {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
 }
 
+// Wire only the provenance/version rail (fresh after a rail-only swap) and
+// restart pending polling. The editor and split buttons are intentionally NOT
+// re-wired here so repeated recognition runs never accumulate duplicate
+// textarea/save/split-button listeners.
+export function wireVersionRail(root, ctx) {
+  wireVersions(root, ctx);
+  startPolling(root, ctx);
+}
+
 export function wireInspector(root, ctx) {
   wireEditor(root, ctx);
   wireSplitButtons(root);
-  wireVersions(root, ctx);
-  // Focus region button inside the actions menu.
-  root.querySelector("[data-inspector-action='focus-region']")?.addEventListener("click", () => ctx.onFocusRegion?.());
-  // "Use transcription" → accept candidate. Guarded by the shared dirty check.
-  root.querySelector("#version-compare-accept")?.addEventListener("click", (event) => {
-    const url = event.currentTarget.dataset.acceptUrl;
-    if (!url) return;
-    if (!guardDirtyInspector(root)) return;
-    if (window.htmx) window.htmx.ajax("POST", url, {target: "#region-inspector", swap: "innerHTML"});
-  });
-  startPolling(root, ctx);
+  wireVersionRail(root, ctx);
+  // Focus region button inside the actions menu + compare-accept live in the
+  // inspector shell; mark them so re-wirings are idempotent.
+  const focusBtn = root.querySelector("[data-inspector-action='focus-region']");
+  if (focusBtn && focusBtn.dataset.wiredAction !== "1") {
+    focusBtn.dataset.wiredAction = "1";
+    focusBtn.addEventListener("click", () => ctx.onFocusRegion?.());
+  }
+  const acceptBtn = root.querySelector("#version-compare-accept");
+  if (acceptBtn && acceptBtn.dataset.wiredAccept !== "1") {
+    acceptBtn.dataset.wiredAccept = "1";
+    // "Use transcription" → accept/re-apply the selected version. Guarded by the
+    // shared dirty check (destructive only if it replaces the editor).
+    acceptBtn.addEventListener("click", (event) => {
+      const url = event.currentTarget.dataset.acceptUrl;
+      if (!url) return;
+      if (!guardDirtyInspector(root)) return;
+      if (window.htmx) window.htmx.ajax("POST", url, {target: "#inspector-pane-region", swap: "innerHTML"});
+    });
+  }
 }

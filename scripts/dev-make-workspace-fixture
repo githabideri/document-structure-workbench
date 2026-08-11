@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Dev-only fixture: make document/page 1 a non-1:1 logical-vs-raster page.
+
+Logical (Docling) page size: 595 × 841.
+Actual raster image:          1190 × 1682  (exactly 2x logical).
+Derivatives: thumbnail ~170×240, preview ~1132×1600 (both < full).
+
+Regions are placed at upper-left, upper-right, centre, lower-left, lower-right,
+one narrow text line and one large enclosing region, with known normalized
+bboxes. This gives the workspace alignment tests real non-1:1 coverage.
+
+Run with: DSW_ARTIFACTS_DIR=/tmp/dsw-artifacts ./.venv/bin/python scripts/dev-make-workspace-fixture
+"""
+import os
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+
+import django  # noqa: E402
+
+from django.conf import settings  # noqa: E402
+
+
+def main():
+    django.setup()
+    from PIL import Image, ImageDraw
+
+    from workbench.models import Page, PageRegion
+
+    logical_w, logical_h = 595, 841
+    raster_w, raster_h = 1190, 1682
+
+    base = Path(settings.ARTIFACTS_BASE_DIR)
+    rel = "fixture-pages/page1-raster.png"
+    dest = base / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", (raster_w, raster_h), (250, 250, 248))
+    draw = ImageDraw.Draw(img)
+    step = 42
+    for x in range(0, raster_w, step):
+        draw.line([(x, 0), (x, raster_h)], fill=(224, 224, 220), width=1)
+    for y in range(0, raster_h, step):
+        draw.line([(0, y), (raster_w, y)], fill=(224, 224, 220), width=1)
+    boxes = {
+        "upper-left": (0.05, 0.15, 0.45, 0.35),
+        "upper-right": (0.55, 0.15, 0.95, 0.35),
+        "centre": (0.25, 0.40, 0.75, 0.62),
+        "lower-left": (0.05, 0.66, 0.45, 0.86),
+        "lower-right": (0.55, 0.66, 0.95, 0.86),
+        "narrow-line": (0.08, 0.50, 0.90, 0.54),
+        "enclosing": (0.02, 0.02, 0.98, 0.98),
+    }
+    for i, (name, (l, t, r, b)) in enumerate(boxes.items()):
+        x0, y0 = int(l * raster_w), int(t * raster_h)
+        x1, y1 = int(r * raster_w), int(b * raster_h)
+        draw.rectangle([x0, y0, x1, y1], outline=(20 + i * 25, 90, 160), width=4)
+        draw.text((x0 + 8, y0 + 8), name, fill=(60, 60, 60))
+    img.save(dest, "PNG")
+    print(f"raster written: {dest} ({raster_w}x{raster_h})")
+
+    page = Page.objects.filter(pk=1).first()
+    if not page:
+        page = Page.objects.filter(document_id=1).first()
+    if not page:
+        print("no page found; set image dims manually", file=sys.stderr)
+        return
+    page.image_path = rel
+    page.width, page.height = logical_w, logical_h
+    page.image_width, page.image_height = raster_w, raster_h
+    page.save(update_fields=["image_path", "width", "height", "image_width", "image_height"])
+
+    # Recreate the page's regions with the known normalized bboxes.
+    PageRegion.objects.filter(page=page).delete()
+    texts = {
+        "upper-left": "Upper-left block: the quartermaster logged the reserve stores.",
+        "upper-right": "Upper-right block: signals repeated the withdrawal order.",
+        "centre": "Central paragraph: the company held the position through the night.",
+        "lower-left": "Lower-left block: equipment R-184 was inventoried at dusk.",
+        "lower-right": "Lower-right block: the field report was sealed and dispatched.",
+        "narrow-line": "A single narrow line of text spanning the page.",
+        "enclosing": "Enclosing region: full-page frame (smallest-area hit test target).",
+    }
+    region_types = {
+        "upper-left": "text", "upper-right": "text", "centre": "text",
+        "lower-left": "text", "lower-right": "text", "narrow-line": "text",
+        "enclosing": "other",
+    }
+    for i, (name, (l, t, r, b)) in enumerate(boxes.items()):
+        PageRegion.objects.create(
+            source_document=page.document.processing_job.source_document,
+            job=page.document.processing_job,
+            page=page, page_number=page.page_number,
+            region_type=region_types[name], left=l, top=t, right=r, bottom=b,
+            text=texts[name],
+        )
+    ids = {r.id: name for r in PageRegion.objects.filter(page=page)}
+    print("regions:", ids)
+    # Clean any stale derived derivatives so they regenerate from the new raster.
+    shutil.rmtree(base / "derived" / "pages" / str(page.pk), ignore_errors=True)
+    print("done")
+
+
+if __name__ == "__main__":
+    main()

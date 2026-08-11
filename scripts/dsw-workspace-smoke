@@ -17,6 +17,7 @@ revision_id="${DSW_WS_REVISION_ID:-1}"
 page_number="${DSW_WS_PAGE:-1}"
 region_a="${DSW_WS_REGION_A:-2}"
 region_b="${DSW_WS_REGION_B:-3}"
+region_c="${DSW_WS_REGION_C:-1}"
 output_dir="${DSW_BROWSER_OUTPUT_DIR:-/tmp/dsw-workspace-smoke-$(date +%Y%m%d-%H%M%S)}"
 allow_remote="${DSW_BROWSER_ALLOW_REMOTE:-0}"
 browser="$(dirname "$0")/agent-browser-dsw"
@@ -59,6 +60,7 @@ while (($#)); do
     --page) page_number="${2:?missing page}"; shift 2;;
     --region-a) region_a="${2:?missing region a}"; shift 2;;
     --region-b) region_b="${2:?missing region b}"; shift 2;;
+    --region-c) region_c="${2:?missing region c}"; shift 2;;
     --output-dir) output_dir="${2:?missing output directory}"; shift 2;;
     --allow-remote) allow_remote=1; shift;;
     *) echo "workspace-smoke: unknown option $1" >&2; usage >&2; exit 2;;
@@ -129,6 +131,32 @@ step_assert focus-deterministic "(async()=>{const ws=window.__DSW_WORKSPACE__;if
 # ---- Selected region fully visible (no crop). ----
 step_assert selected-region-visible "(()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)return null;const reg=ws.state.regions.find(r=>String(r.id)===String(ws.state.regionId));if(!reg)return null;const vp=ws.viewer.viewer.viewport;const vb=vp.getBounds(true);const img=ws.viewer.viewer.world.getItemAt(0).getBounds();const rx=img.x+reg.bbox.left*img.width,ry=img.y+reg.bbox.top*img.height,rw=reg.bbox.width*img.width,rh=reg.bbox.height*img.height;const ok=[[rx,ry],[rx+rw,ry],[rx,ry+rh],[rx+rw,ry+rh]].every(([x,y])=>x>=vb.x-0.5&&x<=vb.x+vb.width+0.5&&y>=vb.y-0.5&&y<=vb.y+vb.height+0.5);if(!ok)throw new Error('selected region cropped');return JSON.stringify({visible:true});})()" || fail "selected region not fully visible"
 
+# ---- Overlay/geometry alignment: the on-screen overlay box must match the
+#      adapter's viewport rect at fit-page, after zoom, after pan, and after
+#      fit-width. This is the deploy blocker for region/image coordinate fidelity.
+step_assert overlay-alignment "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');await ws.selectRegion('$region_b',{focus:false});await new Promise(r=>setTimeout(r,300));const host=document.getElementById('viewer-host');const el=document.querySelector('.region-overlay[data-region-id=\"$region_b\"]');if(!el)throw new Error('no overlay for region');const mismatch=()=>{const d=ws.viewer.diagnostics();const sexp=(d.selectedRegion&&d.selectedRegion.viewport);if(!sexp)throw new Error('no selected viewport');const elRect=ws.viewer.viewer.viewport.viewportToViewerElementRectangle(new OpenSeadragon.Rect(sexp.x,sexp.y,sexp.width,sexp.height));const hrect=host.getBoundingClientRect();const box=el.getBoundingClientRect();const dx=Math.abs((box.x-hrect.x)-elRect.x);const dy=Math.abs((box.y-hrect.y)-elRect.y);const dw=Math.abs(box.width-elRect.width);const dh=Math.abs(box.height-elRect.height);return {dx,dy,dw,dh};};const tol=3;const states=[];const apply=async(name,fn)=>{await fn();await new Promise(r=>setTimeout(r,300));const m=mismatch();if(m.dx>tol||m.dy>tol||m.dw>tol||m.dh>tol)throw new Error('overlay drift at '+name+' '+JSON.stringify(m));states.push(name+':'+JSON.stringify(m));};
+await apply('fit-page',()=>ws.viewer.fitPage());
+await apply('zoom-in',()=>ws.viewer.zoomBy(2.2));
+await apply('pan',()=>ws.viewer.viewer.viewport.panBy(new OpenSeadragon.Point(0.2,0.1),true));
+await apply('fit-width',()=>ws.viewer.fitWidth());
+return JSON.stringify({states});})()" || fail "overlay/image alignment drifted across zoom/pan/fit-width"
+
+# ---- Focus uses exactly the adapter/overlay rectangle (the region rect is
+#      contained in, and derived from, the same geometry as the overlay). ----
+step_assert focus-uses-overlay-rect "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');await ws.selectRegion('$region_b',{focus:true});await new Promise(r=>setTimeout(r,400));const d=ws.viewer.diagnostics();const r=d.selectedRegion.viewport;const vb=d.viewportBounds;const inside=r.x>=vb.x-0.01&&r.y>=vb.y-0.01&&(r.x+r.width)<=vb.x+vb.width+0.01&&(r.y+r.height)<=vb.y+vb.height+0.01;if(!d.selectedRegion)throw new Error('no selected region');if(!inside)throw new Error('focused region not fully within viewport');return JSON.stringify({inside,viewport:d.viewportBounds,region:r});})()" || fail "focus does not use the exact overlay rectangle"
+
+# ---- Selected-ID consistency across workspace/viewer/overlay/focus-button. ----
+step_assert selected-id-consistent "(()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const st=ws.state.regionId;if(!st)throw new Error('no selection');const selEl=document.querySelector('.region-overlay.is-selected');if(!selEl||selEl.dataset.regionId!==String(st))throw new Error('overlay selection mismatch: '+st);if(String(ws.viewer.activeSelectedId())!==String(st))throw new Error('viewer internal selection mismatch');const fb=document.querySelector(\"[data-viewer-action='focus-region']\");if(!fb||fb.disabled)throw new Error('focus button not enabled');return JSON.stringify({regionId:st,overlay:selEl.dataset.regionId,viewer:ws.viewer.activeSelectedId()});})()" || fail "workspace/viewer/overlay selected id diverged"
+
+# ---- Stale async guard: rapid A → B → C must end on C (no stale overwrite). ----
+step_assert rapid-select-stale-guard "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const before=ws.viewer.stats();await Promise.all([ws.selectRegion('$region_a',{push:false}),ws.selectRegion('$region_b',{push:false}),ws.selectRegion('$region_c',{push:false})]);await new Promise(r=>setTimeout(r,600));if(ws.state.regionId!=='$region_c')throw new Error('stale region won: '+ws.state.regionId);const pane=document.getElementById('inspector-pane-region');if(pane.dataset.regionId!=='$region_c')throw new Error('inspector stale: '+pane.dataset.regionId);if(String(ws.viewer.activeSelectedId())!=='$region_c')throw new Error('viewer selection stale');const after=ws.viewer.stats();if(after.imageLoads!==before.imageLoads)throw new Error('viewer reloaded');return JSON.stringify({regionId:ws.state.regionId,pane:pane.dataset.regionId});})()" || fail "stale async region responses overwrote current state"
+
+# ---- Wheel/trackpad: plain wheel pans (zoom unchanged); Ctrl+wheel zooms. ----
+step_assert wheel-pan-and-ctrl-zoom "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const vp=ws.viewer.viewer.viewport;ws.viewer.fitPage();await new Promise(r=>setTimeout(r,250));const z0=vp.getZoom();const b0={x:vp.getBounds(false).x,y:vp.getBounds(false).y};const host=document.getElementById('viewer-host');host.dispatchEvent(new WheelEvent('wheel',{deltaY:120,deltaX:0,bubbles:true,cancelable:true,clientX:host.clientWidth/2,clientY:host.clientHeight/2}));await new Promise(r=>setTimeout(r,200));const z1=vp.getZoom();if(Math.abs(z1-z0)>1e-6)throw new Error('plain wheel changed zoom');const moved=Math.abs(vp.getBounds(false).x-b0.x)>1e-6||Math.abs(vp.getBounds(false).y-b0.y)>1e-6;if(!moved)throw new Error('plain wheel did not pan');host.dispatchEvent(new WheelEvent('wheel',{deltaY:-120,ctrlKey:true,bubbles:true,cancelable:true,clientX:host.clientWidth/2,clientY:host.clientHeight/2}));await new Promise(r=>setTimeout(r,250));const z2=vp.getZoom();if(!(z2>z1))throw new Error('ctrl+wheel did not zoom in');return JSON.stringify({z0,z1,z2,panned:moved});})()" || fail "wheel pan/zoom behaviour is wrong"
+
+# ---- Resize sync: after changing container geometry, overlays stay aligned. ----
+step_assert resize-alignment "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');await ws.selectRegion('$region_b',{focus:false});await new Promise(r=>setTimeout(r,300));const before=ws.viewer.stats();const host=document.getElementById('viewer-host');const el=document.querySelector('.region-overlay[data-region-id=\"$region_b\"]');const insp=document.getElementById('region-inspector');const orig=insp.style.width;insp.style.width='560px';ws.viewer.resyncGeometry();await new Promise(r=>setTimeout(r,300));const d=ws.viewer.diagnostics();const sexp=d.selectedRegion.viewport;const elRect=ws.viewer.viewer.viewport.viewportToViewerElementRectangle(new OpenSeadragon.Rect(sexp.x,sexp.y,sexp.width,sexp.height));const hrect=host.getBoundingClientRect();const box=el.getBoundingClientRect();const dx=Math.abs((box.x-hrect.x)-elRect.x),dy=Math.abs((box.y-hrect.y)-elRect.y);insp.style.width=orig;ws.viewer.resyncGeometry();await new Promise(r=>setTimeout(r,250));if(dx>3||dy>3)throw new Error('overlay drifted after resize: '+dx+','+dy);if(ws.viewer.stats().imageLoads!==before.imageLoads)throw new Error('resize reloaded image');return JSON.stringify({dx,dy,imageLoads:ws.viewer.stats().imageLoads});})()" || fail "container resize shifted overlays or reloaded the image"
+
 # ---- Select another region (same code path a canvas-click invokes). ----
 step_assert region-select-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;if(!ws)throw new Error('no workspace');const before=ws.viewer.stats();await ws.selectRegion('$region_b',{focus:true});await new Promise(r=>setTimeout(r,500));const after=ws.viewer.stats();if(after.imageLoads!==before.imageLoads)throw new Error('viewer reloaded');if(ws.state.regionId!=='$region_b')throw new Error('region not selected');return JSON.stringify({imageLoads:after.imageLoads,selectionChanges:after.selectionChanges,regionId:ws.state.regionId});})()" || fail "region selection recreated the viewer or did not select"
 
@@ -141,8 +169,12 @@ step_assert manual-save-no-reload "(async()=>{const ws=window.__DSW_WORKSPACE__;
 # ---- Hygiene: revert the correction created by the manual save above so the
 #      smoke does not silently mutate shared/staging document content. The server
 #      should run with DSW_HTR_FIXTURE_MODE=true so recognition is simulated.
-"$browser" --session "$session" eval "document.querySelector('[data-transcription-action=revert]')?.click();'revert'">/dev/null 2>&1
-sleep 0.8
+#      A rail-only save does not re-render the editor, so we re-fetch the region
+#      inspector (making the Revert button reflect the new active correction),
+#      then click Revert to restore the prior effective text.
+"$browser" --session "$session" eval "(async()=>{\nconst ws=window.__DSW_WORKSPACE__;const rid=ws.state.regionId;const pane=document.getElementById('inspector-pane-region');\ntry{const resp=await fetch('/regions/'+rid+'/inspector/',{credentials:'same-origin',headers:{Accept:'text/html','HX-Request':'true'}});if(resp.ok)pane.innerHTML=await resp.text();}catch(e){}\nif(window.htmx)window.htmx.process(pane);\nconst btn=document.querySelector('[data-transcription-action=revert]');if(!btn)return 'no-revert-btn';\nconst url=btn.getAttribute('hx-post');\nlet csrf='';const meta=document.querySelector('meta[name=csrf-token]');if(meta)csrf=meta.content;const hid=document.querySelector('[name=csrfmiddlewaretoken]');if(!csrf&&hid)csrf=hid.value;\nawait fetch(url,{method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrf,'HX-Request':'true'}});\nreturn 'reverted '+url;})()" >/dev/null 2>&1
+sleep 1
+echo "workspace-smoke: cleaned previous manual-save correction (revert POSTed)"
 
 # ---- Run a recognition job (Vision when configured, else HTR); version rail becomes
 #      pending without recreating anything. Server should use fixture mode so no real

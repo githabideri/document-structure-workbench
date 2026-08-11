@@ -9,9 +9,14 @@
 // The inspector has two independent tab panes (#inspector-pane-region and
 // #inspector-pane-page). Region-level HTMX swaps retarget to the region pane so
 // the tab shell and the viewer stay put.
+//
+// Async state is guarded centrally: every region/page fetch carries an
+// AbortController + a monotonically increasing generation id, and a response may
+// only commit DOM/URL state if the entity it was requested for is still the
+// current one. Stale responses can never overwrite newer state.
 import {createViewer} from "./viewer.js";
 import {initLayout} from "./splitter.js";
-import {isInspectorDirty, stopPolling, wireInspector, wireSplitButtons} from "./inspector.js";
+import {isInspectorDirty, stopPolling, wireInspector, wireSplitButtons, wireVersionRail} from "./inspector.js";
 import {publishDiagnostics} from "../core/diagnostics.js";
 import {t} from "../core/i18n.js";
 
@@ -49,25 +54,69 @@ function initWorkspace(shell) {
     regions: readJSON("page-regions-data", []),
     imageLevels: readJSON("page-image-data", null),
     imageUrl: ds.imageUrl || "",
+    logicalSize: readJSON("page-meta-data", null)?.logical ?? null,
+    rasterSize: readJSON("page-meta-data", null)?.raster ?? null,
     regionFilter: {type: "all", showSuppressed: false},
   };
-  const pageInspectorUrl = state.pageInspectorUrl;
-  state.pageInspectorUrl = pageInspectorUrl;
 
   const host = document.getElementById("viewer-host");
   const statusEl = document.getElementById("viewer-status");
   let pagePollTimer = null; // hoisted: used by wirePageInspectorRoot during init
+
+  // ---- Async request guards (item: stale responses never commit) ----
+  // Each guarded resource keeps a generation counter + an AbortController. New
+  // requests abort the previous one and bump the generation; a response only
+  // commits if its captured generation is still the latest.
+  const regionReq = {gen: 0, controller: null};
+  const pageReq = {gen: 0, controller: null};
+  const pagePaneReq = {gen: 0, controller: null};
+  const refreshReq = {gen: 0, controller: null};
+
+  function abort(res) {
+    if (res && res.controller) { try { res.controller.abort(); } catch { /* ignore */ } }
+    res.gen += 1;
+    res.controller = null;
+  }
+
+  function fetchGuarded(res, url, options = {}) {
+    abort(res);
+    const controller = new AbortController();
+    res.controller = controller;
+    const gen = res.gen;
+    const signal = controller.signal;
+    return fetch(url, {...options, signal, credentials: options.credentials || "same-origin"})
+      .then((resp) => ({resp, gen, signal}))
+      .catch((err) => {
+        if (err && err.name === "AbortError") return {aborted: true, gen};
+        return {aborted: true, gen}; // transient network error → treat as no-op
+      });
+  }
+
+  function isCurrent(res, gen) { return res.gen === gen; }
+
   const viewer = createViewer(host, {
-    imageLevels: state.imageLevels || null,
-    imageUrl: state.imageUrl || null,
     regions: visibleRegions(state),
     initialSelectedId: state.regionId || null,
     onSelect: (regionId, opts) => selectRegion(regionId, opts),
     statusEl,
-    onRetry: () => viewer.openPage({imageUrl: null, imageLevels: state.imageLevels, regionList: state.regions, selectedId: state.regionId}),
+    onRetry: () => viewer.openPage(pageOpenArgs({focus: !!state.regionId})),
   });
   window.__DSW_WORKSPACE__ = {viewer, state, selectRegion, loadPage, refreshRegions, setInspectorTab, applyRegionFilter};
-  if (state.regionId) viewer.selectRegion(state.regionId, {focus: true}); // deep-link focus on open
+  // Unified load path: the same openPage() used for page switches opens the
+  // initial page, so initial and later imagery follow an identical state machine.
+  viewer.openPage(pageOpenArgs({focus: !!state.regionId}));
+
+  function pageOpenArgs({focus = false} = {}) {
+    return {
+      imageUrl: state.imageUrl,
+      imageLevels: state.imageLevels,
+      regionList: visibleRegions(state),
+      selectedId: state.regionId,
+      focus: focus && state.regionId != null,
+      logicalSize: state.logicalSize,
+      rasterSize: state.rasterSize,
+    };
+  }
 
   initLayout({
     shell,
@@ -75,6 +124,7 @@ function initWorkspace(shell) {
     inspector: document.getElementById("region-inspector"),
     navigator: document.getElementById("page-navigator"),
     opener: document.getElementById("page-navigator-opener"),
+    onLayoutChange: () => viewer.resyncGeometry(),
   });
 
   wireViewerToolbar();
@@ -103,7 +153,9 @@ function initWorkspace(shell) {
       wireInspectorRoot();
       refreshRegions(); // type/suppress/revert mutate region state; resync overlays
     } else if (id === "inspector-versions") {
-      wireInspectorRoot();
+      // Rail-only swap: re-wire just the fresh rail (never the editor/split)
+      // so repeated recognition runs don't accumulate duplicate listeners.
+      wireRailOnly();
     } else if (id === "inspector-pane-page") {
       wirePageInspectorRoot();
     }
@@ -153,16 +205,19 @@ function initWorkspace(shell) {
   }
 
   async function swapInspector(url) {
+    const requested = state.regionId;
     const target = document.getElementById("inspector-pane-region");
-    try {
-      const resp = await fetch(url, {credentials: "same-origin", headers: {"Accept": "text/html", "HX-Request": "true"}});
-      if (!resp.ok) return;
-      const html = await resp.text();
-      target.innerHTML = html;
-      target.dataset.regionId = state.regionId || "";
-      window.htmx?.process(target);
-      wireInspectorRoot();
-    } catch { /* transient */ }
+    const {resp, gen, aborted} = await fetchGuarded(regionReq, url, {headers: {"Accept": "text/html", "HX-Request": "true"}});
+    if (aborted || !isCurrent(regionReq, gen)) return; // superseded or aborted
+    if (String(requested) !== String(state.regionId)) return; // selection moved on
+    if (!resp || !resp.ok || !target) return;
+    const html = await resp.text();
+    if (!isCurrent(regionReq, gen) || String(requested) !== String(state.regionId)) return;
+    target.innerHTML = html;
+    target.dataset.regionId = state.regionId || "";
+    window.htmx?.process(target);
+    wireInspectorRoot();
+    publishDiagnostics();
   }
 
   function clearInspector() {
@@ -179,30 +234,29 @@ function initWorkspace(shell) {
   // ---- Page switching (may load another image; keeps the shell stable) ----
   async function loadPage(pageId, {regionId = null, focus = false, push = true} = {}) {
     if (!pageId) return;
-    let data;
-    try {
-      const resp = await fetch(reverse("page_workspace_data", pageId), {credentials: "same-origin", headers: {"Accept": "application/json"}});
-      data = await resp.json();
-    } catch { return; }
+    const {resp, gen, aborted} = await fetchGuarded(pageReq, reverse("page_workspace_data", pageId), {headers: {"Accept": "application/json"}});
+    if (aborted || !isCurrent(pageReq, gen)) return;
+    if (!resp || !resp.ok) return;
+    const data = await resp.json();
+    if (!isCurrent(pageReq, gen)) return;
+    // The page identity is fixed by the request; only a newer page load may
+    // supersede it. Region-level interactions never supersede a page load.
     state.pageId = String(data.page_id);
     state.pageNumber = String(data.page_number);
     state.regions = data.regions || [];
     state.imageLevels = data.image_levels || null;
     state.imageUrl = data.image_url || "";
+    state.logicalSize = data.logical_size || null;
+    state.rasterSize = data.raster_size || null;
     state.regionId = regionId ? String(regionId) : null;
     shell.dataset.pageId = state.pageId;
     shell.dataset.pageNumber = state.pageNumber;
-    viewer.openPage({
-      imageUrl: state.imageUrl,
-      imageLevels: state.imageLevels,
-      regionList: state.regions,
-      selectedId: state.regionId,
-      focus: focus && state.regionId != null,
-    });
+    viewer.openPage(pageOpenArgs({focus}));
     updatePageNav(state.pageId);
     updatePageIndicator(state.pageNumber);
     // Refresh the page pane for the newly active page.
     await loadPagePane();
+    if (!isCurrent(pageReq, gen)) return;
     if (state.regionId) {
       setInspectorTab("region");
       await swapInspector(reverse("region_inspector", state.regionId));
@@ -215,15 +269,16 @@ function initWorkspace(shell) {
   }
 
   async function loadPagePane() {
-    if (!state.pageId || !state.pageInspectorUrl) return;
+    if (!state.pageId) return;
+    const requestedPage = state.pageId;
     const pane = document.getElementById("inspector-pane-page");
-    try {
-      const resp = await fetch(reverse("page_inspector", state.pageId), {credentials: "same-origin", headers: {"Accept": "text/html", "HX-Request": "true"}});
-      if (!resp.ok || !pane) return;
-      pane.innerHTML = await resp.text();
-      window.htmx?.process(pane);
-      wirePageInspectorRoot();
-    } catch { /* transient */ }
+    const {resp, gen, aborted} = await fetchGuarded(pagePaneReq, reverse("page_inspector", state.pageId), {headers: {"Accept": "text/html", "HX-Request": "true"}});
+    if (aborted || !isCurrent(pagePaneReq, gen) || String(requestedPage) !== String(state.pageId)) return;
+    if (!resp || !resp.ok || !pane) return;
+    pane.innerHTML = await resp.text();
+    if (!isCurrent(pagePaneReq, gen) || String(requestedPage) !== String(state.pageId)) return;
+    window.htmx?.process(pane);
+    wirePageInspectorRoot();
   }
 
   // ---- URL reconciliation (deep links + back/forward) ----
@@ -250,16 +305,15 @@ function initWorkspace(shell) {
   }
 
   // ---- Region overlay synchronization with inspector mutations ----
-  // After type/suppress/restore/revert the server has authoritative region
-  // state; refresh it (a light JSON call, never a viewer reopen) and rebuild the
-  // overlay layer so inspector and viewer stay in lock-step.
   let refreshing = false;
   async function refreshRegions() {
     if (refreshing || !state.pageId) return;
     refreshing = true;
     try {
-      const resp = await fetch(reverse("page_workspace_data", state.pageId), {credentials: "same-origin", headers: {"Accept": "application/json"}});
+      const {resp, gen, aborted} = await fetchGuarded(refreshReq, reverse("page_workspace_data", state.pageId), {headers: {"Accept": "application/json"}});
+      if (aborted || !isCurrent(refreshReq, gen) || !resp || !resp.ok) return;
       const data = await resp.json();
+      if (!isCurrent(refreshReq, gen)) return;
       state.regions = data.regions || state.regions;
       applyRegionFilter();
     } finally { refreshing = false; }
@@ -360,15 +414,13 @@ function initWorkspace(shell) {
   function wireTabs() {
     const tabRegion = document.getElementById("tab-region");
     const tabPage = document.getElementById("tab-page");
+    // Tab switching is NON-destructive: the Region DOM/editor stays mounted with
+    // its unsaved text intact, so no dirty guard is applied here.
     tabRegion?.addEventListener("click", () => {
       if (!state.regionId) return;
-      if (isInspectorDirty(document.getElementById("inspector-pane-region")) &&
-          !confirm(t("You have unsaved transcription changes. Leave the transcription anyway?"))) return;
       setInspectorTab("region");
     });
     tabPage?.addEventListener("click", () => {
-      if (isInspectorDirty(document.getElementById("inspector-pane-region")) &&
-          !confirm(t("You have unsaved transcription changes. Switch to the page view anyway?"))) return;
       setInspectorTab("page");
     });
     // Initial state: Page is the default when no region is selected.
@@ -391,6 +443,18 @@ function initWorkspace(shell) {
     });
   }
 
+  // Rail-only rewiring (recognition starts/polling): never touches the editor
+  // or split buttons.
+  function wireRailOnly() {
+    stopPolling();
+    const root = document.getElementById("inspector-pane-region");
+    if (!root) return;
+    wireVersionRail(root, {
+      viewer,
+      onFocusRegion: () => viewer.focusSelected(),
+    });
+  }
+
   // ---- Page pane wiring (split buttons + lightweight pending polling) ----
   function wirePageInspectorRoot() {
     clearTimeout(pagePollTimer);
@@ -405,17 +469,16 @@ function initWorkspace(shell) {
   }
 
   async function pollPagePane(url) {
+    const requestedPage = state.pageId;
     const pane = document.getElementById("inspector-pane-page");
-    try {
-      const resp = await fetch(url, {credentials: "same-origin", headers: {"Accept": "text/html", "HX-Request": "true"}});
-      if (!resp.ok || !pane) return;
-      pane.innerHTML = await resp.text();
-      window.htmx?.process(pane);
-      wirePageInspectorRoot();
-    } catch { wirePageInspectorRoot(); }
+    const {resp, gen, aborted} = await fetchGuarded(pagePaneReq, url, {headers: {"Accept": "text/html", "HX-Request": "true"}});
+    if (aborted || !isCurrent(pagePaneReq, gen) || String(requestedPage) !== String(state.pageId)) return;
+    if (!resp || !resp.ok || !pane) { wirePageInspectorRoot(); return; }
+    pane.innerHTML = await resp.text();
+    if (!isCurrent(pagePaneReq, gen) || String(requestedPage) !== String(state.pageId)) return;
+    window.htmx?.process(pane);
+    wirePageInspectorRoot();
   }
-
-  // eslint-disable-next-line no-unused-vars
 
   publishDiagnostics();
 }

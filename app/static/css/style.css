@@ -358,6 +358,9 @@ body[data-workspace="document_detail"] .footer { display: none; }
 .viewer-status .is-loading { display: flex; align-items: center; gap: .6rem; }
 .viewer-status .is-preview { font-size: .8rem; color: var(--secondary); background: rgba(255,255,255,.7); padding: .25rem .6rem; border-radius: 999px; }
 .viewer-status .is-error { display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+/* Unobtrusive preview badge pinned to the bottom — never covers the page. */
+.viewer-status:has(.viewer-status-badge) { place-items: end center; padding: .6rem; }
+.viewer-status-badge { font-size: .75rem; color: var(--secondary); background: rgba(255,255,255,.88); border: 1px solid rgba(0,0,0,.08); padding: .25rem .6rem; border-radius: 999px; box-shadow: 0 1px 3px rgba(0,0,0,.14); }
 .viewer-status[hidden] { display: none; }
 .viewer-spinner { width: 1.25rem; height: 1.25rem; border: 2.5px solid rgba(37,99,235,.2); border-top-color: var(--primary); border-radius: 50%; animation: viewer-spin .8s linear infinite; }
 @keyframes viewer-spin { to { transform: rotate(360deg); } }
@@ -468,6 +471,7 @@ body.is-splitter-dragging { cursor: col-resize; user-select: none; }
 .version-rail-meta { color: var(--secondary); font-size: .72rem; }
 .version-dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; border: 1.5px solid #9ca3af; background: #fff; flex: 0 0 auto; }
 .version-dot.is-current { background: #d97706; border-color: #d97706; }
+.version-dot.is-completed { background: #10b981; border-color: #10b981; }
 .version-dot.kind-htr { border-color: #b45309; }
 .version-dot.kind-vision { border-color: #7c3aed; }
 .version-dot.kind-manual { border-color: #2563eb; }

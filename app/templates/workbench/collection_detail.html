@@ -14,6 +14,8 @@
                 <div class="export-menu-items">
                     <a href="{% url 'export_project' collection.id %}?format=md">{% trans "Markdown (.zip)" %}</a>
                     <a href="{% url 'export_project' collection.id %}?format=txt">{% trans "Plain text (.zip)" %}</a>
+                    <a href="{% url 'export_project' collection.id %}?format=tei">{% trans "TEI-XML (.zip)" %}</a>
+                    <a href="{% url 'export_project' collection.id %}?format=xml">{% trans "PAGE-XML (.zip)" %}</a>
                     <a href="{% url 'export_project' collection.id %}?format=md&bundle=single">{% trans "Markdown, single file (.md)" %}</a>
                     <a href="{% url 'export_project' collection.id %}?format=txt&bundle=single">{% trans "Plain text, single file (.txt)" %}</a>
                 </div>

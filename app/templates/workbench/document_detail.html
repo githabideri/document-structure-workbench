@@ -28,6 +28,8 @@
                 <div class="export-menu-items">
                     <a href="{% url 'export_revision' workspace_revision_id %}?format=md">{% trans "Markdown (.md)" %}</a>
                     <a href="{% url 'export_revision' workspace_revision_id %}?format=txt">{% trans "Plain text (.txt)" %}</a>
+                    <a href="{% url 'export_revision' workspace_revision_id %}?format=tei">{% trans "TEI-XML (.tei.xml)" %}</a>
+                    <a href="{% url 'export_revision' workspace_revision_id %}?format=xml">{% trans "PAGE-XML (.xml)" %}</a>
                 </div>
             </details>
         </nav>

@@ -67,7 +67,7 @@ urlpatterns = [
     path("tables/<int:table_id>/crop/", views.table_crop, name="table_crop"),
     path("artifacts/<int:artifact_id>/content/", views.artifact_content, name="artifact_content"),
 
-    # Document / project text export (plain text / Markdown)
+    # Document / project text export (txt / Markdown / PAGE-XML / TEI)
     path("export/revisions/<int:revision_id>/", views.export_revision, name="export_revision"),
     path("export/projects/<int:project_id>/", views.export_project, name="export_project"),
 

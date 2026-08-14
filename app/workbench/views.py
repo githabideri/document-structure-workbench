@@ -1921,11 +1921,14 @@ def export_revision(request, revision_id):
     if not ProjectAccessPolicy(user=request.user).can_view(revision.collection):
         raise PermissionDenied
     data = DocumentExportService.revision_data(revision)
-    renderer = DocumentExportService.to_markdown if fmt == "md" else DocumentExportService.to_text
-    response = HttpResponse(renderer(data), content_type=FORMATS[fmt][0])
-    response["Content-Disposition"] = (
-        f'attachment; filename="{DocumentExportService.revision_filename(data, fmt)}"'
-    )
+    if fmt == "xml":
+        payload, content_type, filename = DocumentExportService.page_xml_payload(data)
+    else:
+        payload = DocumentExportService.renderer(fmt)(data)
+        content_type = FORMATS[fmt][0]
+        filename = DocumentExportService.revision_filename(data, fmt)
+    response = HttpResponse(payload, content_type=content_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
     log_audit(request, "document_exported", "Document", revision.pk, after={"format": fmt})
     return response
 
@@ -1945,6 +1948,11 @@ def export_project(request, project_id):
     if bundle not in BUNDLES:
         return HttpResponseBadRequest(
             _(f"Unsupported bundle '{bundle}'. Use one of: {', '.join(sorted(BUNDLES))}.")
+        )
+    from .export import SINGLE_FILE_FORMATS
+    if bundle == "single" and fmt not in SINGLE_FILE_FORMATS:
+        return HttpResponseBadRequest(
+            _(f"Format '{fmt}' cannot be exported as a single file. Use one of: {', '.join(sorted(SINGLE_FILE_FORMATS))}.")
         )
     project = get_object_or_404(Collection, pk=project_id)
     if not ProjectAccessPolicy(user=request.user).can_view(project):

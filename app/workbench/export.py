@@ -17,8 +17,10 @@ query once per region. The semantics deliberately mirror those properties: the
 latest active correction of each operation wins, and any active ``suppress``
 correction hides the region.
 """
+import re
 import zipfile
 from io import BytesIO
+from xml.sax.saxutils import escape as xml_escape
 
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
@@ -30,8 +32,14 @@ from .models import PageRegion, RegionCorrection
 FORMATS = {
     "txt": ("text/plain; charset=utf-8", ".txt"),
     "md": ("text/markdown; charset=utf-8", ".md"),
+    "xml": ("application/xml; charset=utf-8", ".xml"),
+    "tei": ("application/xml; charset=utf-8", ".tei.xml"),
 }
 DEFAULT_FORMAT = "md"
+
+# Single-file concatenation only makes sense for the line-oriented text
+# formats; XML documents must stay one-document-per-file.
+SINGLE_FILE_FORMATS = {"txt", "md"}
 
 # How a project export is packaged: a ZIP of one file per document, or a single
 # concatenated file (index + every document).
@@ -88,8 +96,21 @@ class DocumentExportService:
                     rtype = corrections["type"].after.get("region_type", rtype)
                 if "text" in corrections:
                     text = corrections["text"].after.get("text", text)
-                page_regions.append({"type": rtype, "text": text or ""})
-            pages_out.append({"page_number": page.page_number, "regions": page_regions})
+                page_regions.append({
+                    "id": region.pk,
+                    "type": rtype,
+                    "text": text or "",
+                    # Page-relative [0,1] geometry; XML consumers scale these by
+                    # the page raster dimensions recorded on the page dict.
+                    "left": region.left, "top": region.top,
+                    "right": region.right, "bottom": region.bottom,
+                })
+            pages_out.append({
+                "page_number": page.page_number,
+                "regions": page_regions,
+                "image_width": page.image_width or page.width or 0,
+                "image_height": page.image_height or page.height or 0,
+            })
 
         return {
             "source_id": source.pk if source else None,
@@ -161,6 +182,143 @@ class DocumentExportService:
         return "\n".join(lines).rstrip() + "\n"
 
     # ------------------------------------------------------------------
+    # Rendering — PAGE-XML (ADR 0004, per page)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def to_page_xml(data, page):
+        """Render one page of revision data as a PAGE-XML 2019-07-15 document.
+
+        The schema allows exactly one ``<Page>`` per ``<PcGts>``, so callers
+        iterate ``revision_data()["pages"]`` and render each page separately
+        (see ``page_xml_files``). Region text is the effective text, markers
+        included literally — marker semantics are carried by the TEI export.
+        """
+        width = page.get("image_width") or 0
+        height = page.get("image_height") or 0
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            f'<PcGts xmlns="{PAGE_XML_NS}" '
+            f'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            f'xsi:schemaLocation="{PAGE_XML_NS} {PAGE_XML_NS}/pagecontent.xsd">',
+            "  <Metadata>",
+            "    <Creator>Document Structure Workbench</Creator>",
+            f"    <Created>{data['created_at']}</Created>",
+            '    <MetadataItem type="processingStep" name="revision">',
+            f"      <Value>revision-{data['revision_id']}</Value>",
+            "    </MetadataItem>",
+            "  </Metadata>",
+            f'  <Page imageFilename="{xml_escape(str(data["source_filename"]))}" '
+            f'imageWidth="{int(width)}" imageHeight="{int(height)}">',
+        ]
+        for index, region in enumerate(page["regions"], start=1):
+            tag = _PAGE_REGION_TAGS.get(region["type"], "TextRegion")
+            type_attr = ""
+            if tag == "TextRegion" and region["type"] in _PAGE_TEXT_REGION_TYPES:
+                type_attr = f' type="{_PAGE_TEXT_REGION_TYPES[region["type"]]}"'
+            coords = _page_coords(region, width, height)
+            lines.append(f'    <{tag} id="r{index}"{type_attr}>')
+            lines.append(f"      <Coords points=\"{coords}\"/>")
+            text = (region.get("text") or "").strip()
+            if text:
+                lines.append("      <TextEquiv>")
+                lines.append(f"        <Unicode>{xml_escape(text)}</Unicode>")
+                lines.append("      </TextEquiv>")
+            lines.append(f"    </{tag}>")
+        lines.append("  </Page>")
+        lines.append("</PcGts>")
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def page_xml_files(data):
+        """Yield ``(filename, page_xml)`` per page of a revision."""
+        for index, page in enumerate(data["pages"], start=1):
+            yield f"page-{page['page_number']:04d}.xml", DocumentExportService.to_page_xml(data, page)
+
+    @staticmethod
+    def page_xml_payload(data):
+        """Return ``(payload, content_type, filename)`` for a PAGE-XML export.
+
+        Single-page revisions produce one XML file; multi-page revisions a ZIP
+        of one PAGE file per page, because the schema forbids multiple
+        ``<Page>`` elements per document.
+        """
+        base = slugify(data.get("external_id")) or f"document-{data.get('revision_id')}"
+        files = list(DocumentExportService.page_xml_files(data))
+        if len(files) == 1:
+            return files[0][1], FORMATS["xml"][0], f"{base}{FORMATS['xml'][1]}"
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, content in files:
+                archive.writestr(name, content)
+        buffer.seek(0)
+        return buffer.getvalue(), "application/zip", f"{base}-pages.zip"
+
+    # ------------------------------------------------------------------
+    # Rendering — TEI (ADR 0004, minimal profile)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def to_tei(data):
+        """Render revision data as a minimal TEI document.
+
+        Pages become ``<div type="page">``, titles ``<head>``, lists
+        ``<list>/<item>``, other regions ``<p>``. Editorial markers
+        (ADR 0002) are converted inline to ``<unclear>``, ``<gap>``, and
+        ``<choice>``. This is a deliberately minimal profile, not a critical
+        edition (see ADR 0004).
+        """
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<TEI xmlns="http://www.tei-c.org/ns/1.0">',
+            "  <teiHeader>",
+            "    <fileDesc>",
+            "      <titleStmt>",
+            f"        <title>{xml_escape(str(data['source_filename']))}</title>",
+            "      </titleStmt>",
+            "      <publicationStmt>",
+            f"        <p>Exported from Document Structure Workbench (revision {data['revision_id']}, {xml_escape(data['created_at'])}).</p>",
+            "      </publicationStmt>",
+            "      <sourceDesc>",
+            f"        <p>{xml_escape(str(data['external_id']))} — {xml_escape(str(data['source_filename']))}</p>",
+            "      </sourceDesc>",
+            "    </fileDesc>",
+            "  </teiHeader>",
+            "  <text>",
+            "    <body>",
+        ]
+        for page in data["pages"]:
+            lines.append(f"      <div type=\"page\" n=\"{page['page_number']}\">")
+            for region in page["regions"]:
+                lines.extend(_region_tei_lines(region))
+            lines.append("      </div>")
+        lines.append("    </body>")
+        lines.append("  </text>")
+        lines.append("</TEI>")
+        return "\n".join(lines) + "\n"
+
+    # ------------------------------------------------------------------
+    # Renderer dispatch
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def renderer(fmt):
+        """Return the single-document renderer for a format.
+
+        PAGE-XML (``xml``) has no single-document renderer (it is per page by
+        schema); use ``page_xml_payload`` for it instead.
+        """
+        renderers = {
+            "txt": DocumentExportService.to_text,
+            "md": DocumentExportService.to_markdown,
+            "tei": DocumentExportService.to_tei,
+        }
+        try:
+            return renderers[fmt]
+        except KeyError:
+            raise ValueError(f"Unsupported export format '{fmt}'. Use one of: {', '.join(sorted(renderers))}.") from None
+
+    # ------------------------------------------------------------------
     # Filename helpers (used by the view/API response builders)
     # ------------------------------------------------------------------
 
@@ -185,8 +343,10 @@ class DocumentExportService:
         Synchronous and in-memory by design for the first iteration, matching the
         existing CSV exports. A background-job + stored-artifact path is the
         documented escape hatch if a real corpus outgrows a single request.
+
+        PAGE-XML archives one file *per page* (schema constraint); every other
+        format archives one file per document as before.
         """
-        renderer = DocumentExportService.to_markdown if fmt == "md" else DocumentExportService.to_text
         ext = FORMATS[fmt][1]
         documents = DocumentExportService.project_data(project)
 
@@ -201,9 +361,15 @@ class DocumentExportService:
             ]
             for index, data in enumerate(documents, start=1):
                 safe = slugify(data.get("external_id")) or slugify(data["source_filename"]) or f"document-{data['revision_id']}"
-                name = f"{index:02d}-{safe}{ext}"
-                archive.writestr(name, renderer(data))
-                manifest.append(f"- `{name}` — {data['source_filename']} ({_('revision')} {data['revision_id']})")
+                prefix = f"{index:02d}-{safe}"
+                if fmt == "xml":
+                    for name, content in DocumentExportService.page_xml_files(data):
+                        archive.writestr(f"{prefix}/{name}", content)
+                    manifest.append(f"- `{prefix}/` — {data['source_filename']} ({_('revision')} {data['revision_id']})")
+                else:
+                    name = f"{prefix}{ext}"
+                    archive.writestr(name, DocumentExportService.renderer(fmt)(data))
+                    manifest.append(f"- `{name}` — {data['source_filename']} ({_('revision')} {data['revision_id']})")
             archive.writestr(f"INDEX{ext}", "\n".join(manifest).rstrip() + "\n")
         buffer.seek(0)
         return buffer.getvalue()
@@ -214,9 +380,12 @@ class DocumentExportService:
 
         The mirror of ``render_zip`` for the "I want one greppable file" case:
         a table of contents followed by every document's rendered text, separated
-        by clear dividers.
+        by clear dividers. Only available for the text formats — XML documents
+        cannot be concatenated into one valid file.
         """
-        renderer = DocumentExportService.to_markdown if fmt == "md" else DocumentExportService.to_text
+        if fmt not in SINGLE_FILE_FORMATS:
+            raise ValueError(f"Format '{fmt}' cannot be exported as a single file.")
+        renderer = DocumentExportService.renderer(fmt)
         documents = DocumentExportService.project_data(project)
         divider = "\n\n---\n\n" if fmt == "md" else "\n\n" + ("=" * 60) + "\n\n"
         parts = []
@@ -275,3 +444,79 @@ def _region_markdown_lines(region):
         return lines
     # text, header, footer, figure, form, other → paragraph
     return [text] if text else []
+
+
+# ----------------------------------------------------------------------
+# PAGE-XML / TEI helpers (module-private, ADR 0004)
+# ----------------------------------------------------------------------
+
+PAGE_XML_NS = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
+
+# PAGE-XML element per effective region type; unmapped types stay TextRegion.
+_PAGE_REGION_TAGS = {"table": "TableRegion", "figure": "ImageRegion"}
+# ``type`` attribute for TextRegion elements where PAGE has a specific value.
+_PAGE_TEXT_REGION_TYPES = {"title": "heading", "header": "page-number"}
+
+
+def _page_coords(region, width, height):
+    """Integer pixel ``points`` attribute from a page-relative [0,1] bbox."""
+    w, h = max(float(width), 0.0), max(float(height), 0.0)
+    x0 = round(max(min(region["left"], 1.0), 0.0) * w)
+    x1 = round(max(min(region["right"], 1.0), 0.0) * w)
+    y0 = round(max(min(region["top"], 1.0), 0.0) * h)
+    y1 = round(max(min(region["bottom"], 1.0), 0.0) * h)
+    return f"{x0},{y0} {x1},{y0} {x1},{y1} {x0},{y1}"
+
+
+# Editorial markers (ADR 0002) as TEI inline markup.
+# ``word[?]`` (or a standalone ``[?]``) -> <unclear>; ``[illegible]``/``[...]``
+# -> <gap>; ``abbrev[expansion]`` -> <choice><abbr/><expan/></choice>.
+_TEI_MARKER_RE = re.compile(
+    r"(\S+)?\[\?\]|\[(?:illegible|\.\.\.)\]|(\w[\w.]*)\[([A-Za-z][\w]*)\]",
+    re.IGNORECASE,
+)
+
+
+def _tei_inline(text):
+    """Escape plain text, converting ADR 0002 markers to TEI elements."""
+    parts = []
+    position = 0
+    for match in _TEI_MARKER_RE.finditer(text):
+        parts.append(xml_escape(text[position:match.start()]))
+        expansion = match.group(3)
+        if expansion is not None:
+            parts.append(
+                f"<choice><abbr>{xml_escape(match.group(2))}</abbr>"
+                f"<expan>{xml_escape(expansion)}</expan></choice>"
+            )
+        elif match.group(0).endswith("[?]"):
+            word = match.group(1)
+            if word:
+                parts.append(f"<unclear>{xml_escape(word)}</unclear>")
+            else:
+                parts.append('<unclear reason="uncertain"/>')
+        else:
+            parts.append('<gap reason="illegible"/>')
+        position = match.end()
+    parts.append(xml_escape(text[position:]))
+    return "".join(parts)
+
+
+def _region_tei_lines(region):
+    """TEI lines for one region of the minimal profile."""
+    rtype = region["type"]
+    text = (region.get("text") or "").strip()
+    if not text:
+        return []
+    if rtype == "title":
+        return [f"        <head>{_tei_inline(text)}</head>"]
+    if rtype == "list":
+        lines = ["        <list>"]
+        lines += [f"          <item>{_tei_inline(line.strip())}</item>" for line in text.splitlines() if line.strip()]
+        lines.append("        </list>")
+        return lines
+    if rtype == "table":
+        # Structured table markup remains a documented gap (as for txt/md);
+        # the effective table text is preserved inside a typed division.
+        return ["        <div type=\"table\">", f"          <p>{_tei_inline(text)}</p>", "        </div>"]
+    return [f"        <p>{_tei_inline(text)}</p>"]

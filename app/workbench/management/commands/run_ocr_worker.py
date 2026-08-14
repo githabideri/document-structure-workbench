@@ -14,6 +14,7 @@ from django.utils import timezone
 from workbench.models import OcrRequest
 from workbench.processors.htr import HtrClient, HtrError, HTR_PROVIDER, HTR_SCHEMA_VERSION
 from workbench.processors.vision_ocr import VisionOcrClient, VisionOcrError, make_crop, request_metadata
+from workbench.validation import evaluate_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,13 @@ class Command(BaseCommand):
                 "metadata", "state", "error_message", "finished_at",
             ])
             return
+        if request.state == "completed":
+            # ADR 0003: persist the deterministic triage verdict as candidate
+            # metadata. Advisory only — acceptance stays a human correction.
+            request.metadata = {
+                **(request.metadata or {}),
+                "validation": evaluate_candidate(request.candidate_text, request.raw_response),
+            }
         request.finished_at = timezone.now()
         request.save(update_fields=[
             "input_sha256", "input_metadata", "candidate_text", "raw_response",

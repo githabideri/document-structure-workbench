@@ -610,10 +610,15 @@ def api_revision_export(request, document_id, revision_id):
     if fmt not in FORMATS:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "bad_format", "message": f"Unsupported format '{fmt}'. Use one of: {', '.join(sorted(FORMATS))}."}}, status=400)
     data = DocumentExportService.revision_data(revision)
-    renderer = DocumentExportService.to_markdown if fmt == "md" else DocumentExportService.to_text
+    if fmt == "xml":
+        payload, content_type, filename = DocumentExportService.page_xml_payload(data)
+    else:
+        payload = DocumentExportService.renderer(fmt)(data)
+        content_type = FORMATS[fmt][0]
+        filename = DocumentExportService.revision_filename(data, fmt)
     AuditEvent.objects.create(actor=request._api_token.user if request._api_token.user_id else None, event_type="document_exported", object_type="Document", object_id=str(revision.pk), after={"format": fmt}, request_id=request._request_id)
-    response = HttpResponse(renderer(data), content_type=FORMATS[fmt][0])
-    response["Content-Disposition"] = f'attachment; filename="{DocumentExportService.revision_filename(data, fmt)}"'
+    response = HttpResponse(payload, content_type=content_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
 
@@ -633,6 +638,9 @@ def api_project_export(request, project_id):
     bundle = request.GET.get("bundle", DEFAULT_BUNDLE)
     if bundle not in BUNDLES:
         return JsonResponse({"request_id": request._request_id, "error": {"code": "bad_bundle", "message": f"Unsupported bundle '{bundle}'. Use one of: {', '.join(sorted(BUNDLES))}."}}, status=400)
+    from .export import SINGLE_FILE_FORMATS
+    if bundle == "single" and fmt not in SINGLE_FILE_FORMATS:
+        return JsonResponse({"request_id": request._request_id, "error": {"code": "bad_format", "message": f"Format '{fmt}' cannot be exported as a single file. Use one of: {', '.join(sorted(SINGLE_FILE_FORMATS))}."}}, status=400)
     if bundle == "single":
         payload = DocumentExportService.render_singlefile(project, fmt)
         response = HttpResponse(payload, content_type=FORMATS[fmt][0])

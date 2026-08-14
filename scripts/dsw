@@ -25,9 +25,9 @@ Commands:
   chat inspect|evidence|retry --run ID    Inspect or retry a run.
   support-bundle --run ID [--format FMT] [--output PATH]
                                            Export and save an audited bundle.
-  export project --project ID [--format md|txt] [--bundle zip|single] [--output PATH]
+  export project --project ID [--format md|txt|xml|tei] [--bundle zip|single] [--output PATH]
                                            Download a project export (ZIP or one file).
-  export revision --source ID --revision ID [--format md|txt] [--output PATH]
+  export revision --source ID --revision ID [--format md|txt|xml|tei] [--output PATH]
                                            Download one revision's text.
   smoke --fake                            Run real local fake-provider integration.
   smoke --live --project ID --source ID --question TEXT
@@ -126,9 +126,10 @@ PY
             *) die "unknown option $1";;
           esac
         done
-        [[ -n "$project" ]] || die "usage: dsw export project --project ID [--format md|txt] [--bundle zip|single] [--output PATH]"
-        [[ "$format" == md || "$format" == txt ]] || die "format must be md or txt"
+        [[ -n "$project" ]] || die "usage: dsw export project --project ID [--format md|txt|xml|tei] [--bundle zip|single] [--output PATH]"
+        case "$format" in md|txt|xml|tei) ;; *) die "format must be md, txt, xml or tei";; esac
         [[ "$bundle" == zip || "$bundle" == single ]] || die "bundle must be zip or single"
+        [[ "$bundle" == single ]] && case "$format" in md|txt) ;; *) die "single-file export is only available for md and txt";; esac
         ext="zip"; [[ "$bundle" == single ]] && ext="$format"
         output="${output:-./project-${project}.${ext}}"
         mkdir -p "$(dirname "$output")"
@@ -147,8 +148,8 @@ PY
             *) die "unknown option $1";;
           esac
         done
-        [[ -n "$source" && -n "$revision" ]] || die "usage: dsw export revision --source ID --revision ID [--format md|txt] [--output PATH]"
-        [[ "$format" == md || "$format" == txt ]] || die "format must be md or txt"
+        [[ -n "$source" && -n "$revision" ]] || die "usage: dsw export revision --source ID --revision ID [--format md|txt|xml|tei] [--output PATH]"
+        case "$format" in md|txt|xml|tei) ;; *) die "format must be md, txt, xml or tei";; esac
         output="${output:-./revision-${revision}.${format}}"
         mkdir -p "$(dirname "$output")"
         http_code="$(curl -fsS -X GET -H "Authorization: Bearer $token" "$base/documents/$source/revisions/$revision/export/?format=$format" -o "$output" -w '%{http_code}')"

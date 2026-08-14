@@ -99,6 +99,7 @@ const de = {
   "Transcription cannot be empty.": "Die Transkription darf nicht leer sein.",
   "Could not save the correction.": "Die Korrektur konnte nicht gespeichert werden.",
   "Network error — try again.": "Netzwerkfehler — bitte erneut versuchen.",
+  "Expansion of the abbreviation:": "Auflösung der Abkürzung:",
   "Run HTR": "HTR starten",
   "Run Vision": "Vision starten",
   "Choose HTR pipeline": "HTR-Pipeline wählen",

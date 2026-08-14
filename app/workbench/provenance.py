@@ -21,6 +21,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from .models import OcrRequest
+from .validation import verdict_summary
 
 
 def _user_label(user):
@@ -137,6 +138,7 @@ def build_region_versions(region):
             model = item.model or item.provider
         is_current = current_id is not None and item.accepted_correction_id == current_id
         cand_text = item.candidate_text if item.state == "completed" else ""
+        review = verdict_summary((item.metadata or {}).get("validation"))
         entries.append({
             "id": f"ocr-{item.pk}",
             "kind": kind,
@@ -149,6 +151,8 @@ def build_region_versions(region):
             "state": item.state,
             "status": "",
             "accepted": is_current,
+            "needs_review": review["needs_review"],
+            "review_reasons": review["labels"],
             "created_by": _user_label(item.created_by),
             "created_at": _ts(item.created_at),
             "finished_at": _ts(item.finished_at),

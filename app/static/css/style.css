@@ -979,3 +979,18 @@ mark { background: #fde68a; color: inherit; padding: 0 .1em; border-radius: 2px;
 .search-reader-meta { margin: 0 0 .5rem; font-size: .75rem; color: var(--secondary); }
 .search-reader-passage { margin: 0 0 .75rem; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .search-reader-grid { grid-template-columns: 1fr; } }
+
+/* Candidate triage badge (ADR 0003) — advisory "needs review" flag on
+   recognition candidates. Amber like version-badge, but with the warning
+   glyph so it reads as attention, not status. */
+.needs-review-badge { display: inline-block; font-size: .68rem; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 1rem; padding: .05rem .45rem; margin-left: .35rem; cursor: help; }
+
+/* Editorial marker toolbar (ADR 0002) — buttons, not syntax: nobody has to
+   know the bracket conventions to use them. */
+.marker-toolbar { display: flex; align-items: center; gap: .35rem; margin-top: .35rem; flex-wrap: wrap; }
+.marker-toolbar-label { font-size: .72rem; color: var(--secondary); }
+.marker-legend { position: relative; margin-left: auto; }
+.marker-legend summary { list-style: none; cursor: help; width: 1.25rem; height: 1.25rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 50%; font-size: .72rem; color: var(--secondary); }
+.marker-legend-panel { position: absolute; right: 0; top: 1.5rem; z-index: 30; background: var(--surface, #fff); border: 1px solid var(--border); border-radius: .5rem; box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: .5rem .75rem; font-size: .75rem; min-width: 16rem; }
+.marker-legend-panel p { margin: .2rem 0; }
+.marker-legend-panel code { background: rgba(0,0,0,.05); border-radius: .25rem; padding: 0 .25rem; }

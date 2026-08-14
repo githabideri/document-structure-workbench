@@ -131,6 +131,49 @@ function wireEditor(root, ctx) {
   area.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); saveTranscription(area, ctx); }
   });
+  // Editorial marker insertion (ADR 0002): buttons, not syntax — the user
+  // never types a bracket. Insertion marks the editor dirty so the normal
+  // save path (with its expected-current guard) applies.
+  const toolbar = root.querySelector(".marker-toolbar");
+  toolbar?.querySelectorAll("[data-marker-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      insertMarker(area, btn.dataset.markerAction);
+      setDirty(area, isInspectorDirty(root));
+      area.focus();
+    });
+  });
+}
+
+function insertMarker(area, action) {
+  const start = area.selectionStart ?? area.value.length;
+  const end = area.selectionEnd ?? start;
+  const before = area.value.slice(0, start);
+  const selected = area.value.slice(start, end);
+  const after = area.value.slice(end);
+  let value, caret;
+  if (action === "uncertain") {
+    // Selection (a word) keeps its text and gains a [?] suffix; no selection
+    // inserts a bare [?] at the cursor.
+    value = before + selected + "[?]" + after;
+    caret = end + 3;
+  } else if (action === "illegible") {
+    // Whatever was selected is replaced by the unreadable-position marker.
+    value = before + "[illegible]" + after;
+    caret = start + "[illegible]".length;
+  } else if (action === "abbreviation") {
+    // Wrap the selected abbreviation word[expansion]; the expansion is asked
+    // for explicitly so the user never types the bracket syntax.
+    const expansion = window.prompt(t("Expansion of the abbreviation:"), "");
+    if (expansion === null) return; // cancelled
+    const clean = expansion.replace(/[\[\]]/g, "").trim();
+    value = before + selected + "[" + clean + "]" + after;
+    caret = end + clean.length + 2;
+  } else {
+    return;
+  }
+  area.value = value;
+  area.setSelectionRange(caret, caret);
+  autoSize(area);
 }
 
 export function wireSplitButtons(root) {

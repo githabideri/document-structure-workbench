@@ -16,6 +16,8 @@ acceptance remains an explicit human correction. ``needs_review`` is advisory.
 """
 import re
 
+from django.utils.translation import gettext_lazy as _
+
 #: Bumped when rule semantics change so persisted verdicts stay interpretable.
 VALIDATION_VERSION = "candidate-validation-v1"
 
@@ -47,6 +49,36 @@ _REVIEW_REASONS = frozenset(
 )
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+#: Human-readable labels for verdict reason codes (UI/tooltip use).
+REASON_LABELS = {
+    "empty_candidate": _("empty candidate text"),
+    "uncertain_marker": _("contains uncertain readings ([?])"),
+    "illegible_marker": _("contains unreadable positions ([illegible])"),
+    "abbreviation_marker": _("contains resolved abbreviations"),
+    "control_characters": _("contains control characters"),
+    "replacement_characters": _("contains replacement characters"),
+    "double_spaces": _("contains double spaces"),
+    "line_count": _("line statistics"),
+    "low_confidence_lines": _("low-confidence HTR lines"),
+    "low_mean_confidence": _("low mean HTR confidence"),
+}
+
+
+def reason_labels(reasons):
+    """Translate verdict reason codes to display labels (unknown codes kept)."""
+    return [str(REASON_LABELS.get(code, code)) for code in reasons or []]
+
+
+def verdict_summary(verdict):
+    """Template-friendly summary of a persisted verdict (``None``-safe)."""
+    if not isinstance(verdict, dict):
+        return {"needs_review": False, "labels": []}
+    return {
+        "needs_review": bool(verdict.get("needs_review")),
+        "labels": reason_labels(verdict.get("reasons")),
+    }
 
 
 def line_confidences(raw_response):

@@ -8,6 +8,23 @@
               aria-label="{% trans 'Current transcription' %}"
               {% if not can_edit_document %}readonly{% endif %}>{{ selected_region.effective_text }}</textarea>
 
+    {% if can_edit_document %}
+    <div class="marker-toolbar" role="toolbar" aria-label="{% trans 'Editorial markers' %}">
+        <span class="marker-toolbar-label">{% trans "Editorial markers:" %}</span>
+        <button type="button" class="btn btn-sm btn-secondary" data-marker-action="uncertain" title="{% trans 'Mark the selected word as an uncertain reading ([?])' %}">{% trans "Unsure" %}</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-marker-action="illegible" title="{% trans 'Replace the selection with an unreadable-position marker ([illegible])' %}">{% trans "Illegible" %}</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-marker-action="abbreviation" title="{% trans 'Resolve an abbreviation: word[expansion]' %}">{% trans "Abbrev…" %}</button>
+        <details class="marker-legend">
+            <summary aria-label="{% trans 'Marker legend' %}">?</summary>
+            <div class="marker-legend-panel">
+                <p><code>[?]</code> — {% trans "uncertain reading" %}</p>
+                <p><code>[illegible]</code> — {% trans "text present but unreadable" %}</p>
+                <p><code>abbrev[expansion]</code> — {% trans "abbreviation with resolution" %}</p>
+            </div>
+        </details>
+    </div>
+    {% endif %}
+
     <div class="transcription-meta" id="transcription-meta">
         <span class="dirty-state" data-dirty-state role="status" aria-live="polite"></span>
         <div class="transcription-meta-actions">

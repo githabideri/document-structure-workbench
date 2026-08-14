@@ -1837,3 +1837,75 @@ msgstr "Sie haben kein bearbeitbares Projekt"
 
 #~ msgid "Upload Another"
 #~ msgstr "Weiteres Dokument hochladen"
+
+msgid "needs review"
+msgstr "prüfen"
+
+msgid "Needs review"
+msgstr "Prüfen erforderlich"
+
+msgid "Editorial markers"
+msgstr "Editorische Kennzeichnungen"
+
+msgid "Editorial markers:"
+msgstr "Editorische Kennzeichnungen:"
+
+msgid "Unsure"
+msgstr "Unsicher"
+
+msgid "Illegible"
+msgstr "Unleserlich"
+
+msgid "Abbrev…"
+msgstr "Abkürzung…"
+
+msgid "Marker legend"
+msgstr "Legende der Kennzeichnungen"
+
+msgid "uncertain reading"
+msgstr "unsichere Lesart"
+
+msgid "text present but unreadable"
+msgstr "Text vorhanden, aber unlesbar"
+
+msgid "abbreviation with resolution"
+msgstr "Abkürzung mit Auflösung"
+
+msgid "Mark the selected word as an uncertain reading ([?])"
+msgstr "Ausgewähltes Wort als unsichere Lesart kennzeichnen ([?])"
+
+msgid "Replace the selection with an unreadable-position marker ([illegible])"
+msgstr "Auswahl durch Kennzeichnung einer unlesbaren Stelle ersetzen ([illegible])"
+
+msgid "Resolve an abbreviation: word[expansion]"
+msgstr "Abkürzung auflösen: Wort[Auflösung]"
+
+msgid "empty candidate text"
+msgstr "leerer Kandidatentext"
+
+msgid "contains uncertain readings ([?])"
+msgstr "enthält unsichere Lesarten ([?])"
+
+msgid "contains unreadable positions ([illegible])"
+msgstr "enthält unlesbare Stellen ([illegible])"
+
+msgid "contains resolved abbreviations"
+msgstr "enthält aufgelöste Abkürzungen"
+
+msgid "contains control characters"
+msgstr "enthält Steuerzeichen"
+
+msgid "contains replacement characters"
+msgstr "enthält Ersetzungszeichen"
+
+msgid "contains double spaces"
+msgstr "enthält doppelte Leerzeichen"
+
+msgid "line statistics"
+msgstr "Zeilenauswertung"
+
+msgid "low-confidence HTR lines"
+msgstr "HTR-Zeilen mit geringer Konfidenz"
+
+msgid "low mean HTR confidence"
+msgstr "geringe mittlere HTR-Konfidenz"

@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n %}{% load dsw_tags %}
 <details class="ocr-history" open
          {% if ocr_kind and fragment_url %}data-ocr-url="{{ fragment_url }}"{% endif %}
          data-ocr-pending="{% if any_pending %}true{% else %}false{% endif %}">
@@ -6,6 +6,7 @@
     {% for candidate in ocr_candidates %}
     <div class="history-item" data-request-id="{{ candidate.id }}">
         <strong>#{{ candidate.id }} · {{ candidate.state }} · {{ candidate.provider }}{% if candidate.model %} ({{ candidate.model }}){% endif %}</strong>
+        {% if candidate.state == "completed" and candidate.metadata.validation|needs_review %}<span class="needs-review-badge" title="{{ candidate.metadata.validation|review_labels }}">⚠ {% trans "needs review" %}</span>{% endif %}
         {% if candidate.state == "completed" %}
         <pre>{{ candidate.candidate_text }}</pre>
         {% if candidate.region_id and not candidate.accepted_correction_id and can_edit_document %}

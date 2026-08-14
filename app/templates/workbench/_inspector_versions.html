@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n %}{% load dsw_tags %}
 <div class="inspector-versions" id="inspector-versions" data-region-id="{{ selected_region.id }}"
      data-pending="{% if region_versions.any_pending %}true{% else %}false{% endif %}"
      data-poll-url="{% url 'region_versions_fragment' selected_region.id %}"
@@ -32,6 +32,7 @@
                     {% if entry.created_by %} · {{ entry.created_by }}{% endif %}
                     {% if entry.created_at %} · {{ entry.created_at|timesince }}{% endif %}
                 </span>
+                {% if entry.needs_review %}<span class="needs-review-badge" title="{{ entry.review_reasons|join:', ' }}" aria-label="{% trans 'Needs review' %}">⚠ {% trans "needs review" %}</span>{% endif %}
             </button>
             {% if entry.accepted %}<span class="version-badge">{% trans "current" %}</span>{% endif %}
             {% if entry.kind == 'htr' and entry.selectable %}

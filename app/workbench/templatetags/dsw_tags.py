@@ -5,7 +5,27 @@ from django import template
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
+from ..validation import verdict_summary
+
 register = template.Library()
+
+
+@register.filter(name="review_labels")
+def review_labels(verdict):
+    """Human-readable review reasons of a persisted validation verdict.
+
+    Takes the ``metadata['validation']`` dict of an ``OcrRequest`` (resolved
+    through the template attribute chain) and returns the translated reason
+    labels joined for a badge tooltip; empty string when no review is needed.
+    """
+    summary = verdict_summary(verdict)
+    return ", ".join(summary["labels"]) if summary["needs_review"] else ""
+
+
+@register.filter(name="needs_review")
+def needs_review(verdict):
+    """Whether a persisted validation verdict flags the candidate for review."""
+    return verdict_summary(verdict)["needs_review"]
 
 
 @register.filter(name="highlight")
